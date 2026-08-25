@@ -21,6 +21,7 @@ applied-AI job description now.
 
 | # | Project | Concept | One-line takeaway |
 |---|---------|---------|-------------------|
+| 03 | [hybrid-search](03-hybrid-search/) | BM25 vs dense retrieval (LSA) vs rank fusion, measured with recall@k and MRR | Dense wins paraphrase queries (MRR 0.794 vs 0.769), both ace exact identifiers — corpus-fit LSA can't be out-of-vocabulary — and RRF fusion takes the best overall MRR (0.902) at the price of rank-blind averaging. |
 | 02 | [retrieval-eval](02-retrieval-eval/) | BM25 vs TF-IDF cosine from scratch, measured with recall@k and MRR | BM25's term saturation and length normalization beat TF-IDF (MRR 0.934 vs 0.917), the b=0 ablation proves length norm does the work — and the two paraphrase queries both systems miss are the entire case for dense retrieval. |
 | 01 | [structured-output](01-structured-output/) | Schema-validated LLM output with malformed-output retry | Free string-level repairs took success from 20% to 60%; feedback retries took it to 96.7% at a 47% call overhead — and the two layers should never be confused. |
 

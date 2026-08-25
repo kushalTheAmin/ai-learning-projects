@@ -1,0 +1,323 @@
+[
+  {
+    "id": "k01",
+    "query": "force-with-lease",
+    "relevant": [
+      "git-03"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k02",
+    "query": "detached HEAD",
+    "relevant": [
+      "git-02"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k03",
+    "query": "git rm --cached",
+    "relevant": [
+      "git-10"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k04",
+    "query": "ECONNREFUSED",
+    "relevant": [
+      "http-05"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k05",
+    "query": "502 bad gateway",
+    "relevant": [
+      "http-02"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k06",
+    "query": "429 Retry-After",
+    "relevant": [
+      "http-12"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k07",
+    "query": "SIGKILL SIGTERM",
+    "relevant": [
+      "unix-03"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k08",
+    "query": "lsof port 8080",
+    "relevant": [
+      "unix-04"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k09",
+    "query": "tail -f",
+    "relevant": [
+      "unix-07"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k10",
+    "query": "chmod 755",
+    "relevant": [
+      "unix-06"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k11",
+    "query": "OOMKilled",
+    "relevant": [
+      "dk-06"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k12",
+    "query": "docker compose yaml",
+    "relevant": [
+      "dk-05"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k13",
+    "query": "python -m venv",
+    "relevant": [
+      "py-01"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k14",
+    "query": "GIL",
+    "relevant": [
+      "py-03"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k15",
+    "query": "asyncio await",
+    "relevant": [
+      "py-08"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k16",
+    "query": "N+1 queries",
+    "relevant": [
+      "sql-03"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k17",
+    "query": "EXPLAIN plan",
+    "relevant": [
+      "sql-07"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k18",
+    "query": "bcrypt argon2",
+    "relevant": [
+      "sec-01"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k19",
+    "query": "JWT base64 payload",
+    "relevant": [
+      "sec-02"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "k20",
+    "query": "catastrophic backtracking",
+    "relevant": [
+      "re-06"
+    ],
+    "category": "keyword"
+  },
+  {
+    "id": "p01",
+    "query": "take back what i just committed but keep the work",
+    "relevant": [
+      "git-01"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p02",
+    "query": "commits disappeared after a reset, can i recover the old state",
+    "relevant": [
+      "git-09"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p03",
+    "query": "put my unfinished changes somewhere so i can work on another branch",
+    "relevant": [
+      "git-05"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p04",
+    "query": "page stops responding while a long task runs in the browser",
+    "relevant": [
+      "js-01"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p05",
+    "query": "fire off many requests together in python while each waits",
+    "relevant": [
+      "py-08"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p06",
+    "query": "browser refuses my api call to another domain",
+    "relevant": [
+      "http-04"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p07",
+    "query": "request waits forever because the server never answers",
+    "relevant": [
+      "http-06"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p08",
+    "query": "machine running out of space, find which folders are eating it",
+    "relevant": [
+      "unix-05"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p09",
+    "query": "force a program that stopped responding to die",
+    "relevant": [
+      "unix-03"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p10",
+    "query": "give back the stored result instead of repeating the expensive work",
+    "relevant": [
+      "perf-03"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p11",
+    "query": "keep files around after the container goes away",
+    "relevant": [
+      "dk-03"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p12",
+    "query": "every build repeats the dependency install and takes far too long",
+    "relevant": [
+      "dk-02"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p13",
+    "query": "ship a small production image that pulls fast",
+    "relevant": [
+      "dk-07",
+      "dk-08"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p14",
+    "query": "check who is logged in without a trip to the database on every request",
+    "relevant": [
+      "sec-02"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p15",
+    "query": "a visitor's browser runs script that came from user input on the page",
+    "relevant": [
+      "sec-03"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p16",
+    "query": "pushed an api key to the repository, what now",
+    "relevant": [
+      "sec-05"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p17",
+    "query": "lookups get slow as the table grows",
+    "relevant": [
+      "sql-02"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p18",
+    "query": "make two updates happen together or not at all",
+    "relevant": [
+      "sql-04"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p19",
+    "query": "my function remembers values from one call to the next when a list is the default",
+    "relevant": [
+      "py-02"
+    ],
+    "category": "paraphrase"
+  },
+  {
+    "id": "p20",
+    "query": "read a large file one line at a time without filling memory",
+    "relevant": [
+      "py-05"
+    ],
+    "category": "paraphrase"
+  }
+]
