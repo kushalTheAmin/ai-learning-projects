@@ -89,3 +89,11 @@ always do
 - the scripted failure distribution is hand-built, not sampled from a real
   model — the rates are illustrative of the mechanism, not a benchmark of any
   actual model
+
+## fixes
+
+- 2026-08-25 — the brace walker only tracked double quotes, so a python-dict
+  reply with an unmatched `{` or `}` inside a value got cut short and thrown
+  away — a retry burned on output the `python_literal` layer already handles.
+  both quote styles delimit strings now. no measured numbers moved, no summary
+  in the dataset carries a brace

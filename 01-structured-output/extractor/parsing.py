@@ -40,29 +40,31 @@ def strip_code_fence(text: str) -> str:
 
 
 def extract_balanced_object(text: str) -> str | None:
-    """Return the first balanced {...} substring, respecting JSON strings.
+    """Return the first balanced {...} substring, respecting quoted strings.
 
     Walks the text once, tracking string boundaries and escape characters so
-    braces inside string values do not confuse the depth count.
+    braces inside string values do not confuse the depth count. Both " and '
+    open a string, closed by the same character that opened it: this candidate
+    also feeds the python_literal layer, where values are single-quoted.
     """
     start = text.find("{")
     if start == -1:
         return None
     depth = 0
-    in_string = False
+    quote = None
     escaped = False
     for i in range(start, len(text)):
         ch = text[i]
-        if in_string:
+        if quote is not None:
             if escaped:
                 escaped = False
             elif ch == "\\":
                 escaped = True
-            elif ch == '"':
-                in_string = False
+            elif ch == quote:
+                quote = None
             continue
-        if ch == '"':
-            in_string = True
+        if ch in "\"'":
+            quote = ch
         elif ch == "{":
             depth += 1
         elif ch == "}":

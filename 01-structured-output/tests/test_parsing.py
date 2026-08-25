@@ -66,6 +66,21 @@ class TestExtractBalancedObject:
     def test_no_object(self):
         assert extract_balanced_object("no json here") is None
 
+    def test_single_quoted_value_with_closing_brace(self):
+        # python-dict output is a failure mode this project handles, so the
+        # walker has to respect ' as a string delimiter too - otherwise the
+        # } inside the value ends the object early
+        text = "{'summary': 'missing } brace', 'areas': ['api']}"
+        assert extract_balanced_object(text) == text
+
+    def test_single_quoted_value_with_opening_brace(self):
+        text = "{'summary': 'stray { brace', 'areas': ['api']}"
+        assert extract_balanced_object(text) == text
+
+    def test_apostrophe_inside_double_quoted_string_is_not_a_delimiter(self):
+        text = '{"summary": "it\'s fine {here}", "areas": ["api"]}'
+        assert extract_balanced_object(text) == text
+
     def test_unclosed_object(self):
         assert extract_balanced_object('{"a": 1') is None
 
@@ -125,6 +140,18 @@ class TestParseLenient:
             obj, layer = parse_lenient(text)
             assert obj == {"a": 1}
             assert layer == expected_layer
+
+    def test_python_dict_with_brace_in_a_value(self):
+        text = "{'summary': 'use the {x} placeholder', 'areas': ['api']}"
+        obj, layer = parse_lenient(text)
+        assert obj == {"summary": "use the {x} placeholder", "areas": ["api"]}
+        assert layer == "python_literal"
+
+    def test_python_dict_with_unmatched_brace_in_a_value(self):
+        text = "{'summary': 'missing } brace', 'areas': ['api']}"
+        obj, layer = parse_lenient(text)
+        assert obj == {"summary": "missing } brace", "areas": ["api"]}
+        assert layer == "python_literal"
 
     def test_empty_string(self):
         with pytest.raises(ParseError, match="empty response"):

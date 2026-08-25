@@ -104,6 +104,20 @@ class TestExtractTicket:
         assert result.success
         assert result.attempts == 3
 
+    def test_python_dict_output_with_a_brace_in_a_value_costs_no_retry(self):
+        # the model emits a python dict and the summary happens to contain a
+        # brace - the python_literal layer handles that for free, it must not
+        # burn an llm call
+        expected = {**EXPECTED, "summary": "Export fails when a filter ends with }."}
+        ticket = {"id": "x2", "email": "export is broken", "expected": expected,
+                  "plan": ["single_quotes", "clean"]}
+        llm = ScriptedLLM([ticket])
+        result = extract_ticket(llm, ticket)
+        assert result.success
+        assert result.attempts == 1
+        assert result.parse_layers == ["python_literal"]
+        assert llm.calls == 1
+
     def test_empty_email_ticket_still_flows(self):
         ticket = make_ticket(["clean"], email="")
         result = extract_ticket(ScriptedLLM([ticket]), ticket)
