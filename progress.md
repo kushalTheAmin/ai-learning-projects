@@ -7,19 +7,22 @@ OPEN THREADS for the questions worth answering next.
 
 ## COMPLETED
 
-| project | date | mechanism |
-|---|---|---|
-| 04-bpe-tokenizer | 2026-08-25 | byte-level bpe from scratch: pair counting weighted by pretoken piece frequency, deterministic lexicographic tie-break, rank-ordered merge application, byte fallback, replacement-char-safe decode; merge-prefix truncation lets one training serve a whole vocab sweep; measured — vocab 256→1246 cuts heldout prose 3106→1058 tokens (2.9x cost), domain transfer with a vocab-matched control (prose-trained 1.49 vs mixed-trained 2.56 bytes/token on code at equal vocab — the domain, not the slots), script cost (cjk 9.0x english tokens/char, zero merges learned), baselines at matched vocab (word tokenizer 20.3% oov on heldout prose, char tokenizer misses 277 chars, byte-level oov is structurally 0%) |
-| 02-retrieval-eval, bootstrap extension | 2026-08-25 | paired bootstrap over per-query reciprocal ranks (10000 resamples, seeded, stdlib only): 95% percentile confidence intervals on each system's mrr and on paired per-query mrr differences, plus a direction-stability fraction (share of resamples where the gap is <= 0); measured verdict — bm25 vs tf-idf +0.018 [+0.000, +0.048] includes zero, the gap rests on 2 of 38 queries even though bm25 never loses one, while bm25 vs b=0 +0.041 [+0.001, +0.091] excludes zero |
-| 03-hybrid-search | 2026-08-25 | okapi bm25 from scratch + lsa dense retrieval (tf-idf → seeded truncated svd) over one shared stemmer/compound-splitting tokenizer; rrf and weighted score fusion with alpha sweep; recall@1/5 + mrr on 100 docs / 40 golden queries split keyword vs paraphrase (paraphrase mrr: bm25 0.769, dense 0.794, hybrid rrf 0.803; overall rrf best at 0.902; keyword saturated for both — corpus-fit lsa has no oov failure mode) |
-| 02-retrieval-eval | 2026-08-25 | from-scratch okapi bm25 (lucene idf, k1 tf saturation, b length norm) vs sklearn-style tf-idf cosine (raw tf, smooth idf, l2 norm); evaluated with recall@1/recall@5/mrr@10 over a committed 40-doc / 38-query golden dataset, per-query head-to-head by reciprocal rank, plus a b=0 ablation isolating length normalization (mrr 0.917 tf-idf / 0.934 bm25 / 0.893 b=0); dataset includes engineered kitchen-sink distractor docs and deliberate vocabulary-mismatch queries to show where lexical retrieval fails |
-| 01-structured-output | 2026-08-25 | layered JSON parse repair (fence strip, balanced-brace extraction, trailing-comma removal, python-literal fallback) + pydantic schema validation with a validation-error-feedback retry loop and hard-failure policy; benchmarked strict vs lenient vs full retry on 30 scripted-failure tickets (20.0% → 60.0% → 96.7%, 44 llm calls vs 30) |
+| project | date | language | mechanism |
+|---|---|---|---|
+| 05-streaming-parser | 2026-08-25 | ts | incremental sse parser (streaming textdecoder, spec framing, chunk boundaries anywhere including mid-code-point); partial-json prefix parser via recursive descent with an explicit truncation policy (partial strings kept, dangling escapes/keys/literals dropped, numbers trimmed by a number-prefix grammar, corruption throws, depth cap); anthropic-shaped content-block assembler with live snapshots; bounded async channel (promise parking, direct handoff, high-watermark + blocked-push instrumentation); measured — 54 chunkings reassemble byte-identical messages, mean tool-arg field final at 48.2% of the arg stream vs 100% wait-for-complete, full-prefix re-parse is o(n^2) (3.7ms at 670 B, 13.6s at 67 KB), unbounded queue pins 5039 items / ~314 KB where cap=8 pins 8 at equal consumer-bound throughput |
+| 04-bpe-tokenizer | 2026-08-25 | py | byte-level bpe from scratch: pair counting weighted by pretoken piece frequency, deterministic lexicographic tie-break, rank-ordered merge application, byte fallback, replacement-char-safe decode; merge-prefix truncation lets one training serve a whole vocab sweep; measured — vocab 256→1246 cuts heldout prose 3106→1058 tokens (2.9x cost), domain transfer with a vocab-matched control (prose-trained 1.49 vs mixed-trained 2.56 bytes/token on code at equal vocab — the domain, not the slots), script cost (cjk 9.0x english tokens/char, zero merges learned), baselines at matched vocab (word tokenizer 20.3% oov on heldout prose, char tokenizer misses 277 chars, byte-level oov is structurally 0%) |
+| 02-retrieval-eval, bootstrap extension | 2026-08-25 | py | paired bootstrap over per-query reciprocal ranks (10000 resamples, seeded, stdlib only): 95% percentile confidence intervals on each system's mrr and on paired per-query mrr differences, plus a direction-stability fraction (share of resamples where the gap is <= 0); measured verdict — bm25 vs tf-idf +0.018 [+0.000, +0.048] includes zero, the gap rests on 2 of 38 queries even though bm25 never loses one, while bm25 vs b=0 +0.041 [+0.001, +0.091] excludes zero |
+| 03-hybrid-search | 2026-08-25 | py | okapi bm25 from scratch + lsa dense retrieval (tf-idf → seeded truncated svd) over one shared stemmer/compound-splitting tokenizer; rrf and weighted score fusion with alpha sweep; recall@1/5 + mrr on 100 docs / 40 golden queries split keyword vs paraphrase (paraphrase mrr: bm25 0.769, dense 0.794, hybrid rrf 0.803; overall rrf best at 0.902; keyword saturated for both — corpus-fit lsa has no oov failure mode) |
+| 02-retrieval-eval | 2026-08-25 | py | from-scratch okapi bm25 (lucene idf, k1 tf saturation, b length norm) vs sklearn-style tf-idf cosine (raw tf, smooth idf, l2 norm); evaluated with recall@1/recall@5/mrr@10 over a committed 40-doc / 38-query golden dataset, per-query head-to-head by reciprocal rank, plus a b=0 ablation isolating length normalization (mrr 0.917 tf-idf / 0.934 bm25 / 0.893 b=0); dataset includes engineered kitchen-sink distractor docs and deliberate vocabulary-mismatch queries to show where lexical retrieval fails |
+| 01-structured-output | 2026-08-25 | py | layered JSON parse repair (fence strip, balanced-brace extraction, trailing-comma removal, python-literal fallback) + pydantic schema validation with a validation-error-feedback retry loop and hard-failure policy; benchmarked strict vs lenient vs full retry on 30 scripted-failure tickets (20.0% → 60.0% → 96.7%, 44 llm calls vs 30) |
 
 ## MECHANISMS
 
 Every algorithm, metric, data structure, and technique implemented somewhere
-in the repo, and where it lives. Anything on this list gets imported or
-extended, not rewritten — the one sanctioned duplicate is documented below.
+in the repo, and where it lives. A mechanism's language is its project's —
+see the LANGUAGE column above (01–04 python, 05 typescript). Anything on
+this list gets imported or extended, not rewritten in the same language —
+the one sanctioned duplicate is documented below.
 
 - layered JSON parse repair: fence strip, balanced-brace extraction, trailing-comma removal, python-literal fallback (01)
 - pydantic schema validation with `extra="forbid"` (01)
@@ -46,6 +49,13 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - character tokenizer with unseen-character reporting (04)
 - compression metrics: bytes per token, tokens per character (04)
 - token cost accounting at a parameterized price per million tokens (04)
+- incremental sse parser: raw byte chunks → complete events, streaming textdecoder for split code points, data/event/comment framing, unterminated-event discard (05)
+- partial-json prefix parser: recursive descent returning the largest committed value, explicit truncation policy, number-prefix grammar separating truncated from unsalvageable, corruption throws with index, depth cap (05)
+- streaming message assembler over content-block start/delta/stop events with live text + tool-arg snapshots (05)
+- bounded async channel: promise-parking push/pop, direct handoff to a waiting consumer, close-then-drain semantics, high-watermark and blocked-push instrumentation (05)
+- mulberry32 seeded prng (05)
+- seeded byte chunkers, fixed and random, boundary-agnostic (05)
+- field-earliness metric: first-visible and final-at byte offsets per leaf field as a fraction of the stream (05)
 
 ## OPEN THREADS
 
@@ -63,6 +73,10 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - 04: at what corpus size does naive full-recount bpe training fall over, and what does an incremental pair-count trainer buy, measured — same shape as 02's inverted-index thread
 - 04: mixed-domain training won on code without hurting prose — does that hold as domains multiply, or does a fixed vocab budget hit a crowding-out point?
 - 04: script cost is measured per line and the emoji line is diluted by the english around it — a per-codepoint-class breakdown would price each script honestly
+- 05: full-prefix re-parse per delta is o(n^2), measured to 13.6s at 67 KB — a resumable tokenizer carrying parser state between deltas is the fix, deliberately unbuilt; at what real tool-call size does it start to matter?
+- 05: partial fields are readable but not actionable — nothing marks a string value as closed, so a client can render `"ZR"` but must not act on it; a per-field closed signal from the parser would split render-safe from act-safe
+- 05: field earliness is a function of json key order — would reordering tool schemas (act-on-first fields first) buy measurable latency on real tool calls, and does field order survive real model generation?
+- 05: the producer is instant and consumer pacing synthetic — high-watermarks against a real socket with provider-side generation pacing are unmeasured
 
 ## BLOCKED
 

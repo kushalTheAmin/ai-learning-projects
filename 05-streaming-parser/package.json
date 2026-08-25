@@ -1,0 +1,21 @@
+{
+  "name": "streaming-parser",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Incremental SSE parsing, partial-JSON handling for streamed tool calls, and backpressure — hand-rolled and measured",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3",
+    "vitest": "2.1.8"
+  }
+}
