@@ -15,6 +15,42 @@ OPEN THREADS for the questions worth answering next.
 | 02-retrieval-eval | 2026-08-25 | from-scratch okapi bm25 (lucene idf, k1 tf saturation, b length norm) vs sklearn-style tf-idf cosine (raw tf, smooth idf, l2 norm); evaluated with recall@1/recall@5/mrr@10 over a committed 40-doc / 38-query golden dataset, per-query head-to-head by reciprocal rank, plus a b=0 ablation isolating length normalization (mrr 0.917 tf-idf / 0.934 bm25 / 0.893 b=0); dataset includes engineered kitchen-sink distractor docs and deliberate vocabulary-mismatch queries to show where lexical retrieval fails |
 | 01-structured-output | 2026-08-25 | layered JSON parse repair (fence strip, balanced-brace extraction, trailing-comma removal, python-literal fallback) + pydantic schema validation with a validation-error-feedback retry loop and hard-failure policy; benchmarked strict vs lenient vs full retry on 30 scripted-failure tickets (20.0% → 60.0% → 96.7%, 44 llm calls vs 30) |
 
+## FINDINGS
+
+Open issues found by review, worst first. High = wrong results or wrong
+claims, medium = robustness or consistency, low = performance wrong in kind.
+Fixed items stay listed with their fix date so the history reads in one place.
+
+- [medium] 01 — `extract_balanced_object` returns only the first brace-balanced
+  candidate and never tries a later one, so prose with stray braces before the
+  real json ("use {placeholders} like this: {...}") is rejected outright, and a
+  reply carrying two objects always yields the first. today this is documented
+  in the readme and pinned by a test, but it still costs a retry on output that
+  would parse — scanning every `{` and taking the first candidate that parses
+  would close it. found 2026-08-25
+- [low] 01 — `run.py` divides by `len(tickets)` with no guard, so an empty
+  `data/tickets.jsonl` raises ZeroDivisionError instead of reporting an empty
+  run. found 2026-08-25
+- [low] 01 — an uppercase ```` ```JSON ```` fence misses the fence regex and is
+  rescued by the extract layer instead, so the layer report in `run.py` credits
+  the wrong layer for that shape. success rate is unaffected. found 2026-08-25
+- [fixed 2026-08-25] 01 — `extract_balanced_object` tracked only `"` as a string
+  delimiter while also feeding the `python_literal` layer, so a python-dict
+  reply with an unmatched `{` or `}` inside a value had its depth count broken,
+  got truncated, and was thrown away — burning a retry on output that layer
+  already handles. both quote styles delimit strings now. no measured numbers
+  moved: no summary in the committed dataset carries a brace
+
+## REVIEWED
+
+| project | last review |
+|---|---|
+| 01-structured-output | 2026-08-25 |
+
+Note on the first pass: every project in the repo was committed on 2026-08-25,
+so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
+the oldest instead (01, committed 17:44 UTC) rather than run a no-op.
+
 ## MECHANISMS
 
 Every algorithm, metric, data structure, and technique implemented somewhere
