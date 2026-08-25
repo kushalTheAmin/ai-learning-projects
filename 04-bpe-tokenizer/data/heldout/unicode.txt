@@ -1,0 +1,27 @@
+The same short passage, rewritten in several scripts, plus symbols an English-trained tokenizer has never seen.
+
+Spanish: La red no es fiable. Los mensajes se retrasan, se duplican y se pierden, y ninguna máquina puede distinguir un servidor lento de uno muerto.
+
+French: Le cache répond à une question déjà posée sans refaire le travail. L'invalidation reste le problème difficile, comme toujours.
+
+German: Die Warteschlange entkoppelt den Erzeuger der Arbeit vom Verbraucher. Größere Systeme brauchen genau diese Entkopplung, um Lastspitzen zu überstehen.
+
+Portuguese: Um índice transforma uma varredura completa da tabela em uma busca logarítmica, mas cada escrita paga o custo de mantê-lo.
+
+Russian: Сеть ненадёжна. Сообщения задерживаются, дублируются и теряются, и ни одна машина не может отличить медленный узел от мёртвого.
+
+Greek: Η ουρά αποσυνδέει τον παραγωγό της εργασίας από τον καταναλωτή, απορροφά τις αιχμές και εξομαλύνει το φορτίο.
+
+Japanese: ネットワークは信頼できない。メッセージは遅延し、重複し、失われる。キャッシュは同じ質問に二度計算せずに答える技術である。
+
+Chinese: 网络并不可靠。消息会延迟、重复和丢失。缓存的艺术在于不重复计算就能回答已经回答过的问题。索引把全表扫描变成对数查找。
+
+Korean: 네트워크는 신뢰할 수 없다. 메시지는 지연되고 중복되며 손실된다. 큐는 작업의 생산자와 소비자를 분리한다.
+
+Arabic: الشبكة غير موثوقة. الرسائل تتأخر وتتكرر وتضيع، ولا يمكن لأي جهاز أن يميز الخادم البطيء من الميت.
+
+Hindi: नेटवर्क विश्वसनीय नहीं है। संदेश देरी से पहुँचते हैं, दोहराए जाते हैं और खो जाते हैं।
+
+Math and symbols: ∀x ∈ S: f(x) ≤ g(x) ⇒ ∑f ≤ ∑g. Latency ≈ 3·10⁻³ s ± 5%. Temperature: 25°C → 77°F. Currency: €4,20 · £3.50 · ¥500 · ₹250.
+
+Emoji: deploys on friday 🚀🔥😱, rollback ready 🟢, incident review ☕📝, the queue is draining slowly 🐢, tests are green ✅✅✅, on call tonight 📟😴.

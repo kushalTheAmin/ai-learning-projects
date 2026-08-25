@@ -1,0 +1,72 @@
+import hashlib
+import re
+from collections import Counter
+
+
+def slugify(title, max_length=64):
+    """Lowercase, hyphen-separated, ascii-only slug for a title."""
+    slug = title.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
+    return slug[:max_length].rstrip("-") or "untitled"
+
+
+def stable_bucket(key, buckets):
+    """Deterministically assign a key to one of n buckets."""
+    if buckets <= 0:
+        raise ValueError("buckets must be positive")
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % buckets
+
+
+class EventCounter:
+    """Counts events per named category with a bounded category set."""
+
+    def __init__(self, max_categories=100):
+        self.max_categories = max_categories
+        self.counts = Counter()
+        self.overflow = 0
+
+    def record(self, category):
+        if category in self.counts or len(self.counts) < self.max_categories:
+            self.counts[category] += 1
+        else:
+            self.overflow += 1
+
+    def top(self, n=10):
+        return self.counts.most_common(n)
+
+
+def parse_duration(text):
+    """Parse strings like '90s', '15m', '2h' into seconds."""
+    match = re.fullmatch(r"(\d+)([smh])", text.strip())
+    if not match:
+        raise ValueError(f"unparseable duration: {text!r}")
+    amount, unit = int(match.group(1)), match.group(2)
+    scale = {"s": 1, "m": 60, "h": 3600}[unit]
+    return amount * scale
+
+
+def chunked_lines(path, batch_size=500):
+    """Yield lists of stripped, non-empty lines in fixed-size batches."""
+    batch = []
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            batch.append(line)
+            if len(batch) == batch_size:
+                yield batch
+                batch = []
+    if batch:
+        yield batch
+
+
+def percentile(sorted_values, fraction):
+    """Nearest-rank percentile of an already-sorted list."""
+    if not sorted_values:
+        raise ValueError("no values")
+    if not 0.0 <= fraction <= 1.0:
+        raise ValueError("fraction must be within [0, 1]")
+    rank = round(fraction * (len(sorted_values) - 1))
+    return sorted_values[rank]

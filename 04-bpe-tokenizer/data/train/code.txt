@@ -1,0 +1,235 @@
+import json
+import time
+from collections import OrderedDict
+from dataclasses import dataclass, field
+
+
+class LRUCache:
+    """Least-recently-used cache with a fixed capacity."""
+
+    def __init__(self, capacity):
+        if capacity <= 0:
+            raise ValueError("capacity must be positive")
+        self.capacity = capacity
+        self._entries = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, key, default=None):
+        if key not in self._entries:
+            self.misses += 1
+            return default
+        self.hits += 1
+        self._entries.move_to_end(key)
+        return self._entries[key]
+
+    def put(self, key, value):
+        if key in self._entries:
+            self._entries.move_to_end(key)
+        self._entries[key] = value
+        if len(self._entries) > self.capacity:
+            self._entries.popitem(last=False)
+
+    def hit_rate(self):
+        total = self.hits + self.misses
+        return self.hits / total if total else 0.0
+
+
+@dataclass
+class RetryPolicy:
+    max_attempts: int = 5
+    base_delay: float = 0.5
+    max_delay: float = 30.0
+    retryable: tuple = (ConnectionError, TimeoutError)
+
+    def delay_for(self, attempt):
+        delay = self.base_delay * (2 ** attempt)
+        return min(delay, self.max_delay)
+
+
+def with_retries(fn, policy, sleep=time.sleep):
+    last_error = None
+    for attempt in range(policy.max_attempts):
+        try:
+            return fn()
+        except policy.retryable as exc:
+            last_error = exc
+            if attempt < policy.max_attempts - 1:
+                sleep(policy.delay_for(attempt))
+    raise last_error
+
+
+@dataclass
+class Record:
+    key: str
+    value: dict
+    version: int = 0
+    deleted: bool = False
+
+
+class KeyValueStore:
+    """Append-only store: every write is a new version, reads see the latest."""
+
+    def __init__(self):
+        self._log = []
+        self._index = {}
+
+    def put(self, key, value):
+        version = self._index[key].version + 1 if key in self._index else 1
+        record = Record(key=key, value=dict(value), version=version)
+        self._log.append(record)
+        self._index[key] = record
+        return version
+
+    def get(self, key):
+        record = self._index.get(key)
+        if record is None or record.deleted:
+            raise KeyError(key)
+        return record.value
+
+    def delete(self, key):
+        if key not in self._index:
+            raise KeyError(key)
+        record = Record(key=key, value={}, version=self._index[key].version + 1,
+                        deleted=True)
+        self._log.append(record)
+        self._index[key] = record
+
+    def compact(self):
+        """Drop superseded versions, keeping only the latest per key."""
+        survivors = [r for r in self._index.values() if not r.deleted]
+        survivors.sort(key=lambda r: r.key)
+        self._log = survivors
+        self._index = {r.key: r for r in survivors}
+        return len(self._log)
+
+    def dump(self, path):
+        with open(path, "w", encoding="utf-8") as handle:
+            for record in self._log:
+                handle.write(json.dumps({
+                    "key": record.key,
+                    "value": record.value,
+                    "version": record.version,
+                    "deleted": record.deleted,
+                }) + "\n")
+
+    @classmethod
+    def load(cls, path):
+        store = cls()
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                raw = json.loads(line)
+                record = Record(key=raw["key"], value=raw["value"],
+                                version=raw["version"], deleted=raw["deleted"])
+                store._log.append(record)
+                store._index[record.key] = record
+        return store
+
+
+def paginate(items, page_size):
+    """Yield successive fixed-size pages from a list."""
+    if page_size <= 0:
+        raise ValueError("page_size must be positive")
+    for start in range(0, len(items), page_size):
+        yield items[start:start + page_size]
+
+
+def moving_average(values, window):
+    if window <= 0:
+        raise ValueError("window must be positive")
+    averages = []
+    total = 0.0
+    for i, value in enumerate(values):
+        total += value
+        if i >= window:
+            total -= values[i - window]
+        averages.append(total / min(i + 1, window))
+    return averages
+
+
+def merge_sorted(left, right):
+    """Merge two sorted lists into one sorted list."""
+    merged = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        if left[i] <= right[j]:
+            merged.append(left[i])
+            i += 1
+        else:
+            merged.append(right[j])
+            j += 1
+    merged.extend(left[i:])
+    merged.extend(right[j:])
+    return merged
+
+
+def binary_search(items, target):
+    """Index of target in sorted items, or -1 when absent."""
+    low, high = 0, len(items) - 1
+    while low <= high:
+        mid = (low + high) // 2
+        if items[mid] == target:
+            return mid
+        if items[mid] < target:
+            low = mid + 1
+        else:
+            high = mid - 1
+    return -1
+
+
+class TokenBucket:
+    """Rate limiter: capacity tokens, refilled at rate per second."""
+
+    def __init__(self, capacity, refill_rate, clock=time.monotonic):
+        self.capacity = float(capacity)
+        self.refill_rate = float(refill_rate)
+        self.tokens = float(capacity)
+        self.clock = clock
+        self.last_refill = clock()
+
+    def _refill(self):
+        now = self.clock()
+        elapsed = now - self.last_refill
+        self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_rate)
+        self.last_refill = now
+
+    def allow(self, cost=1.0):
+        self._refill()
+        if self.tokens >= cost:
+            self.tokens -= cost
+            return True
+        return False
+
+
+def group_by(items, key_fn):
+    groups = {}
+    for item in items:
+        groups.setdefault(key_fn(item), []).append(item)
+    return groups
+
+
+def flatten(nested):
+    """Flatten one level of nesting."""
+    flat = []
+    for chunk in nested:
+        flat.extend(chunk)
+    return flat
+
+
+def levenshtein(a, b):
+    """Edit distance between two strings, iterative two-row version."""
+    if len(a) < len(b):
+        a, b = b, a
+    previous = list(range(len(b) + 1))
+    for i, ch_a in enumerate(a, start=1):
+        current = [i]
+        for j, ch_b in enumerate(b, start=1):
+            insert_cost = current[j - 1] + 1
+            delete_cost = previous[j] + 1
+            replace_cost = previous[j - 1] + (ch_a != ch_b)
+            current.append(min(insert_cost, delete_cost, replace_cost))
+        previous = current
+    return previous[-1]
