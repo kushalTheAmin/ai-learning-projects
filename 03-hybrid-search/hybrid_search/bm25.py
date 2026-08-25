@@ -47,7 +47,9 @@ class BM25:
             raise RuntimeError("call fit() before scores()")
         result = np.zeros(len(self._doc_term_freqs))
         norm = 1.0 - self.b + self.b * (self._doc_lens / self._avg_doc_len)
-        for term in tokenize(query):
+        # unique query terms only: a repeated term must not score double.
+        # same semantics as 02-retrieval-eval's BM25Index, pinned by test.
+        for term in dict.fromkeys(tokenize(query)):
             idf = self._idf.get(term)
             if idf is None:
                 continue

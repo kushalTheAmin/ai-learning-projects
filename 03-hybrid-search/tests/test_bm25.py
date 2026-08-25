@@ -59,6 +59,17 @@ def test_matching_more_query_terms_scores_higher():
     assert scores[1] > scores[3]
 
 
+def test_duplicate_query_terms_do_not_double_count():
+    bm25 = BM25().fit(CORPUS)
+    assert np.array_equal(bm25.scores("cat cat cat"), bm25.scores("cat"))
+
+
+def test_stemmed_duplicates_do_not_double_count():
+    # "cache" and "caching" stem to the same term and must count once
+    bm25 = BM25().fit(["cache invalidation is hard", "naming things is hard"])
+    assert np.array_equal(bm25.scores("cache caching"), bm25.scores("cache"))
+
+
 def test_single_document_corpus():
     bm25 = BM25().fit(["just one document"])
     assert bm25.scores("document")[0] > 0.0

@@ -2,6 +2,8 @@
 
 project 02 ended on the two paraphrase queries lexical retrieval cant reach — this one goes after them. two retrievers built over the same 100-doc corpus, measured head to head, then fused. bm25 implemented from scratch — the actual okapi formula, not a wrapper. the dense side is tf-idf + truncated svd (classic LSA), which is the fully offline stand-in for an embedding model — no api key, no model download, runs anywhere. both sides share one tokenizer so the comparison measures retrieval, not tokenization.
 
+a note on the second bm25 — project 02 also implements okapi bm25, and this one is deliberately separate rather than imported. it has to sit on 03s stemming/compound-splitting tokenizer so the lexical and dense sides see identical tokens, and it returns full score vectors for fusion instead of 02s top-k lists. the scoring itself is pinned to agree with 02: same lucene +1 idf, same k1/b defaults, and repeated query terms count once — both projects carry a test holding that last contract, because two bm25s in one repo that silently disagree on "cache cache" vs "cache" is exactly the kind of bug that erodes trust in every number downstream
+
 ## the concept
 
 lexical search matches the words you typed. dense search matches what the words tend to mean, because svd squeezes the term space into latent dimensions where words that co-occur across the corpus land close together — kill/terminate, folder/directory. that buys you paraphrase queries and costs you precision on exact identifiers. hybrid search runs both and fuses the rankings, betting that their failure modes dont overlap.
