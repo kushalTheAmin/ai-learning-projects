@@ -21,6 +21,7 @@ applied-AI job description now.
 
 | # | Project | Concept | One-line takeaway |
 |---|---------|---------|-------------------|
+| 02 | [retrieval-eval](02-retrieval-eval/) | BM25 vs TF-IDF cosine from scratch, measured with recall@k and MRR | BM25's term saturation and length normalization beat TF-IDF (MRR 0.934 vs 0.917), the b=0 ablation proves length norm does the work — and the two paraphrase queries both systems miss are the entire case for dense retrieval. |
 | 01 | [structured-output](01-structured-output/) | Schema-validated LLM output with malformed-output retry | Free string-level repairs took success from 20% to 60%; feedback retries took it to 96.7% at a 47% call overhead — and the two layers should never be confused. |
 
 New projects are added to this table by the routine as they're built. Each

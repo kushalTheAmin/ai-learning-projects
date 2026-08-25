@@ -1,0 +1,38 @@
+{"query": "how do i undo a commit that is already pushed to a shared branch", "relevant": ["git-revert"]}
+{"query": "throw away all my uncommitted local changes", "relevant": ["git-reset"]}
+{"query": "temporarily set aside half-done work without committing", "relevant": ["git-stash"]}
+{"query": "find which commit introduced a bug using binary search", "relevant": ["git-bisect"]}
+{"query": "apply one specific commit from another branch to my branch", "relevant": ["git-cherry-pick"]}
+{"query": "what do the conflict markers in my files mean and how do i resolve them", "relevant": ["git-merge-conflict"]}
+{"query": "which commit added or removed a particular string", "relevant": ["git-pickaxe"]}
+{"query": "keep commit history linear without merge commits", "relevant": ["git-rebase"]}
+{"query": "make docker builds faster by reusing the layer cache", "relevant": ["dockerfile-cache", "docker-image-layers"]}
+{"query": "shrink the size of my docker image", "relevant": ["docker-multistage"]}
+{"query": "keep database files when the container is removed and recreated", "relevant": ["docker-volume"]}
+{"query": "my containers cannot reach each other by name", "relevant": ["docker-network"]}
+{"query": "start several containers together defined in one yaml file", "relevant": ["docker-compose"]}
+{"query": "isolate dependencies per python project", "relevant": ["py-venv"]}
+{"query": "why is my multithreaded python code not using all cpu cores", "relevant": ["py-gil"]}
+{"query": "call many http apis concurrently from python while waiting on responses", "relevant": ["py-asyncio"]}
+{"query": "process a huge file line by line without loading it into memory", "relevant": ["py-generators"]}
+{"query": "same package versions on every machine and in ci", "relevant": ["py-pinning"]}
+{"query": "which status code should i return when the client sends too many requests", "relevant": ["http-rate-limit", "http-status-codes"]}
+{"query": "how do cache control max age and etag revalidation work in the browser", "relevant": ["http-caching"]}
+{"query": "is it safe to retry a put request that timed out", "relevant": ["rest-idempotency"]}
+{"query": "browser blocks my javascript fetch to a different origin", "relevant": ["cors"]}
+{"query": "verify who the user is on each request without a session store", "relevant": ["jwt-auth"]}
+{"query": "my query does a full table scan and is slow", "relevant": ["sql-index"]}
+{"query": "orm fires one extra query per row in the list", "relevant": ["sql-nplus1"]}
+{"query": "make several statements commit or roll back together", "relevant": ["sql-transactions"]}
+{"query": "requests randomly time out waiting for a database connection under load", "relevant": ["db-connection-pool"]}
+{"query": "keep database schema changes in sync across environments", "relevant": ["db-migrations"]}
+{"query": "search for a string in every file under a directory", "relevant": ["grep-usage"]}
+{"query": "list files older than seven days", "relevant": ["find-usage"]}
+{"query": "log in to a server without typing a password", "relevant": ["ssh-keys"]}
+{"query": "run a script automatically every night at 3am", "relevant": ["cron-syntax"]}
+{"query": "where should secrets and credentials live instead of the codebase", "relevant": ["env-config"]}
+{"query": "expire old entries from an in-memory cache automatically", "relevant": ["redis-cache"]}
+{"query": "spread traffic across several instances of my service", "relevant": ["load-balancer"]}
+{"query": "chain the output of one command into another", "relevant": ["shell-pipes"]}
+{"query": "why does my site suddenly show old content after a deploy", "relevant": ["caching-overview"]}
+{"query": "my app crashed halfway and now the data is inconsistent", "relevant": ["sql-transactions"]}
