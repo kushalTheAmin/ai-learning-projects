@@ -21,6 +21,7 @@ applied-AI job description now.
 
 | # | Project | Concept | One-line takeaway |
 |---|---------|---------|-------------------|
+| 01 | [structured-output](01-structured-output/) | Schema-validated LLM output with malformed-output retry | Free string-level repairs took success from 20% to 60%; feedback retries took it to 96.7% at a 47% call overhead — and the two layers should never be confused. |
 
 New projects are added to this table by the routine as they're built. Each
 project folder is self-contained: `cd` into it and its README tells you how
