@@ -78,3 +78,5 @@ def test_entry_point_runs_and_reports(corpus, queries):
     assert "tf-idf cosine" in out
     assert "bm25 (k1=1.5, b=0.75)" in out
     assert "head to head by reciprocal rank" in out
+    assert "paired bootstrap over queries" in out
+    assert "mrr difference, paired per query" in out
