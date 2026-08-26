@@ -29,21 +29,23 @@ no network, no api key. svd is seeded, so every run prints the same numbers.
 ## the numbers
 
 ```
-ALL QUERIES (40)          recall@1    recall@5    mrr
-bm25 (lexical)               0.812       0.950     0.885
+ALL QUERIES (40)          recall@1    recall@5    mrr@10
+bm25 (lexical)               0.812       0.950     0.882
 dense (lsa)                  0.812       0.975     0.897
-hybrid (rrf)                 0.838       0.950     0.902
+hybrid (rrf)                 0.838       0.950     0.899
 
-PARAPHRASE ONLY (20)      recall@1    recall@5    mrr
-bm25 (lexical)               0.625       0.900     0.769
+PARAPHRASE ONLY (20)      recall@1    recall@5    mrr@10
+bm25 (lexical)               0.625       0.900     0.765
 dense (lsa)                  0.625       0.950     0.794
-hybrid (rrf)                 0.675       0.900     0.803
+hybrid (rrf)                 0.675       0.900     0.799
 ```
 
+mrr is cut off at rank 10, same as 02 — every ranking here covers all 100 docs, so without a cutoff nothing is ever a miss and the metric cant say "didnt find it". bm25s worst query sits at rank 12 and was booking 0.083 for it
+
 - keyword queries: both sides go 20/20 at rank 1. more on why thats interesting below
-- paraphrase queries: bm25 gets trapped by surface-word collisions — "check who is logged in without a trip to the database" lands on the connection-pooling doc (database! trip!) at rank 12 while dense puts the JWT doc at 8. dense wins the category on mrr and recall@5
-- hybrid rrf has the best mrr and recall@1 overall — it recovers several of bm25s paraphrase misses without giving up the keyword wins
-- the alpha sweep prints mrr at every blend from pure-bm25 to pure-dense. best value on this set is 0.2, but with 40 queries thats reading tea leaves — the sweep is there to show the tradeoff curve exists, not to pick a production constant
+- paraphrase queries: bm25 gets trapped by surface-word collisions — "check who is logged in without a trip to the database" lands on the connection-pooling doc (database! trip!) and doesnt reach the JWT doc until rank 12, past the cutoff, so it scores zero — dense has it at 8. dense wins the category on mrr@10 and recall@5
+- hybrid rrf has the best mrr@10 and recall@1 overall — it recovers several of bm25s paraphrase misses without giving up the keyword wins
+- the alpha sweep prints mrr@10 at every blend from pure-bm25 to pure-dense. best value on this set is 0.2, but with 40 queries thats reading tea leaves — the sweep is there to show the tradeoff curve exists, not to pick a production constant
 
 ## the honest finding about keyword queries
 
@@ -54,6 +56,14 @@ i expected dense to stumble on exact identifiers — thats the standard story fo
 - rrf is rank-blind. when one retriever is confidently right and the other is confidently wrong, rrf averages them — you can see it drag a dense rank-4 hit down to rank-7 hybrid when bm25 had it at 10. the weighted blend can lean toward the stronger side, but now you own a hyperparameter and a normalization scheme
 - the tokenizer keeps hyphen compounds whole and also splits them — `force-with-lease` stays searchable as a flag while `logged-in` still matches "logged". skip the split half and compound words silently stop matching their parts. this is the same tradeoff elasticsearchs word-delimiter filter exists for
 - the stemmer is ~30 lines of suffix stripping. it maps cache/caching/cached together, which is all this corpus needs — it also cant tell that slow and slower are related, so a query using the comparative form just loses that term
+
+## fixes
+
+- 2026-08-26 — mrr had no rank cutoff while 02 reports mrr@10, so the same
+  metric name meant two things across the repo — and since rankings here cover
+  all 100 docs, a query bm25 only answered at rank 12 still scored 0.083
+  instead of missing. now cut off at 10 like 02. bm25 0.885 → 0.882, rrf
+  0.902 → 0.899, paraphrase bm25 0.769 → 0.765, paraphrase rrf 0.803 → 0.799
 
 ## where it breaks down
 

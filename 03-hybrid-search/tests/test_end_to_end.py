@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from hybrid_search.evaluate import aggregate, evaluate, load_json, sweep_alpha
+from hybrid_search.evaluate import (
+    MRR_K,
+    QueryResult,
+    aggregate,
+    evaluate,
+    load_json,
+    sweep_alpha,
+)
 
 PROJECT_DIR = Path(__file__).parent.parent
 DATA_DIR = PROJECT_DIR / "data"
@@ -71,6 +78,26 @@ def test_all_strategies_clear_a_quality_floor(results):
     for strategy, row in table.items():
         assert row["recall@5"] >= 0.85, f"{strategy} recall@5 too low"
         assert row["mrr"] >= 0.80, f"{strategy} mrr too low"
+
+
+def _single_strategy_result(ranking, relevant):
+    return QueryResult(
+        query_id="q", category="keyword", relevant=relevant, rankings={"only": ranking}
+    )
+
+
+def test_aggregate_scores_mrr_at_the_reported_cutoff():
+    # every ranking here covers the whole corpus, so an uncapped mrr can never
+    # come out 0 — the harness has to apply the same cutoff it reports
+    ranking = [f"d{i}" for i in range(20)]
+    past = _single_strategy_result(ranking, {f"d{MRR_K}"})  # rank MRR_K + 1
+    assert aggregate([past])["only"]["mrr"] == 0.0
+
+
+def test_aggregate_counts_a_hit_exactly_at_the_cutoff():
+    ranking = [f"d{i}" for i in range(20)]
+    at_edge = _single_strategy_result(ranking, {f"d{MRR_K - 1}"})  # rank MRR_K
+    assert aggregate([at_edge])["only"]["mrr"] == pytest.approx(1 / MRR_K)
 
 
 def test_evaluation_is_deterministic(corpus, queries):

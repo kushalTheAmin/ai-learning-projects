@@ -11,11 +11,19 @@ def recall_at_k(retrieved_ids: list[str], relevant_ids: set[str], k: int) -> flo
     return hits / len(relevant_ids)
 
 
-def reciprocal_rank(retrieved_ids: list[str], relevant_ids: set[str]) -> float:
-    """1 / rank of the first relevant document, 0 if none was retrieved."""
+def reciprocal_rank(retrieved_ids: list[str], relevant_ids: set[str], k: int) -> float:
+    """1 / rank of the first relevant document within the top k, else 0.
+
+    The cutoff is required, not optional: the rankings this is scored over
+    cover the whole corpus, so without one every query would find its answer
+    somewhere and the metric could never come out 0. Same semantics as
+    02-retrieval-eval's reciprocal_rank, pinned by a test in each project.
+    """
+    if k <= 0:
+        raise ValueError(f"k must be positive, got {k}")
     if not relevant_ids:
         raise ValueError("relevant_ids must not be empty")
-    for position, doc_id in enumerate(retrieved_ids, start=1):
+    for position, doc_id in enumerate(retrieved_ids[:k], start=1):
         if doc_id in relevant_ids:
             return 1.0 / position
     return 0.0

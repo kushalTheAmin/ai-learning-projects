@@ -13,6 +13,7 @@ from .fusion import reciprocal_rank_fusion, weighted_score_fusion
 from .metrics import mean, recall_at_k, reciprocal_rank
 
 RECALL_KS = (1, 5)
+MRR_K = 10
 DEFAULT_ALPHA = 0.5
 
 
@@ -93,7 +94,7 @@ def aggregate(results: list[QueryResult], category: str | None = None) -> dict:
                 [recall_at_k(r.rankings[strategy], r.relevant, k) for r in subset]
             )
         row["mrr"] = mean(
-            [reciprocal_rank(r.rankings[strategy], r.relevant) for r in subset]
+            [reciprocal_rank(r.rankings[strategy], r.relevant, MRR_K) for r in subset]
         )
         table[strategy] = row
     return table
@@ -114,6 +115,8 @@ def sweep_alpha(
         mrrs = []
         for relevant, bm25_scores, dense_scores in cached:
             ranking = weighted_score_fusion(bm25_scores, dense_scores, alpha)
-            mrrs.append(reciprocal_rank([doc_ids[i] for i in ranking], relevant))
+            mrrs.append(
+                reciprocal_rank([doc_ids[i] for i in ranking], relevant, MRR_K)
+            )
         result[alpha] = mean(mrrs)
     return result

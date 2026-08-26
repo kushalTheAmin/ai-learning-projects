@@ -6,6 +6,7 @@ from pathlib import Path
 
 from hybrid_search.evaluate import (
     DEFAULT_ALPHA,
+    MRR_K,
     RECALL_KS,
     aggregate,
     evaluate,
@@ -25,8 +26,9 @@ STRATEGY_LABELS = {
 
 def print_table(title: str, table: dict) -> None:
     metric_names = [f"recall@{k}" for k in RECALL_KS] + ["mrr"]
+    labels = [f"recall@{k}" for k in RECALL_KS] + [f"mrr@{MRR_K}"]
     print(f"\n{title}")
-    header = f"  {'strategy':<26}" + "".join(f"{m:>12}" for m in metric_names)
+    header = f"  {'strategy':<26}" + "".join(f"{m:>12}" for m in labels)
     print(header)
     print("  " + "-" * (len(header) - 2))
     for strategy, row in table.items():
@@ -40,8 +42,8 @@ def print_biggest_wins(results, queries) -> None:
     direction, or say plainly when a retriever never wins."""
     query_text = {q["id"]: q["query"] for q in queries}
     for winner, loser in [("bm25", "dense"), ("dense", "bm25")]:
-        margin = lambda r: reciprocal_rank(r.rankings[winner], r.relevant) - (
-            reciprocal_rank(r.rankings[loser], r.relevant)
+        margin = lambda r: reciprocal_rank(r.rankings[winner], r.relevant, MRR_K) - (
+            reciprocal_rank(r.rankings[loser], r.relevant, MRR_K)
         )
         best = max(results, key=margin)
         if margin(best) <= 0:
@@ -83,10 +85,17 @@ def main() -> None:
     alphas = [round(0.1 * i, 1) for i in range(11)]
     sweep = sweep_alpha(corpus, queries, alphas)
     print("\nWEIGHTED FUSION ALPHA SWEEP (0 = pure bm25, 1 = pure dense)")
-    print("  alpha: " + "  ".join(f"{a:>5.1f}" for a in alphas))
-    print("  mrr:   " + "  ".join(f"{sweep[a]:>5.3f}" for a in alphas))
+    label_width = len(f"mrr@{MRR_K}:")
+    print(f"  {'alpha:':<{label_width}} " + "  ".join(f"{a:>5.1f}" for a in alphas))
+    print(
+        f"  {f'mrr@{MRR_K}:':<{label_width}} "
+        + "  ".join(f"{sweep[a]:>5.3f}" for a in alphas)
+    )
     best_alpha = max(sweep, key=sweep.get)
-    print(f"  best alpha on this query set: {best_alpha} (mrr {sweep[best_alpha]:.3f})")
+    print(
+        f"  best alpha on this query set: {best_alpha} "
+        f"(mrr@{MRR_K} {sweep[best_alpha]:.3f})"
+    )
 
 
 if __name__ == "__main__":

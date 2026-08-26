@@ -12,7 +12,7 @@ OPEN THREADS for the questions worth answering next.
 | 05-token-streaming | 2026-08-26 | typescript | incremental sse parser over raw bytes (whatwg subset: lf/crlf/bare-cr incl. cr on a chunk boundary, streaming utf-8 decode, multi-line data, last-event-id, dispatch only on non-empty data) + partial-json prefix parser (single left-to-right scan: container stack, in-progress token, safe-index truncation; unambiguous completion — close string, tru->true, trim 12. to 12 — else drop the dangling piece) + bounded async queue whose await-push blocks when full, with high-water/stall instrumentation; measured — first text at 2.5% of a buffering client's wait, tool-arg fields readable at 44-89% of stream bytes vs 100% waiting for the closing brace, bounded(8) queue holds high-water at 8 chunks vs 419 unbounded at identical wall time, 300/300 seeded byte-level chunkings parse identically |
 | 04-bpe-tokenizer | 2026-08-25 | python | byte-level bpe from scratch: pair counting weighted by pretoken piece frequency, deterministic lexicographic tie-break, rank-ordered merge application, byte fallback, replacement-char-safe decode; merge-prefix truncation lets one training serve a whole vocab sweep; measured — vocab 256→1246 cuts heldout prose 3106→1058 tokens (2.9x cost), domain transfer with a vocab-matched control (prose-trained 1.49 vs mixed-trained 2.56 bytes/token on code at equal vocab — the domain, not the slots), script cost (cjk 9.0x english tokens/char, zero merges learned), baselines at matched vocab (word tokenizer 20.3% oov on heldout prose, char tokenizer misses 277 chars, byte-level oov is structurally 0%) |
 | 02-retrieval-eval, bootstrap extension | 2026-08-25 | python | paired bootstrap over per-query reciprocal ranks (10000 resamples, seeded, stdlib only): 95% percentile confidence intervals on each system's mrr and on paired per-query mrr differences, plus a direction-stability fraction (share of resamples where the gap is <= 0); measured verdict — bm25 vs tf-idf +0.018 [+0.000, +0.048] includes zero, the gap rests on 2 of 38 queries even though bm25 never loses one, while bm25 vs b=0 +0.041 [+0.001, +0.091] excludes zero |
-| 03-hybrid-search | 2026-08-25 | python | okapi bm25 from scratch + lsa dense retrieval (tf-idf → seeded truncated svd) over one shared stemmer/compound-splitting tokenizer; rrf and weighted score fusion with alpha sweep; recall@1/5 + mrr on 100 docs / 40 golden queries split keyword vs paraphrase (paraphrase mrr: bm25 0.769, dense 0.794, hybrid rrf 0.803; overall rrf best at 0.902; keyword saturated for both — corpus-fit lsa has no oov failure mode) |
+| 03-hybrid-search | 2026-08-25 | python | okapi bm25 from scratch + lsa dense retrieval (tf-idf → seeded truncated svd) over one shared stemmer/compound-splitting tokenizer; rrf and weighted score fusion with alpha sweep; recall@1/5 + mrr on 100 docs / 40 golden queries split keyword vs paraphrase (paraphrase mrr@10: bm25 0.765, dense 0.794, hybrid rrf 0.799; overall rrf best at 0.899; keyword saturated for both — corpus-fit lsa has no oov failure mode) |
 | 02-retrieval-eval | 2026-08-25 | python | from-scratch okapi bm25 (lucene idf, k1 tf saturation, b length norm) vs sklearn-style tf-idf cosine (raw tf, smooth idf, l2 norm); evaluated with recall@1/recall@5/mrr@10 over a committed 40-doc / 38-query golden dataset, per-query head-to-head by reciprocal rank, plus a b=0 ablation isolating length normalization (mrr 0.917 tf-idf / 0.934 bm25 / 0.893 b=0); dataset includes engineered kitchen-sink distractor docs and deliberate vocabulary-mismatch queries to show where lexical retrieval fails |
 | 01-structured-output | 2026-08-25 | python | layered JSON parse repair (fence strip, balanced-brace extraction, trailing-comma removal, python-literal fallback) + pydantic schema validation with a validation-error-feedback retry loop and hard-failure policy; benchmarked strict vs lenient vs full retry on 30 scripted-failure tickets (20.0% → 60.0% → 96.7%, 44 llm calls vs 30) |
 
@@ -22,6 +22,21 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [low] 02 — the readme quotes the headline disagreement as "expire old entries
+  from an in-memory cache"; the committed query is "expire old entries from an
+  in-memory cache automatically". same for "the raw 0.017 gap", which `main.py`
+  prints as +0.018 — both are the same number rounded twice, but the readme
+  should say what the entry point says. found 2026-08-26
+- [low] 02 — `print_significance` decides "excludes zero" on `ci.lo > 0` while
+  printing `ci.lo` to 3 decimals, so a lower bound of 0.0004 would print
+  "[+0.000, ...] — interval excludes zero" and contradict itself on screen.
+  not triggered by the committed data, where the bound is exactly 0.0.
+  found 2026-08-26
+- [low] 02, 04 — `tokenize` runs `[^\W_]+` over unicode, so a whole cjk sentence
+  becomes one token and only matches on exact whole-run equality. no measured
+  number moves (the corpus is english) and `test_unicode_text_survives` pins the
+  behavior as if it were wanted — 04 measures the same cost honestly, 02 doesnt
+  mention it. found 2026-08-26
 - [medium] 01 — `extract_balanced_object` returns only the first brace-balanced
   candidate and never tries a later one, so prose with stray braces before the
   real json ("use {placeholders} like this: {...}") is rejected outright, and a
@@ -35,6 +50,13 @@ Fixed items stay listed with their fix date so the history reads in one place.
 - [low] 01 — an uppercase ```` ```JSON ```` fence misses the fence regex and is
   rescued by the extract layer instead, so the layer report in `run.py` credits
   the wrong layer for that shape. success rate is unaffected. found 2026-08-25
+- [fixed 2026-08-26] 03 — `reciprocal_rank` took no rank cutoff while 02 reports
+  mrr@10, so the same metric name meant two things in two folders. 03 ranks the
+  whole 100-doc corpus, so an uncapped mrr had no failure mode at all: the one
+  query bm25 only answered at rank 12 booked 0.083 instead of 0. cutoff is a
+  required argument now, `MRR_K = 10` at every call site, column reads mrr@10.
+  bm25 0.885 → 0.882, rrf 0.902 → 0.899, paraphrase bm25 0.769 → 0.765,
+  paraphrase rrf 0.803 → 0.799, alpha sweep best still 0.2. no ordering changed
 - [fixed 2026-08-25] 01 — `extract_balanced_object` tracked only `"` as a string
   delimiter while also feeding the `python_literal` layer, so a python-dict
   reply with an unmatched `{` or `}` inside a value had its depth count broken,
@@ -46,11 +68,20 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 02-retrieval-eval | 2026-08-26 |
 | 01-structured-output | 2026-08-25 |
 
 Note on the first pass: every project in the repo was committed on 2026-08-25,
 so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
-the oldest instead (01, committed 17:44 UTC) rather than run a no-op.
+the oldest instead (01, committed 17:44 UTC) rather than run a no-op. Same on
+2026-08-26 — everything was still inside 24 hours, so the oldest unreviewed
+project went first (02, committed 18:10 UTC).
+
+02 came back clean on its own code: tf-idf matches sklearn's TfidfVectorizer to
+1.1e-16 on every committed query, bm25 matches the lucene formula term by term,
+reciprocal rank is 1-indexed and recall@k slices k, everything is seeded and
+reruns identically, and all 12 readme numbers match what `main.py` prints today.
+The finding that came out of it was the cross-project one, in 03.
 
 ## MECHANISMS
 
@@ -66,7 +97,7 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - tf-idf cosine similarity: raw tf, smooth idf, l2 norm (02)
 - b=0 ablation isolating length normalization (02)
 - recall@k (02, 03)
-- reciprocal rank / mrr (02, 03)
+- reciprocal rank / mrr@k (02, 03; the rank cutoff is a required argument in both and both run it at k=10, with a test in each project holding that a hit past the cutoff scores 0)
 - per-query head-to-head comparison by reciprocal rank (02)
 - golden dataset construction: engineered kitchen-sink distractors and vocabulary-mismatch queries (02), keyword vs paraphrase category split (03)
 - regex word tokenizer with stopword removal, naive suffix stemmer, hyphen/underscore compounds kept whole and split (03)
