@@ -43,6 +43,26 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [medium] 03 — `stem` lets the plural strip fall through into the -ed strip, so
+  "exceeds" loses its s to become "exceed" and then loses "ed" to become "exce",
+  while "exceeded" stops at "exceed". both words are in dk-06, so the doc
+  disagrees with itself on one term. no query uses either, so no measured number
+  moves today. separate mechanism from the undouble fix below (suffix rules
+  chaining, not the undouble guard), so it was not folded into that commit.
+  found 2026-08-27
+- [medium] 03 — the tokenizer regex is `[a-z0-9]+(?:[-_][a-z0-9]+)*`, ascii-only
+  despite the re.UNICODE flag, so a non-ascii letter acts as a word boundary
+  rather than a character: "naïve" splits into "na" + "ve" and "Ünicode" becomes
+  "nicod". `test_non_ascii_does_not_crash` pins "café" → "caf" as if the
+  truncation were wanted. 02 and 04 keep a unicode run whole (their own finding
+  below), so the repo now has two different unicode behaviors and 03s readme
+  mentions neither. corpus is english, no number moves. found 2026-08-27
+- [low] 03 — when no query term is known, every score is 0 and `np.argsort`
+  stable-sorts into corpus order, so the retriever still returns a full ranking
+  headed by whatever doc sits at index 0 (git-01) and the metrics score it as a
+  real retrieval. the score contract is tested (`test_oov_query_scores_zero_
+  everywhere` in both retrievers), the ranking one is not. no committed query
+  is affected — all 40 carry at least one known term. found 2026-08-27
 - [low] 02 — the readme quotes the headline disagreement as "expire old entries
   from an in-memory cache"; the committed query is "expire old entries from an
   in-memory cache automatically". same for "the raw 0.017 gap", which `main.py`
@@ -80,6 +100,19 @@ Fixed items stay listed with their fix date so the history reads in one place.
 - [low] 01 — an uppercase ```` ```JSON ```` fence misses the fence regex and is
   rescued by the extract layer instead, so the layer report in `run.py` credits
   the wrong layer for that shape. success rate is unaffected. found 2026-08-25
+- [fixed 2026-08-27] 03 — `_undouble` stripped the final letter of any doubled
+  consonant left behind by an -ing/-ed strip, l, s and z included. those
+  doublings belong to the base word, not the suffix, so "killed" stemmed to
+  "kil" while "kill" stemmed to "kill" and a query term stopped matching its own
+  document term — same for install/installed, call/calling, fills/filling, and
+  pass/passed. the readme claimed the stemmer "maps morphological variants onto
+  one form" while three such families in the committed corpus were split. l, s
+  and z are excluded from the undouble now, the exclusion porter's step 1b makes
+  for this exact reason; stopped → stop and running → run are unaffected and
+  still pinned. paraphrase dense mrr@10 0.794 → 0.793 (the jwt doc for p14 moves
+  rank 8 → 9), hybrid weighted a=0.5 0.889 → 0.887 overall and 0.779 → 0.774 on
+  paraphrase; bm25, dense overall, rrf and every keyword number unchanged, best
+  alpha still 0.2. no other project has a stemmer. found and fixed 2026-08-27
 - [fixed 2026-08-26] 03 — `reciprocal_rank` took no rank cutoff while 02 reports
   mrr@10, so the same metric name meant two things in two folders. 03 ranks the
   whole 100-doc corpus, so an uncapped mrr had no failure mode at all: the one
@@ -98,6 +131,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 03-hybrid-search | 2026-08-27 |
 | 04-bpe-tokenizer | 2026-08-27 |
 | 02-retrieval-eval | 2026-08-26 |
 | 01-structured-output | 2026-08-25 |
@@ -123,6 +157,20 @@ deterministic across PYTHONHASHSEED, and all 16 readme numbers match
 partial-utf8 decode, vocab-below-256 rejected). the finding was a claim the
 run's own control column already refuted — the domain-crowding takeaway, now
 fixed.
+
+03 came back clean on retrieval and clean on measurement: bm25 matches the
+lucene formula term by term and dedupes repeated query terms like 02, the lsa
+side fits on the corpus alone with nothing from the query set touching the
+vectorizer or the svd, rrf sums 1/(60+rank) on 1-indexed ranks, weighted fusion
+min-maxes both arrays before blending, recall@k slices k, reciprocal_rank is
+1-indexed and cut at 10, output is byte-identical across reruns and across
+PYTHONHASHSEED, and every readme number matches `main.py`. the alpha sweep does
+read its best value off the same 40 queries it tunes on, which is the classic
+misleading-measurement shape — but the readme already calls it "reading tea
+leaves" and refuses to name a production constant, so it is disclosed, not
+claimed. the defect was one layer down in the shared tokenizer: the stemmer
+split words from their own inflections, fixed above. two smaller tokenizer
+findings came out of the same read and are listed open.
 
 ## MECHANISMS
 
