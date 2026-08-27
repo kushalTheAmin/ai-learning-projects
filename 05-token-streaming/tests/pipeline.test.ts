@@ -4,6 +4,25 @@ import { ASSISTANT_TEXT, TOOL_ARGS, TOOL_NAME, scriptedSseBytes } from "../src/f
 import { runPipeline } from "../src/pipeline.js";
 import { SseParser, parseSseComplete } from "../src/sse.js";
 
+/** SSE wire bytes for one tool call whose arguments are `args`, cut into
+ *  fragments of `fragmentSize` characters. */
+function sseWireForArgs(args: string, fragmentSize: number): Uint8Array {
+  let wire = `event: tool_call_start\ndata: ${JSON.stringify({
+    type: "tool_call_start",
+    name: "t",
+  })}\n\n`;
+  for (let i = 0; i < args.length; i += fragmentSize) {
+    const payload = { type: "tool_args_delta", fragment: args.slice(i, i + fragmentSize) };
+    wire += `event: tool_args_delta\ndata: ${JSON.stringify(payload)}\n\n`;
+  }
+  wire += "data: [DONE]\n\n";
+  return new TextEncoder().encode(wire);
+}
+
+async function* oneChunk(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
+  yield bytes;
+}
+
 describe("pipeline end to end", () => {
   it("reassembles the scripted turn exactly from tiny chunks", async () => {
     const bytes = scriptedSseBytes();
@@ -46,6 +65,48 @@ describe("pipeline end to end", () => {
       expect(availableAtByteFraction).toBeLessThan(1);
       previous = availableAtByteFraction;
     }
+  });
+
+  it("separates when a field first parses from when it first carries a value", async () => {
+    const bytes = scriptedSseBytes();
+    const result = await runPipeline(
+      chunkBytes(bytes, { seed: 3, maxChunkBytes: 12, delayMs: 0 }),
+      bytes.length,
+    );
+    const byField = new Map(result.fieldAvailability.map((f) => [f.field, f]));
+
+    // `filters` is an object, so it parses as `{}` the moment its key gets a
+    // value position — before any of its own keys have arrived. Reporting it
+    // as available there would say a dispatcher can read the filters when
+    // what it can read is an empty object.
+    const filters = byField.get("filters");
+    expect(filters).toBeDefined();
+    expect(filters?.nonEmptyAtByteFraction).not.toBeNull();
+    expect(filters?.nonEmptyAtByteFraction as number).toBeGreaterThan(
+      filters?.availableAtByteFraction as number,
+    );
+
+    // Scalars are whole the instant they parse, so the two coincide there.
+    for (const field of ["top_k", "include_snippets"]) {
+      const entry = byField.get(field);
+      expect(entry?.nonEmptyAtByteFraction).toBe(entry?.availableAtByteFraction);
+    }
+  });
+
+  it("reports no value-carrying point for a field that stays empty", async () => {
+    // A field whose final value is "" or [] never carries anything, so there
+    // is no honest fraction to report for it.
+    const wire = sseWireForArgs('{"blank":"","none":[],"held":"x"}', 5);
+    const result = await runPipeline(oneChunk(wire), wire.length);
+    const byField = new Map(result.fieldAvailability.map((f) => [f.field, f]));
+
+    expect(byField.get("blank")?.nonEmptyAtByteFraction).toBeNull();
+    expect(byField.get("none")?.nonEmptyAtByteFraction).toBeNull();
+    expect(byField.get("held")?.nonEmptyAtByteFraction).toBe(
+      byField.get("held")?.availableAtByteFraction,
+    );
+    // All three still parsed, so the first-parse column is unaffected.
+    expect([...byField.keys()]).toEqual(["blank", "none", "held"]);
   });
 
   it("records a first-text time no later than the total time", async () => {

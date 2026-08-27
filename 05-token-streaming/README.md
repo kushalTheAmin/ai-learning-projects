@@ -46,7 +46,7 @@ that, from scratch, and measures each one.
 
 ```
 npm ci
-npm test        # 55 tests
+npm test        # 57 tests
 npm start       # the four measurements below
 npm run typecheck
 ```
@@ -61,21 +61,31 @@ reassembled text and tool arguments are byte-identical to the fixture, so the
 early output costs no correctness.
 
 **2. Partial JSON on streamed tool arguments.** All 35 argument fragments
-yield a usable snapshot (35/35). Field availability, as a fraction of total
-stream bytes received when the field first parsed:
+yield a usable snapshot (35/35). Two columns, both a fraction of total stream
+bytes received: when the field first parses at all, and when its value first
+carries anything — a non-empty string, a container with an entry in it, or
+any scalar.
 
-| field | available at |
-|---|---|
-| `query` | 44.1% |
-| `top_k` | 59.0% |
-| `filters` | 60.5% |
-| `include_snippets` | 86.6% |
-| `note` | 88.6% |
-| any field, waiting for complete JSON | 100.0% |
+| field | first parsed | carries a value |
+|---|---|---|
+| `query` | 44.1% | 44.1% |
+| `top_k` | 59.0% | 59.0% |
+| `filters` | 60.5% | 63.8% |
+| `include_snippets` | 86.6% | 86.6% |
+| `note` | 88.6% | 88.6% |
+| any field, waiting for complete JSON | 100.0% | 100.0% |
 
-That gap is the whole argument for partial parsing: a UI can show the query
-being searched, or a dispatcher can start validating it, at 44% of the
-stream instead of 100%.
+The two columns only separate for `filters`, and that separation is the point
+of having them — an object parses as `{}` the moment its key gets a value
+position, so "available at 60.5%" would mean a dispatcher reads the filters
+and gets nothing. It has a filter in it at 63.8%. Scalars are whole the
+instant they parse, so their columns coincide.
+
+The gap against 100% is still the argument for partial parsing: a UI can
+start rendering the query at 44.1% instead of waiting for the closing brace.
+What it has there is `"bre"` — the first three characters of a query that
+keeps growing — so it is something to show, not something to validate or
+dispatch on.
 
 **3. Backpressure.** Fast producer (whole stream already buffered), slow
 consumer (1ms per chunk):
@@ -116,6 +126,11 @@ degenerate case and a mixed CRLF/CR/LF wire fuzzed separately in the tests.
   until its value has started. So the set of visible keys tells you nothing
   about what's coming; only the fixture's key order makes the availability
   table look inevitable.
+- **A key existing is not the same as it holding anything.** The step after
+  the one above: `{"filters": {` gives you `filters` as `{}`. The key is
+  there, the value is empty, and a table that only records first-parse counts
+  that as available. That is why measurement 2 carries a second column — and
+  even it only proves the field is non-empty, not that it is finished.
 - **The CR-on-chunk-boundary case is the one a naive splitter loses.** A
   `\r` as the last byte of a chunk can't be classified until the next chunk
   says whether a `\n` follows. The first fuzz corpus (LF-only fixture)
@@ -130,6 +145,11 @@ degenerate case and a mixed CRLF/CR/LF wire fuzzed separately in the tests.
 
 ## fixes
 
+- 2026-08-27 — the field availability table counted a field as available the
+  moment it first parsed, and `filters` first parses as `{}` — so 60.5% said
+  you could read filters that werent there yet. table has a second column for
+  when the value first carries anything. `filters` 60.5% → 63.8%, every other
+  field unchanged (scalars and strings are non-empty as soon as they parse)
 - 2026-08-27 — the backpressure demo reported buffered memory as chunk count
   times the *maximum* chunk size, so it claimed 10032 bytes buffered out of a
   5185-byte stream — nearly twice the whole thing. the queue sums the real

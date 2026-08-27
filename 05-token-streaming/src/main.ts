@@ -63,9 +63,15 @@ async function partialJsonDemo(): Promise<void> {
     `argument fragments: ${result.argSnapshots.length}, snapshots yielding a value: ` +
       `${parseable}/${result.argSnapshots.length}`,
   );
-  console.log("field availability (fraction of stream bytes received when field first parsed):");
-  for (const { field, availableAtByteFraction } of result.fieldAvailability) {
-    console.log(`  ${field.padEnd(18)} ${fmt(100 * availableAtByteFraction)}%`);
+  console.log("field availability (fraction of stream bytes received):");
+  console.log(`  ${"field".padEnd(18)} ${"first parsed".padStart(12)} ${"carries a value".padStart(15)}`);
+  for (const { field, availableAtByteFraction, nonEmptyAtByteFraction } of result.fieldAvailability) {
+    const nonEmpty =
+      nonEmptyAtByteFraction === null ? "never" : `${fmt(100 * nonEmptyAtByteFraction)}%`;
+    console.log(
+      `  ${field.padEnd(18)} ${`${fmt(100 * availableAtByteFraction)}%`.padStart(12)} ` +
+        `${nonEmpty.padStart(15)}`,
+    );
   }
   console.log("  waiting for complete JSON = 100.0% for every field");
   console.log("");

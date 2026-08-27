@@ -16,6 +16,14 @@ export interface FieldAvailability {
   field: string;
   /** Fraction of total stream bytes received when the field first parsed. */
   availableAtByteFraction: number;
+  /**
+   * Fraction received when the field's value first carried anything — a
+   * non-empty string, a container with at least one entry, or any scalar.
+   * A container-valued field parses as `{}`/`[]` before its contents arrive,
+   * so this is strictly later than `availableAtByteFraction` for those.
+   * `null` if the field never carried anything in this stream.
+   */
+  nonEmptyAtByteFraction: number | null;
 }
 
 export interface PipelineResult {
@@ -40,6 +48,7 @@ export async function runPipeline(
   const events: SseEvent[] = [];
   const argSnapshots: PartialResult[] = [];
   const firstSeenAtBytes = new Map<string, number>();
+  const firstNonEmptyAtBytes = new Map<string, number>();
 
   let text = "";
   let toolName: string | null = null;
@@ -68,8 +77,11 @@ export async function runPipeline(
         const snapshot = parsePartialJson(argsText);
         argSnapshots.push(snapshot);
         if (snapshot.status !== "unparseable" && isObject(snapshot.value)) {
-          for (const key of Object.keys(snapshot.value)) {
+          for (const [key, value] of Object.entries(snapshot.value)) {
             if (!firstSeenAtBytes.has(key)) firstSeenAtBytes.set(key, byteCount);
+            if (!firstNonEmptyAtBytes.has(key) && carriesValue(value)) {
+              firstNonEmptyAtBytes.set(key, byteCount);
+            }
           }
         }
         break;
@@ -88,10 +100,14 @@ export async function runPipeline(
 
   const totalMs = performance.now() - startedAt;
   const finalArgs = argsText === "" ? null : parsePartialJson(argsText);
-  const fieldAvailability = [...firstSeenAtBytes.entries()].map(([field, bytes]) => ({
-    field,
-    availableAtByteFraction: bytes / totalBytes,
-  }));
+  const fieldAvailability = [...firstSeenAtBytes.entries()].map(([field, bytes]) => {
+    const nonEmptyBytes = firstNonEmptyAtBytes.get(field);
+    return {
+      field,
+      availableAtByteFraction: bytes / totalBytes,
+      nonEmptyAtByteFraction: nonEmptyBytes === undefined ? null : nonEmptyBytes / totalBytes,
+    };
+  });
 
   return {
     text,
@@ -109,4 +125,17 @@ export async function runPipeline(
 
 function isObject(value: JsonValue): value is { [key: string]: JsonValue } {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether a partial value holds anything a consumer could act on. An empty
+ * string, object or array is what a field looks like before its content has
+ * started arriving; scalars are whole the instant they parse (their digits
+ * may still change, which is a separate caveat).
+ */
+function carriesValue(value: JsonValue): boolean {
+  if (typeof value === "string") return value.length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (isObject(value)) return Object.keys(value).length > 0;
+  return true;
 }
