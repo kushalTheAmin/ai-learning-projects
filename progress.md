@@ -9,6 +9,7 @@ OPEN THREADS for the questions worth answering next.
 
 | project | date | language | mechanism |
 |---|---|---|---|
+| 07-near-duplicates | 2026-08-27 | python | word n-gram shingling (nfkc/casefold normalization) + exact jaccard ground truth over all pairs + minhash signatures (seeded affine hash family mod 2^61-1, prefix-truncatable so one k=128 pass serves the whole accuracy sweep) + banded lsh with the 1-(1-s^r)^b s-curve + 64-bit simhash with hamming sweep + seeded mutation corpus (typo/drop/shuffle/truncate/noise, provenance ground truth); measured — dup-pair estimator mae 0.114 at k=8 to 0.031 at k=128 (~1/sqrt k), tuned banding b=64 r=2 recovers all 360 dup pairs exactly at 3.5% of brute-force comparisons, mistuned b=32 r=4 (s-curve 0.383 above the 0.280 dup floor) silently loses 31 pairs concentrated in mutant-mutant (0.879) and typo (0.917) recall, simhash best f1 0.942 vs pipeline 1.000 because the dup/non-dup hamming tails overlap (max dup distance past min non-dup 19) |
 | 06-rate-limiting | 2026-08-27 | typescript | virtual-time clock (deterministic timer ordering by (time, seq), deadlock detection, run-until-settled driver) + continuous-refill token bucket shared by server admission and client pacing + backoff policies (fixed, capped exponential, full/equal/decorrelated jitter per the aws formulations) + bounded retry loop with optional retry-after compliance + simulated api with seeded latency and transient 503s; measured on a 40-client x 5-request herd against 20 req/s — no-jitter retries collide 20-wide at the same instant vs 1 jittered, but full jitter's peak-window load is higher (104 vs 61 per 100ms, mean delay is half), fixed-100ms burns 15.32 attempts/success and still fails 56.5%, retry-after makespan 9.47s vs 9.0s ideal, client pacing 1.11 att/ok with every leftover 429 downstream of 503 retries that bypass the pacing bucket |
 | 05-token-streaming | 2026-08-26 | typescript | incremental sse parser over raw bytes (whatwg subset: lf/crlf/bare-cr incl. cr on a chunk boundary, streaming utf-8 decode, multi-line data, last-event-id, dispatch only on non-empty data) + partial-json prefix parser (single left-to-right scan: container stack, in-progress token, safe-index truncation; unambiguous completion — close string, tru->true, trim 12. to 12 — else drop the dangling piece) + bounded async queue whose await-push blocks when full, with high-water/stall instrumentation; measured — first text at 2.5% of a buffering client's wait, tool-arg fields readable at 44-89% of stream bytes vs 100% waiting for the closing brace, bounded(8) queue holds high-water at 8 chunks vs 419 unbounded at identical wall time, 300/300 seeded byte-level chunkings parse identically |
 | 04-bpe-tokenizer | 2026-08-25 | python | byte-level bpe from scratch: pair counting weighted by pretoken piece frequency, deterministic lexicographic tie-break, rank-ordered merge application, byte fallback, replacement-char-safe decode; merge-prefix truncation lets one training serve a whole vocab sweep; measured — vocab 256→1246 cuts heldout prose 3106→1058 tokens (2.9x cost), domain transfer with a vocab-matched control (prose-trained 1.49 vs mixed-trained 2.56 bytes/token on code at equal vocab — the domain, not the slots), script cost (cjk 9.0x english tokens/char, zero merges learned), baselines at matched vocab (word tokenizer 20.3% oov on heldout prose, char tokenizer misses 277 chars, byte-level oov is structurally 0%) |
@@ -161,6 +162,13 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - bounded retry loop with retry-after compliance and hard failure after max retries (06, typescript)
 - client-side pacing limiter: token bucket whose acquire waits instead of failing (06, typescript)
 - retry-collision metric: max retries arriving at the same virtual instant (06, typescript)
+- word n-gram shingling with nfkc/casefold normalization and short-text single-shingle fallback (07)
+- exact jaccard similarity over shingle sets, empty-empty defined as 1.0 (07)
+- minhash signatures: seeded affine hashes mod the mersenne prime 2^61-1, prefix-truncatable, empty-set sentinel (07)
+- banded lsh candidate generation with collision s-curve 1-(1-s^r)^b and halfway-threshold placement (07)
+- 64-bit simhash fingerprint with per-bit shingle voting + hamming distance (07)
+- seeded document mutation family (typos, word drops, sentence shuffle, truncation, case/whitespace noise) with provenance-based duplicate labels (07)
+- pair-level precision/recall/f1 against labeled duplicate pairs (07)
 
 ## OPEN THREADS
 
@@ -191,6 +199,12 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - 06: 503 retries bypass the pacing bucket by design and cause every leftover 429 — routing retries through the pacer (and measuring the makespan cost of that fairness) is a one-line change with a real trade-off attached
 - 06: the virtual clock fires timers one at a time with a full continuation flush between — at what simulated scale does that become the bottleneck, and what does batching same-instant timers buy?
 - 06: the discarded 06-retry-backoff twin measured two failure shapes this project doesnt — outage recovery against retry-after hints (exact vs jittered) and retry pressure on a dead service where every client must give up — worth re-measuring on 06's clock and server
+
+- 07: the s-curve was placed knowing the duplicate floor (0.280), which real pipelines never know — what does adaptive band/row selection from sampled candidate similarities look like?
+- 07: multi-probe lsh claims recall without more tables — how much of the mistuned banding's 0.086 recall gap does probing buy back, at what probe cost?
+- 07: simhash used unit weights per shingle; the original paper weights by importance — does idf weighting pull the overlapping dup/non-dup hamming tails apart enough to close the f1 gap?
+- 07: band buckets are exact tuples in dicts — at scale the tables are the memory problem, and hot buckets from boilerplate shingles blow up candidate counts; bucket-size distributions are unmeasured here
+- 07: exact-jaccard verification reuses shingle sets already in memory — in a store where fetching originals costs io, when is a k=512 signature verdict cheaper than the fetch, and at what false-verdict rate?
 
 ## BLOCKED
 
