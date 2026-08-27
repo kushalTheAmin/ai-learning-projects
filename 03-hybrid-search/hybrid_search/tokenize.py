@@ -14,7 +14,10 @@ STOPWORDS = frozenset(
     will with you your""".split()
 )
 
-_DOUBLE_CONSONANT_RE = re.compile(r"[bcdfghjklmnpqrstvz]$")
+# l, s and z are excluded on purpose (the same exclusion porter's step 1b
+# makes): a word ending in ll/ss/zz carries the doubling itself, so undoubling
+# it would split "kill" from "killed" and "install" from "installed".
+_DOUBLE_CONSONANT_RE = re.compile(r"[bcdfghjkmnpqrtv]$")
 
 
 def _undouble(word: str) -> str:

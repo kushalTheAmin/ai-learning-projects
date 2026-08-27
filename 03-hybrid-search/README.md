@@ -36,14 +36,14 @@ hybrid (rrf)                 0.838       0.950     0.899
 
 PARAPHRASE ONLY (20)      recall@1    recall@5    mrr@10
 bm25 (lexical)               0.625       0.900     0.765
-dense (lsa)                  0.625       0.950     0.794
+dense (lsa)                  0.625       0.950     0.793
 hybrid (rrf)                 0.675       0.900     0.799
 ```
 
 mrr is cut off at rank 10, same as 02 — every ranking here covers all 100 docs, so without a cutoff nothing is ever a miss and the metric cant say "didnt find it". bm25s worst query sits at rank 12 and was booking 0.083 for it
 
 - keyword queries: both sides go 20/20 at rank 1. more on why thats interesting below
-- paraphrase queries: bm25 gets trapped by surface-word collisions — "check who is logged in without a trip to the database" lands on the connection-pooling doc (database! trip!) and doesnt reach the JWT doc until rank 12, past the cutoff, so it scores zero — dense has it at 8. dense wins the category on mrr@10 and recall@5
+- paraphrase queries: bm25 gets trapped by surface-word collisions — "check who is logged in without a trip to the database" lands on the connection-pooling doc (database! trip!) and doesnt reach the JWT doc until rank 12, past the cutoff, so it scores zero — dense has it at 9. dense wins the category on mrr@10 and recall@5
 - hybrid rrf has the best mrr@10 and recall@1 overall — it recovers several of bm25s paraphrase misses without giving up the keyword wins
 - the alpha sweep prints mrr@10 at every blend from pure-bm25 to pure-dense. best value on this set is 0.2, but with 40 queries thats reading tea leaves — the sweep is there to show the tradeoff curve exists, not to pick a production constant
 
@@ -59,6 +59,11 @@ i expected dense to stumble on exact identifiers — thats the standard story fo
 
 ## fixes
 
+- 2026-08-27 — the stemmer undoubled ll/ss/zz, so "killed" became "kil" while
+  "kill" stayed "kill" — a word stopped matching its own inflections, same for
+  install/installed and call/calling. l, s and z are excluded from the undouble
+  now, the exclusion porter's step 1b makes. paraphrase dense mrr 0.794 → 0.793
+  (the jwt doc moves rank 8 → 9), every other headline number unchanged
 - 2026-08-26 — mrr had no rank cutoff while 02 reports mrr@10, so the same
   metric name meant two things across the repo — and since rankings here cover
   all 100 docs, a query bm25 only answered at rank 12 still scored 0.083

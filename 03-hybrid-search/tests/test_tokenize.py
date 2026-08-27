@@ -20,6 +20,21 @@ def test_undoubles_after_suffix_strip():
     assert stem("running") == "run"
 
 
+def test_does_not_undouble_ll_ss_zz():
+    # the doubled letter belongs to the base word, not to the stripped
+    # suffix, so undoubling it splits a word from its own inflections
+    assert stem("kill") == stem("killed") == stem("killing")
+    assert stem("install") == stem("installed") == stem("installs")
+    assert stem("call") == stem("calling") == stem("calls")
+    assert stem("pass") == stem("passed") == stem("passing")
+    assert stem("fizz") == stem("fizzed") == stem("fizzing")
+
+
+def test_inflected_document_term_matches_base_query_term():
+    assert "kill" in tokenize("the process was killed")
+    assert "install" in tokenize("dependencies are installed here")
+
+
 def test_plural_stripping():
     assert stem("queries") == "query"
     assert stem("processes") == stem("process")
