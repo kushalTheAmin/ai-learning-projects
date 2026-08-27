@@ -82,8 +82,7 @@ interface QueueRun {
 async function runQueue(capacity: number, label: string): Promise<QueueRun> {
   const bytes = scriptedSseBytes();
   const boundaries = chunkOffsets(bytes.length, SEED, 24);
-  const queue = new AsyncQueue<Uint8Array>(capacity);
-  const chunkSize = 24;
+  const queue = new AsyncQueue<Uint8Array>(capacity, (chunk) => chunk.byteLength);
 
   const started = performance.now();
   const producer = (async () => {
@@ -96,12 +95,10 @@ async function runQueue(capacity: number, label: string): Promise<QueueRun> {
     queue.close();
   })();
 
-  let peakBufferedBytes = 0;
   const parser = new SseParser();
   let events = 0;
   const consumer = (async () => {
     for await (const chunk of queue) {
-      peakBufferedBytes = Math.max(peakBufferedBytes, queue.size * chunkSize);
       events += parser.feed(chunk).length;
       // Slow consumer: pretend each chunk costs a millisecond to render.
       await new Promise((resolve) => setTimeout(resolve, 1));
@@ -115,7 +112,7 @@ async function runQueue(capacity: number, label: string): Promise<QueueRun> {
     highWaterMark: queue.stats.highWaterMark,
     stallMs: queue.stats.totalProducerStallMs,
     wallMs: performance.now() - started,
-    peakBufferedBytes,
+    peakBufferedBytes: queue.stats.sizeHighWaterMark,
   };
 }
 

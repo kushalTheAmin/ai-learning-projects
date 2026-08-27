@@ -46,18 +46,19 @@ that, from scratch, and measures each one.
 
 ```
 npm ci
-npm test        # 52 tests
+npm test        # 55 tests
 npm start       # the four measurements below
 npm run typecheck
 ```
 
 ## Numbers (seed 20260826, 5185-byte stream in 420 chunks of 1–24 bytes)
 
-**1. Streaming vs buffering.** First text is visible 23ms into a 907ms
+**1. Streaming vs buffering.** First text is visible ~23ms into a ~930ms
 stream — a streaming client shows something at ~2.5% of the wait a
-buffer-the-whole-response client pays. The reassembled text and tool
-arguments are byte-identical to the fixture, so the early output costs no
-correctness.
+buffer-the-whole-response client pays. Both figures are wall clock over the
+simulated 2ms inter-chunk delay, so they move a few percent run to run. The
+reassembled text and tool arguments are byte-identical to the fixture, so the
+early output costs no correctness.
 
 **2. Partial JSON on streamed tool arguments.** All 35 argument fragments
 yield a usable snapshot (35/35). Field availability, as a fraction of total
@@ -81,13 +82,17 @@ consumer (1ms per chunk):
 
 | queue | buffer high-water | producer stalled | wall time |
 |---|---|---|---|
-| unbounded | 419 chunks (~10KB) | 0ms | 470ms |
-| bounded(8) | 8 chunks (~192B) | 458ms | 470ms |
+| unbounded | 419 chunks (5169 bytes) | ~0ms | ~490ms |
+| bounded(8) | 8 chunks (149 bytes) | ~480ms | ~490ms |
+
+The chunk and byte columns are exact and reproduce every run; the two
+millisecond columns are wall clock on the machine that ran it and move a few
+percent run to run.
 
 Wall time is identical because the consumer is the bottleneck either way.
 The bounded queue converts "buffer the entire backlog" into "make the
-producer wait", holding memory flat at 8 chunks instead of 419 — which is
-the difference between O(1) and O(stream) memory. 10KB doesn't hurt anyone;
+producer wait", holding memory flat at 149 bytes instead of 5169 — which is
+the difference between O(1) and O(stream) memory. 5KB doesn't hurt anyone;
 the same shape with a 2GB file transfer or ten thousand concurrent streams
 does.
 
@@ -122,6 +127,13 @@ degenerate case and a mixed CRLF/CR/LF wire fuzzed separately in the tests.
   With a bursty consumer, a capacity of 8 would add latency the unbounded
   queue absorbs — the right capacity is a claim about burst shape, and this
   demo doesn't measure that.
+
+## fixes
+
+- 2026-08-27 — the backpressure demo reported buffered memory as chunk count
+  times the *maximum* chunk size, so it claimed 10032 bytes buffered out of a
+  5185-byte stream — nearly twice the whole thing. the queue sums the real
+  byte lengths now. unbounded peak 10032 → 5169 bytes, bounded(8) 192 → 149
 
 ## Open questions
 

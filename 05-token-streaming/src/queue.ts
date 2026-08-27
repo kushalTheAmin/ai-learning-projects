@@ -6,11 +6,14 @@
  * until the consumer frees a slot — so an `await queue.push(x)` producer is
  * paced by the consumer instead of buffering without limit. Consumption is
  * a plain `for await` loop. The queue records its own evidence: buffer
- * high-water mark and total time producers spent blocked.
+ * high-water mark in items, the same in whatever unit an optional `sizeOf`
+ * measures (bytes, for byte chunks), and total time producers spent blocked.
  */
 
 export interface QueueStats {
   highWaterMark: number;
+  /** Peak sum of `sizeOf` over the buffered items; 0 when no `sizeOf` was given. */
+  sizeHighWaterMark: number;
   totalProducerStallMs: number;
   pushes: number;
   stalledPushes: number;
@@ -27,14 +30,19 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
   private readonly pendingPushes: PendingPush<T>[] = [];
   private readonly takers: ((result: IteratorResult<T>) => void)[] = [];
   private closed = false;
+  private bufferedSize = 0;
   readonly stats: QueueStats = {
     highWaterMark: 0,
+    sizeHighWaterMark: 0,
     totalProducerStallMs: 0,
     pushes: 0,
     stalledPushes: 0,
   };
 
-  constructor(private readonly capacity: number = Infinity) {
+  constructor(
+    private readonly capacity: number = Infinity,
+    private readonly sizeOf: (item: T) => number = () => 0,
+  ) {
     if (capacity < 1) throw new RangeError("capacity must be >= 1");
   }
 
@@ -56,8 +64,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
       return Promise.resolve();
     }
     if (this.items.length < this.capacity) {
-      this.items.push(item);
-      this.stats.highWaterMark = Math.max(this.stats.highWaterMark, this.items.length);
+      this.buffer(item);
       return Promise.resolve();
     }
     this.stats.stalledPushes++;
@@ -82,6 +89,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
       next: (): Promise<IteratorResult<T>> => {
         const item = this.items.shift();
         if (item !== undefined) {
+          this.bufferedSize -= this.sizeOf(item);
           this.admitPending();
           return Promise.resolve({ value: item, done: false });
         }
@@ -101,10 +109,17 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
   private admitPending(): void {
     const pending = this.pendingPushes.shift();
     if (pending !== undefined) {
-      this.items.push(pending.item);
-      this.stats.highWaterMark = Math.max(this.stats.highWaterMark, this.items.length);
+      this.buffer(pending.item);
       this.settlePending(pending);
     }
+  }
+
+  /** Take an item into the buffer and record both high-water marks. */
+  private buffer(item: T): void {
+    this.items.push(item);
+    this.bufferedSize += this.sizeOf(item);
+    this.stats.highWaterMark = Math.max(this.stats.highWaterMark, this.items.length);
+    this.stats.sizeHighWaterMark = Math.max(this.stats.sizeHighWaterMark, this.bufferedSize);
   }
 
   private settlePending(pending: PendingPush<T>): void {

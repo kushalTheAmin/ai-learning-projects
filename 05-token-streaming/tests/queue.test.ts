@@ -105,4 +105,40 @@ describe("AsyncQueue", () => {
     const queue = new AsyncQueue<number | undefined>(1);
     await expect(queue.push(undefined)).rejects.toThrow(TypeError);
   });
+
+  it("measures buffered size from the actual items, not count times the largest one", async () => {
+    // Sizes vary the way network chunks do; the answer is their sum, not
+    // 7 * 24. Counting by the biggest possible chunk nearly doubles it here.
+    const sizes = [1, 24, 2, 24, 3, 24, 1];
+    const queue = new AsyncQueue<Uint8Array>(Infinity, (chunk) => chunk.byteLength);
+    for (const size of sizes) await queue.push(new Uint8Array(size));
+    queue.close();
+    expect(queue.stats.highWaterMark).toBe(sizes.length);
+    expect(queue.stats.sizeHighWaterMark).toBe(79);
+    expect(await drain(queue)).toHaveLength(sizes.length);
+  });
+
+  it("tracks buffered size down as the consumer drains and back up as pending items land", async () => {
+    const sizes = [10, 1, 20, 1, 30];
+    const queue = new AsyncQueue<Uint8Array>(2, (chunk) => chunk.byteLength);
+    const producer = (async () => {
+      for (const size of sizes) await queue.push(new Uint8Array(size));
+      queue.close();
+    })();
+    const seen: number[] = [];
+    for await (const chunk of queue) {
+      seen.push(chunk.byteLength);
+      await tick();
+    }
+    await producer;
+    expect(seen).toEqual(sizes);
+    // capacity 2, so the buffer never holds more than the largest adjacent pair
+    expect(queue.stats.sizeHighWaterMark).toBe(31);
+  });
+
+  it("reports zero buffered size when no size function is given", async () => {
+    const queue = new AsyncQueue<number>(4);
+    await queue.push(1);
+    expect(queue.stats.sizeHighWaterMark).toBe(0);
+  });
 });
