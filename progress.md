@@ -27,6 +27,10 @@ code actually has, and it adds the client-side pacing comparison. The
 06-retry-backoff twin was discarded, not merged, to keep one implementation
 of the mechanism per language; its extra scenarios (outage recovery,
 dead-service give-up) live on as an open thread.
+Cleanup caveat: deleting the nine stale remote claude/* branches was
+attempted and denied (403 on ref deletion; write access here is limited to
+fast-forward pushes). They are all now either fully merged or superseded by
+main and safe to delete by hand from the github branches page.
 
 ## FINDINGS
 
