@@ -67,6 +67,20 @@ class TestBenchmarkOutput:
         # Still true with the vocab-size advantage removed.
         assert mixed_matched > prose_trained
 
+    def test_matched_vocab_states_the_trade_in_both_directions(self, output):
+        # The matched column is the only controlled comparison, and it has two
+        # sides: adding code to training buys code tokens and costs prose
+        # tokens out of the same fixed vocab budget. Reading the uncontrolled
+        # mixed@full column instead says prose is unharmed, which is the
+        # vocab-size advantage talking. The run has to state both sides.
+        section = section_of(output, "domain transfer")
+        verdict = re.search(r"cuts code tokens ([\d.]+)% and costs prose ([\d.]+)%",
+                            section)
+        assert verdict, "domain transfer must report the matched-vocab trade"
+        code_cut, prose_cost = map(float, verdict.groups())
+        assert code_cut > 0
+        assert prose_cost > 0
+
     def test_cjk_costs_more_tokens_per_char_than_english(self, output):
         section = section_of(output, "script cost")
 

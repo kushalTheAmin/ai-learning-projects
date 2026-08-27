@@ -78,12 +78,22 @@ prose only vs prose+code (bytes per token, higher = cheaper):
     code         1.49         2.70         2.56
  unicode         1.23         1.24         1.23
 ```
+```
+at a matched 1246 vocab, adding code to training cuts code tokens 41.8% and costs prose 4.9% — one budget, two domains, already crowding
+```
 
 the prose-only tokenizer nearly halves its efficiency on code — it has never
 seen `self.` or `return` often enough to merge them. the third column is the
 honest control: the mixed tokenizer truncated to the same 1246 vocab still
 hits 2.56 on code, so the win is the training domain, not the extra vocab
-slots. in cost terms, from the run:
+slots.
+
+that control cuts both ways and its worth saying out loud — read the middle
+column and mixed training looks free, 2.98 on prose against 2.94. it isnt.
+that column has 413 extra vocab slots paying for both domains at once. hold
+the budget fixed and prose goes 2.94 → 2.80, 4.9% more tokens, because every
+slot a `self.` merge takes is a slot some prose merge doesnt get. two domains
+is already enough to see it. in cost terms, from the run:
 
 ```
 1 MB of code through prose-trained bpe: ~669,811 tokens = $2.01
@@ -139,6 +149,14 @@ per-line granularity flattens whats inside the line.
 - merge exhaustion: on a corpus this small the vocab budget is aspirational.
   both trainings stopped early and the run says so out loud.
 
+## fixes
+
+- 2026-08-27 — the open questions said mixed training won on code "without
+  hurting prose", read off the mixed@1659 column the readme itself calls
+  confounded. the honest control says the opposite. the run now prints the
+  matched-vocab trade in both directions and the readme quotes it — prose
+  costs 4.9% to buy 41.8% on code
+
 ## open questions
 
 - how far are these learned merges from a production tokenizers on identical
@@ -149,9 +167,9 @@ per-line granularity flattens whats inside the line.
 - at what corpus size does the naive recount trainer actually fall over, and
   what does the incremental-update trainer cost to build? same shape as 02s
   inverted-index question
-- mixed-domain training won on code without hurting prose here — does that
-  hold as domains pile up, or does a fixed vocab budget eventually make
-  domains crowd each other out?
+- crowding is already measurable at two domains — 4.9% on prose to buy 41.8%
+  on code. what does the curve look like as domains pile up, and is there a
+  budget past which adding a domain stops paying for itself at all?
 - per-script accounting finer than per-line — the emoji row is diluted by the
   english around it, and a codepoint-class breakdown would say what each
   script actually costs

@@ -83,6 +83,16 @@ def main():
               f"{bytes_per_token(text, row['mixed']):>12.2f} "
               f"{bytes_per_token(text, row['matched']):>12.2f}")
 
+    # The matched column is the only controlled comparison here, and it cuts
+    # both ways: at one fixed vocab budget, the slots code merges take are
+    # slots prose merges do not get. The mixed@full column hides that, because
+    # its extra slots pay for both domains at once.
+    code_cut = 1 - domain_tokens["code"]["matched"] / domain_tokens["code"]["prose"]
+    prose_cost = domain_tokens["prose"]["matched"] / domain_tokens["prose"]["prose"] - 1
+    print(f"at a matched {mixed_matched.vocab_size} vocab, adding code to training "
+          f"cuts code tokens {code_cut * 100:.1f}% and costs prose "
+          f"{prose_cost * 100:.1f}% — one budget, two domains, already crowding")
+
     print("\n=== script cost (mixed-trained, tokens per character) ===")
     print(f"{'text':>18} {'tokens/char':>12}")
     prose_tpc = tokens_per_char(heldout["prose"], domain_tokens["prose"]["mixed"])
