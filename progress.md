@@ -43,6 +43,25 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [high] 05 — the field-availability table counts a field as available the moment
+  its value *starts*, not when it carries anything. `query` is first seen at
+  4.6% of the argument json as `""` and `filters` at 33.3% as `{}` — both empty.
+  the readme turns that into "a UI can show the query being searched, or a
+  dispatcher can start validating it, at 44% of the stream", and the root readme
+  into "partial parsing makes tool-call fields readable at 44% of the stream" —
+  neither is true of an empty string. `top_k` (5) and `include_snippets` (true)
+  are genuinely final when first seen, so the metric is right for scalars and
+  wrong for the two container-valued fields it leads with. the design notes do
+  disclose the mechanism ("a key doesnt exist until its value has started"), so
+  the machinery is honest and the headline drawn from it is not. a first-
+  non-empty-value column next to the first-seen one would settle it.
+  found 2026-08-27
+- [low] 05 — the sse parser strips a byte order mark twice: `TextDecoder("utf-8")`
+  already removes a leading bom (ignoreBOM defaults false), and `processLine`
+  then strips another from the first line, so a stream opening with two boms
+  loses both where the spec keeps the second. `test_strips_a_leading_bom` passes
+  either way because it only ever sends one. the second strip is dead on every
+  real stream. found 2026-08-27
 - [medium] 03 — `stem` lets the plural strip fall through into the -ed strip, so
   "exceeds" loses its s to become "exceed" and then loses "ed" to become "exce",
   while "exceeded" stops at "exceed". both words are in dk-06, so the doc
@@ -78,6 +97,18 @@ Fixed items stay listed with their fix date so the history reads in one place.
   number moves (the corpus is english) and `test_unicode_text_survives` pins the
   behavior as if it were wanted — 04 measures the same cost honestly, 02 doesnt
   mention it. found 2026-08-26
+- [fixed 2026-08-27] 05 — the backpressure demo derived peak buffered memory as
+  `queue.size * 24`, where 24 is the *maximum* chunk size rather than the size
+  of the chunks actually held. chunk sizes are uniform in 1..24, so the figure
+  came out at nearly twice the truth and the demo printed 10032 bytes buffered
+  out of a 5185-byte stream — more than the whole stream, which is the tell.
+  the readme repeated it as "419 chunks (~10KB)" and reasoned "10KB doesnt hurt
+  anyone" off it. `AsyncQueue` takes an optional `sizeOf` now and keeps a byte
+  high-water mark from the real item sizes; the demo reads that instead of
+  estimating. unbounded peak 10032 → 5169 bytes, bounded(8) 192 → 149. chunk
+  counts (419 / 8), stall and wall times unchanged, and the O(1)-vs-O(stream)
+  conclusion is unchanged — only the size of the number backing it. no other
+  project buffers byte chunks, so nothing to port. found and fixed 2026-08-27
 - [fixed 2026-08-27] 04 — the open questions claimed mixed-domain training "won
   on code without hurting prose", but that reads the mixed@1659 column the
   readme itself calls confounded (413 extra vocab slots). the matched-vocab
@@ -131,6 +162,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 05-token-streaming | 2026-08-27 |
 | 03-hybrid-search | 2026-08-27 |
 | 04-bpe-tokenizer | 2026-08-27 |
 | 02-retrieval-eval | 2026-08-26 |
@@ -157,6 +189,25 @@ deterministic across PYTHONHASHSEED, and all 16 readme numbers match
 partial-utf8 decode, vocab-below-256 rejected). the finding was a claim the
 run's own control column already refuted — the domain-crowding takeaway, now
 fixed.
+
+05 came back clean on both parsers and dirty on one measurement. the partial-
+json scanner survived a differential fuzz over every prefix of 400 generated
+documents (nested objects/arrays, escapes, unicode, emoji, exponents): no
+prefix of a valid document was ever rejected, every snapshot was a genuine
+prefix of the final value (keys only from the real document and never
+disappearing, settled keys never changing, strings always prefixes), and every
+full document came back `complete` except bare top-level numbers and literals,
+which are `partial` on purpose. the sse parser is self-consistent under 300
+random chunkings plus byte-by-byte, handles cr-on-a-boundary, and matches the
+whatwg model on multi-line data, one-space stripping, empty-data suppression,
+nul-in-id and non-numeric retry; the one divergence is a double bom strip,
+listed low. the queue is fifo, honours capacity, and wakes waiting consumers on
+close. the defect was in what the backpressure demo *reported*: peak buffered
+memory computed as chunk count times the largest possible chunk, fixed above.
+the field-availability metric under measurement 2 is the other side of that
+coin and is now the open high finding — the timing columns, which are wall
+clock and move a few percent per run, are labelled as such in the readme now
+rather than quoted as fixed measurements.
 
 03 came back clean on retrieval and clean on measurement: bm25 matches the
 lucene formula term by term and dedupes repeated query terms like 02, the lsa
@@ -205,7 +256,7 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - token cost accounting at a parameterized price per million tokens (04)
 - incremental sse parsing over byte chunks: line reassembly across boundaries, streaming utf-8 decode, event field state machine (05, typescript)
 - partial-json prefix parsing: container-stack scan, safe-index truncation, unambiguous token completion (05, typescript)
-- bounded async queue with promise-blocking push backpressure and high-water/stall stats (05, typescript)
+- bounded async queue with promise-blocking push backpressure and high-water/stall stats (05, typescript; capacity is in items, and an optional `sizeOf` adds a second high-water mark in the item's own unit — bytes for byte chunks — so buffered memory is summed, never estimated from a count)
 - seeded prng (mulberry32) byte-level chunk-boundary fuzzing (05, typescript; 06 imports the prng from 05's folder rather than duplicating it)
 - field-availability metric: fraction of stream bytes received when a field first parses (05, typescript)
 - virtual-time clock: deterministic (time, schedule-order) timer firing, deadlock detection, run-until-settled driver (06, typescript)
