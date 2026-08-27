@@ -1,0 +1,10 @@
+[
+  { "title": "retry backoff notes", "body": "exponential backoff with jitter avoids thundering herds" },
+  { "title": "token bucket", "body": "continuous refill admission control" },
+  { "title": "naïve café reading list", "body": "espresso brewing and unicode normalization" },
+  { "title": "zod validation patterns", "body": "strict objects reject extra fields" },
+  { "title": "streaming parsers", "body": "partial json prefix parsing for tool args" },
+  { "title": "agent loop budgets", "body": "hard step limits stop runaway retry loops" },
+  { "title": "minhash shingles", "body": "near duplicate detection at scale" },
+  { "title": "virtual clocks", "body": "deterministic timers for retry tests" }
+]

@@ -1,0 +1,328 @@
+[
+  {
+    "id": "calc-add",
+    "prompt": "add 19 and 23",
+    "intents": [
+      { "call": { "name": "calc", "args": { "op": "add", "a": 19, "b": 23 } }, "flawKind": "none", "correctsAfter": 0 }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "calc-chain",
+    "prompt": "multiply 6 by 7, then add 8 to that",
+    "intents": [
+      { "call": { "name": "calc", "args": { "op": "mul", "a": 6, "b": 7 } }, "flawKind": "none", "correctsAfter": 0 },
+      { "call": { "name": "calc", "args": { "op": "add", "a": 42, "b": 8 } }, "flawKind": "none", "correctsAfter": 0 }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 50",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "lookup-tokyo",
+    "prompt": "what is the population of Tokyo?",
+    "intents": [
+      { "call": { "name": "lookup_city", "args": { "city": "Tokyo" } }, "flawKind": "none", "correctsAfter": 0 }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 37115035",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "search-retry",
+    "prompt": "which notes mention retry?",
+    "intents": [
+      { "call": { "name": "search_notes", "args": { "query": "retry" } }, "flawKind": "none", "correctsAfter": 0 }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: retry backoff notes, agent loop budgets, virtual clocks",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "search-unicode",
+    "prompt": "find the café note",
+    "intents": [
+      { "call": { "name": "search_notes", "args": { "query": "café" } }, "flawKind": "none", "correctsAfter": 0 }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: naïve café reading list",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "fetch-clean",
+    "prompt": "fetch the status page",
+    "intents": [
+      { "call": { "name": "fetch_page", "args": { "url": "https://example.com/status" } }, "flawKind": "none", "correctsAfter": 0 }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: fetched https://example.com/status status=200 attempts=1",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "no-tools",
+    "prompt": "say hello",
+    "intents": [],
+    "finalTemplate": "no tools needed for this one",
+    "expectedAnswer": "no tools needed for this one",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "dup-calls",
+    "prompt": "add 2 and 2, twice, to be sure",
+    "intents": [
+      { "call": { "name": "calc", "args": { "op": "add", "a": 2, "b": 2 } }, "flawKind": "none", "correctsAfter": 0 },
+      { "call": { "name": "calc", "args": { "op": "add", "a": 2, "b": 2 } }, "flawKind": "none", "correctsAfter": 0 }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 4",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "fetch-flaky-2",
+    "prompt": "fetch the flaky page",
+    "intents": [
+      { "call": { "name": "fetch_page", "args": { "url": "https://example.com/flaky" } }, "flawKind": "none", "correctsAfter": 0 }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: fetched https://example.com/flaky status=200 attempts=3",
+    "fetchTransientFailures": 2
+  },
+  {
+    "id": "fetch-flaky-4",
+    "prompt": "fetch the very flaky page",
+    "intents": [
+      { "call": { "name": "fetch_page", "args": { "url": "https://example.com/very-flaky" } }, "flawKind": "none", "correctsAfter": 0 }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: fetched https://example.com/very-flaky status=200 attempts=5",
+    "fetchTransientFailures": 4
+  },
+  {
+    "id": "wrong-type-calc",
+    "prompt": "add 19 and 23",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "add", "a": 19, "b": 23 } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "calc", "args": { "op": "add", "a": "19", "b": 23 } },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "wrong-type-lookup",
+    "prompt": "what is the population of München?",
+    "intents": [
+      {
+        "call": { "name": "lookup_city", "args": { "city": "München" } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "lookup_city", "args": { "city": 1512491 } },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 1512491",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "wrong-type-search-limit",
+    "prompt": "find up to 2 notes about clocks",
+    "intents": [
+      {
+        "call": { "name": "search_notes", "args": { "query": "clock", "limit": 2 } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "search_notes", "args": { "query": "clock", "limit": "2" } },
+        "correctsAfter": 2
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: virtual clocks",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "missing-field-calc",
+    "prompt": "multiply 6 by 9",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "mul", "a": 6, "b": 9 } },
+        "flawKind": "missing-field",
+        "flawedCall": { "name": "calc", "args": { "op": "mul", "a": 6 } },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 54",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "missing-field-lookup",
+    "prompt": "what is the population of São Paulo?",
+    "intents": [
+      {
+        "call": { "name": "lookup_city", "args": { "city": "São Paulo" } },
+        "flawKind": "missing-field",
+        "flawedCall": { "name": "lookup_city", "args": {} },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 22620000",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "missing-field-fetch",
+    "prompt": "fetch the doc page",
+    "intents": [
+      {
+        "call": { "name": "fetch_page", "args": { "url": "https://example.com/doc" } },
+        "flawKind": "missing-field",
+        "flawedCall": { "name": "fetch_page", "args": {} },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: fetched https://example.com/doc status=200 attempts=1",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "extra-field-calc",
+    "prompt": "add 5 and 7",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "add", "a": 5, "b": 7 } },
+        "flawKind": "extra-field",
+        "flawedCall": { "name": "calc", "args": { "op": "add", "a": 5, "b": 7, "precision": 2 } },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 12",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "extra-field-search",
+    "prompt": "find the zod note",
+    "intents": [
+      {
+        "call": { "name": "search_notes", "args": { "query": "zod" } },
+        "flawKind": "extra-field",
+        "flawedCall": { "name": "search_notes", "args": { "query": "zod", "sort": "asc" } },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: zod validation patterns",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "unknown-tool-calculator",
+    "prompt": "subtract 58 from 100",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "sub", "a": 100, "b": 58 } },
+        "flawKind": "unknown-tool",
+        "flawedCall": { "name": "calculator", "args": { "op": "sub", "a": 100, "b": 58 } },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "unknown-tool-web-search",
+    "prompt": "find the minhash note",
+    "intents": [
+      {
+        "call": { "name": "search_notes", "args": { "query": "minhash" } },
+        "flawKind": "unknown-tool",
+        "flawedCall": { "name": "web_search", "args": { "query": "minhash" } },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: minhash shingles",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "stubborn-wrong-type",
+    "prompt": "add 1 and 2",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "add", "a": 1, "b": 2 } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "calc", "args": { "op": "add", "a": "1", "b": 2 } },
+        "correctsAfter": null
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 3",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "stubborn-missing",
+    "prompt": "what is the population of Tokyo?",
+    "intents": [
+      {
+        "call": { "name": "lookup_city", "args": { "city": "Tokyo" } },
+        "flawKind": "missing-field",
+        "flawedCall": { "name": "lookup_city", "args": {} },
+        "correctsAfter": null
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 37115035",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "stubborn-unknown-tool",
+    "prompt": "add 1 and 1",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "add", "a": 1, "b": 1 } },
+        "flawKind": "unknown-tool",
+        "flawedCall": { "name": "get_time", "args": {} },
+        "correctsAfter": null
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 2",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "slow-corrector",
+    "prompt": "divide 84 by 2",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "div", "a": 84, "b": 2 } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "calc", "args": { "op": "div", "a": "84", "b": 2 } },
+        "correctsAfter": 3
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "chain-mid-flaw",
+    "prompt": "find the bucket note, then add 40 and 2",
+    "intents": [
+      { "call": { "name": "search_notes", "args": { "query": "bucket" } }, "flawKind": "none", "correctsAfter": 0 },
+      {
+        "call": { "name": "calc", "args": { "op": "add", "a": 40, "b": 2 } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "calc", "args": { "op": "add", "a": "40", "b": 2 } },
+        "correctsAfter": 1
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  }
+]
