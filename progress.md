@@ -53,6 +53,15 @@ Fixed items stay listed with their fix date so the history reads in one place.
   number moves (the corpus is english) and `test_unicode_text_survives` pins the
   behavior as if it were wanted — 04 measures the same cost honestly, 02 doesnt
   mention it. found 2026-08-26
+- [fixed 2026-08-27] 04 — the open questions claimed mixed-domain training "won
+  on code without hurting prose", but that reads the mixed@1659 column the
+  readme itself calls confounded (413 extra vocab slots). the matched-vocab
+  control says the opposite: held at 1246 vocab, prose goes 2.94 → 2.80
+  bytes/token, 4.9% more tokens, to buy 41.8% fewer on code. crowding is
+  already visible at two domains. run_benchmark now prints the trade in both
+  directions and the readme quotes it. no core algorithm number moved — the
+  three-column table was already correct, only the takeaway drawn from it was
+  wrong. found and fixed 2026-08-27
 - [medium] 01 — `extract_balanced_object` returns only the first brace-balanced
   candidate and never tries a later one, so prose with stray braces before the
   real json ("use {placeholders} like this: {...}") is rejected outright, and a
@@ -84,6 +93,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 04-bpe-tokenizer | 2026-08-27 |
 | 02-retrieval-eval | 2026-08-26 |
 | 01-structured-output | 2026-08-25 |
 
@@ -98,6 +108,16 @@ project went first (02, committed 18:10 UTC).
 reciprocal rank is 1-indexed and recall@k slices k, everything is seeded and
 reruns identically, and all 12 readme numbers match what `main.py` prints today.
 The finding that came out of it was the cross-project one, in 03.
+
+04 came back clean on its algorithm: the from-scratch bpe reproduces an
+independent minbpe-style reference term for term — identical 990 merges on the
+prose corpus, 577 on code, identical encodings on all three heldout files — and
+the trainer/encoder agree, all 4 tricky-string classes round-trip, output is
+deterministic across PYTHONHASHSEED, and all 16 readme numbers match
+`run_benchmark.py`. edge cases hold (empty/whitespace corpora, unseen bytes,
+partial-utf8 decode, vocab-below-256 rejected). the finding was a claim the
+run's own control column already refuted — the domain-crowding takeaway, now
+fixed.
 
 ## MECHANISMS
 
@@ -156,7 +176,7 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - 04: how far are the learned merges from a production tokenizer's on identical text — fertility head to head needs a real pretrained vocab run over this corpus, my 990 merges vs their 100k
 - 04: compression is not quality — a bigger vocab is cheaper per request, but whether it helps or hurts a downstream model is invisible without a model
 - 04: at what corpus size does naive full-recount bpe training fall over, and what does an incremental pair-count trainer buy, measured — same shape as 02's inverted-index thread
-- 04: mixed-domain training won on code without hurting prose — does that hold as domains multiply, or does a fixed vocab budget hit a crowding-out point?
+- 04: crowding is already measurable at two domains (prose 2.94 → 2.80 at matched vocab to buy 41.8% on code, fixed 2026-08-27) — the open shape is the curve as domains multiply, and whether there is a budget past which a new domain stops paying for itself
 - 04: script cost is measured per line and the emoji line is diluted by the english around it — a per-codepoint-class breakdown would price each script honestly
 
 - 05: queue capacity is counted in chunks — a byte-budgeted queue is what a real memory ceiling wants, and chunk sizes varying 1000x would break the chunk-count story
