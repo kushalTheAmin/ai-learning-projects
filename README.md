@@ -22,6 +22,7 @@ behind — those open questions are where the next projects come from.
 
 | # | Project | Concept | One-line takeaway |
 |---|---------|---------|-------------------|
+| 09 | [concurrency](09-concurrency/) | Batching, worker pools, and bounded parallelism over a simulated LLM batch API, on a virtual clock (TypeScript) | Every scaling knob has a sharp knee: client workers past the server's 8-call cap hold throughput at 79.3 req/s while doubling observed latency per doubling of workers (100ms to 793ms p50), batch size 8 captures 90% of the cost amortization batch 32 gets at a third of its latency, and when one unnamed bad item fails a whole 32-item call, bisection isolates it in 11 calls vs 33 one-by-one, an advantage that inverts by 4 bad items because failing halves repay the prompt overhead at every level of the tree. |
 | 08 | [agent-tool-loop](08-agent-tool-loop/) | Agent loop with zod-validated tool calling and hard retry/failure policies, each malformed-arg flaw priced against a clean run (TypeScript) | Validation strictness is a budget knob: failing on the first invalid call completes 10/25 tasks, feeding zod errors back recovers 22/25 at 3x the token spend, and a loop guard that aborts on the 3rd identical invalid call keeps the recovery while cutting 80.9% of the tokens a never-correcting model burns, at the price of killing the one slow corrector plain feedback would have saved. |
 | 07 | [near-duplicates](07-near-duplicates/) | MinHash + LSH banding vs SimHash for near-duplicate detection, measured against exact Jaccard ground truth (Python) | The sketch should narrow the search, not issue the verdict: well-placed banding (b=64 r=2) recovers all 360 labeled duplicate pairs at 3.5% of brute-force comparisons, one step of mistuning (s-curve at 0.383, above the 0.280 duplicate floor) silently drops 31 pairs no verification can recover, and SimHash's 64-bit fingerprint tops out at F1 0.942 because its duplicate/non-duplicate Hamming tails overlap structurally. |
 | 06 | [rate-limiting](06-rate-limiting/) | Exponential backoff and jitter under a simulated thundering herd, on a deterministic virtual clock (TypeScript) | Jitter fixes synchronization, not volume: no-jitter retries collide 20-wide in lockstep while full jitter never exceeds 1, yet full jitter's peak load is *higher* because its mean delay is half; honoring Retry-After finishes closest to the ideal makespan (9.47s vs 9.0s), and client-side pacing cuts attempts-per-success from 2.99 to 1.11 by moving the waiting into your own process. |
@@ -34,5 +35,6 @@ behind — those open questions are where the next projects come from.
 Each project folder is self-contained: `cd` into it and its README tells
 you how to run everything. Projects don't share installed dependencies;
 the one exception to full isolation is that a project may import a tiny
-utility from an earlier one (06 imports 05's seeded PRNG) rather than
-keep a second copy of the same algorithm in the same language.
+utility from an earlier one (06 imports 05's seeded PRNG; 08 and 09
+import 06's virtual clock) rather than keep a second copy of the same
+algorithm in the same language.
