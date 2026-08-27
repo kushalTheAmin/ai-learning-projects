@@ -9,12 +9,24 @@ OPEN THREADS for the questions worth answering next.
 
 | project | date | language | mechanism |
 |---|---|---|---|
+| 06-rate-limiting | 2026-08-27 | typescript | virtual-time clock (deterministic timer ordering by (time, seq), deadlock detection, run-until-settled driver) + continuous-refill token bucket shared by server admission and client pacing + backoff policies (fixed, capped exponential, full/equal/decorrelated jitter per the aws formulations) + bounded retry loop with optional retry-after compliance + simulated api with seeded latency and transient 503s; measured on a 40-client x 5-request herd against 20 req/s — no-jitter retries collide 20-wide at the same instant vs 1 jittered, but full jitter's peak-window load is higher (104 vs 61 per 100ms, mean delay is half), fixed-100ms burns 15.32 attempts/success and still fails 56.5%, retry-after makespan 9.47s vs 9.0s ideal, client pacing 1.11 att/ok with every leftover 429 downstream of 503 retries that bypass the pacing bucket |
 | 05-token-streaming | 2026-08-26 | typescript | incremental sse parser over raw bytes (whatwg subset: lf/crlf/bare-cr incl. cr on a chunk boundary, streaming utf-8 decode, multi-line data, last-event-id, dispatch only on non-empty data) + partial-json prefix parser (single left-to-right scan: container stack, in-progress token, safe-index truncation; unambiguous completion — close string, tru->true, trim 12. to 12 — else drop the dangling piece) + bounded async queue whose await-push blocks when full, with high-water/stall instrumentation; measured — first text at 2.5% of a buffering client's wait, tool-arg fields readable at 44-89% of stream bytes vs 100% waiting for the closing brace, bounded(8) queue holds high-water at 8 chunks vs 419 unbounded at identical wall time, 300/300 seeded byte-level chunkings parse identically |
 | 04-bpe-tokenizer | 2026-08-25 | python | byte-level bpe from scratch: pair counting weighted by pretoken piece frequency, deterministic lexicographic tie-break, rank-ordered merge application, byte fallback, replacement-char-safe decode; merge-prefix truncation lets one training serve a whole vocab sweep; measured — vocab 256→1246 cuts heldout prose 3106→1058 tokens (2.9x cost), domain transfer with a vocab-matched control (prose-trained 1.49 vs mixed-trained 2.56 bytes/token on code at equal vocab — the domain, not the slots), script cost (cjk 9.0x english tokens/char, zero merges learned), baselines at matched vocab (word tokenizer 20.3% oov on heldout prose, char tokenizer misses 277 chars, byte-level oov is structurally 0%) |
 | 02-retrieval-eval, bootstrap extension | 2026-08-25 | python | paired bootstrap over per-query reciprocal ranks (10000 resamples, seeded, stdlib only): 95% percentile confidence intervals on each system's mrr and on paired per-query mrr differences, plus a direction-stability fraction (share of resamples where the gap is <= 0); measured verdict — bm25 vs tf-idf +0.018 [+0.000, +0.048] includes zero, the gap rests on 2 of 38 queries even though bm25 never loses one, while bm25 vs b=0 +0.041 [+0.001, +0.091] excludes zero |
 | 03-hybrid-search | 2026-08-25 | python | okapi bm25 from scratch + lsa dense retrieval (tf-idf → seeded truncated svd) over one shared stemmer/compound-splitting tokenizer; rrf and weighted score fusion with alpha sweep; recall@1/5 + mrr on 100 docs / 40 golden queries split keyword vs paraphrase (paraphrase mrr@10: bm25 0.765, dense 0.794, hybrid rrf 0.799; overall rrf best at 0.899; keyword saturated for both — corpus-fit lsa has no oov failure mode) |
 | 02-retrieval-eval | 2026-08-25 | python | from-scratch okapi bm25 (lucene idf, k1 tf saturation, b length norm) vs sklearn-style tf-idf cosine (raw tf, smooth idf, l2 norm); evaluated with recall@1/recall@5/mrr@10 over a committed 40-doc / 38-query golden dataset, per-query head-to-head by reciprocal rank, plus a b=0 ablation isolating length normalization (mrr 0.917 tf-idf / 0.934 bm25 / 0.893 b=0); dataset includes engineered kitchen-sink distractor docs and deliberate vocabulary-mismatch queries to show where lexical retrieval fails |
 | 01-structured-output | 2026-08-25 | python | layered JSON parse repair (fence strip, balanced-brace extraction, trailing-comma removal, python-literal fallback) + pydantic schema validation with a validation-error-feedback retry loop and hard-failure policy; benchmarked strict vs lenient vs full retry on 30 scripted-failure tickets (20.0% → 60.0% → 96.7%, 44 llm calls vs 30) |
+
+Note on 06: two stranded branches had implemented backoff+jitter twice
+(claude/stoic-albattani-mz3nch, 06-retry-backoff, callback discrete-event sim,
+three scenarios; claude/stoic-albattani-wbddzz, 06-rate-limiting, async
+virtual clock, pacing + retry-after + transient faults in one herd scenario).
+06-rate-limiting was kept and landed: near-equal quality and test count, but
+its clock drives real promise-based retry code, the shape production retry
+code actually has, and it adds the client-side pacing comparison. The
+06-retry-backoff twin was discarded, not merged, to keep one implementation
+of the mechanism per language; its extra scenarios (outage recovery,
+dead-service give-up) live on as an open thread.
 
 ## FINDINGS
 
@@ -104,7 +116,7 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - lsa dense retrieval: tf-idf term-doc matrix → seeded truncated svd (03)
 - reciprocal rank fusion (03)
 - weighted score fusion with min-max normalization and an alpha sweep (03)
-- linearly interpolated percentile (02)
+- linearly interpolated percentile (02; sanctioned typescript port in 06 — same interpolation, pinned by tests to the same known values)
 - percentile bootstrap confidence interval on a mean (02)
 - paired bootstrap over per-query differences with a direction-stability fraction (02)
 - byte-level bpe: weighted pair counting, lexicographic tie-break on frequency ties, rank-ordered merge application, byte fallback (04)
@@ -117,8 +129,14 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - incremental sse parsing over byte chunks: line reassembly across boundaries, streaming utf-8 decode, event field state machine (05, typescript)
 - partial-json prefix parsing: container-stack scan, safe-index truncation, unambiguous token completion (05, typescript)
 - bounded async queue with promise-blocking push backpressure and high-water/stall stats (05, typescript)
-- seeded prng (mulberry32) byte-level chunk-boundary fuzzing (05, typescript)
+- seeded prng (mulberry32) byte-level chunk-boundary fuzzing (05, typescript; 06 imports the prng from 05's folder rather than duplicating it)
 - field-availability metric: fraction of stream bytes received when a field first parses (05, typescript)
+- virtual-time clock: deterministic (time, schedule-order) timer firing, deadlock detection, run-until-settled driver (06, typescript)
+- continuous-refill token bucket: lazy elapsed-time refill, burst cap, exact next-token wait (06, typescript)
+- backoff policies: fixed, capped exponential, full jitter, equal jitter, decorrelated jitter (06, typescript)
+- bounded retry loop with retry-after compliance and hard failure after max retries (06, typescript)
+- client-side pacing limiter: token bucket whose acquire waits instead of failing (06, typescript)
+- retry-collision metric: max retries arriving at the same virtual instant (06, typescript)
 
 ## OPEN THREADS
 
@@ -141,6 +159,14 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - 05: partial-json snapshots recompute from the full accumulated text every fragment, O(n^2) over the stream — a resumable scanner carrying state between fragments is the fix, the crossover size is unmeasured
 - 05: the sse parser buffers an unbounded line if the stream never sends a terminator — needs a cap and a deliberate failure mode
 - 05: the stream is scripted and the chunker is uniform 1..24 bytes — real networks burst; replaying a captured real provider stream (timings included) would make the ttft and availability numbers mean something outside the fixture
+
+- 06: the herd is one-shot at t=0 — a poisson arrival process with a congestion spike in the middle would test whether the strategy ordering survives steady-state traffic
+- 06: full jitter and decorrelated fail 2 and 7 of 200 requests where equal jitter fails 0 — is the delay floor the real variable? a floor sweep (0%, 25%, 50% of exp) at fixed retry budget would isolate it
+- 06: retry-after re-synchronizes clients (collide 12) because the hint is deterministic — does a server-jittered hint keep the makespan win without the collisions?
+- 06: pacing is measured at exactly the server rate — a rate sweep (80%..120% of server rate) would find the throughput/429 knee, and adaptive pacing (aimd on 429s) is the real-world answer when the server rate is unknown
+- 06: 503 retries bypass the pacing bucket by design and cause every leftover 429 — routing retries through the pacer (and measuring the makespan cost of that fairness) is a one-line change with a real trade-off attached
+- 06: the virtual clock fires timers one at a time with a full continuation flush between — at what simulated scale does that become the bottleneck, and what does batching same-instant timers buy?
+- 06: the discarded 06-retry-backoff twin measured two failure shapes this project doesnt — outage recovery against retry-after hints (exact vs jittered) and retry pressure on a dead service where every client must give up — worth re-measuring on 06's clock and server
 
 ## BLOCKED
 
