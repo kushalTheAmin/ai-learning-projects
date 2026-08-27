@@ -22,6 +22,7 @@ behind — those open questions are where the next projects come from.
 
 | # | Project | Concept | One-line takeaway |
 |---|---------|---------|-------------------|
+| 06 | [rate-limiting](06-rate-limiting/) | Exponential backoff and jitter under a simulated thundering herd, on a deterministic virtual clock | Jitter fixes synchronization, not volume — no-jitter retries collide 20-wide in lockstep while full jitter never exceeds 1, yet full jitter's peak load is *higher* because its mean delay is half; honoring Retry-After lands within 5.3% of the ideal makespan, and client-side pacing cuts attempts-per-success from 2.96 to 1.11 by moving the waiting into your own process. |
 | 05 | [token-streaming](05-token-streaming/) | Streaming LLM output in TypeScript — SSE byte parsing, partial JSON for tool arguments, backpressure, all fuzzed at chunk boundaries | The network hands you bytes, not tokens: 300/300 random chunkings parse identically once CR-on-a-boundary and split UTF-8 are handled, partial parsing makes tool-call fields readable at 44% of the stream instead of 100%, and a bounded queue turns O(stream) buffering into O(1) at zero wall-time cost when the consumer is the bottleneck. |
 | 04 | [bpe-tokenizer](04-bpe-tokenizer/) | Byte-level BPE from scratch — vocab size, training domain, and script, each measured against token cost | The tokenizer is a silent price multiplier: a prose-only tokenizer pays 80.7% more for the same code, CJK costs 9x English per character when training never saw it, and byte fallback holds OOV at a structural 0% while a word baseline loses 20.3% of held-out tokens to `<unk>`. |
 | 03 | [hybrid-search](03-hybrid-search/) | BM25 vs dense retrieval (LSA) vs rank fusion, measured with recall@k and MRR | Dense wins paraphrase queries (MRR@10 0.794 vs 0.765), both ace exact identifiers — corpus-fit LSA can't be out-of-vocabulary — and RRF fusion takes the best overall MRR@10 (0.899) at the price of rank-blind averaging. |
@@ -29,4 +30,7 @@ behind — those open questions are where the next projects come from.
 | 01 | [structured-output](01-structured-output/) | Schema-validated LLM output with malformed-output retry | Free string-level repairs took success from 20% to 60%; feedback retries took it to 96.7% at a 47% call overhead — and the two layers should never be confused. |
 
 Each project folder is self-contained: `cd` into it and its README tells
-you how to run everything. No shared dependencies between projects.
+you how to run everything. Projects don't share installed dependencies;
+the one exception to full isolation is that a project may import a tiny
+utility from an earlier one (06 imports 05's seeded PRNG) rather than
+keep a second copy of the same algorithm in the same language.
