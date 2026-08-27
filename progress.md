@@ -15,7 +15,7 @@ OPEN THREADS for the questions worth answering next.
 | 08-agent-tool-loop | 2026-08-27 | typescript | agent loop over zod strict-object tool schemas with hard edges: model-call budget, per-intent validation-feedback cap, loop guard that aborts at the 3rd identical invalid emission (counts invalid calls only, so legitimate duplicate valid calls pass) + scripted reactive model (authored intent lists with per-intent flaws and correction rules, a pure function of the visible history) + clean-twin flaw pricing (same task re-run with flaws stripped, delta per flaw class) + token/cost estimate at ~4 chars/token on full-history replay; imports 06's clock/backoff/retry/percentile and 05's rng, and applies 01's validation-error-feedback idea (python) per tool call inside a multi-step loop; measured — strict 10/25 vs feedback 22/25 vs guarded 21/25 completion, a one-round correction costs +1 model call and 139-218 extra tokens vs the clean twin, 3 stubborn tasks burn 3969 tokens under feedback vs 759 guarded (80.9% saved), and the guard's price is the one slow corrector (corrects after 3 rounds) it kills at the 3rd identical emission |
 | 07-near-duplicates | 2026-08-27 | python | word n-gram shingling (nfkc/casefold normalization) + exact jaccard ground truth over all pairs + minhash signatures (seeded affine hash family mod 2^61-1, prefix-truncatable so one k=128 pass serves the whole accuracy sweep) + banded lsh with the 1-(1-s^r)^b s-curve + 64-bit simhash with hamming sweep + seeded mutation corpus (typo/drop/shuffle/truncate/noise, provenance ground truth); measured — dup-pair estimator mae 0.114 at k=8 to 0.031 at k=128 (~1/sqrt k), tuned banding b=64 r=2 recovers all 360 dup pairs exactly at 3.5% of brute-force comparisons, mistuned b=32 r=4 (s-curve 0.383 above the 0.280 dup floor) silently loses 31 pairs concentrated in mutant-mutant (0.879) and typo (0.917) recall, simhash best f1 0.942 vs pipeline 1.000 because the dup/non-dup hamming tails overlap (max dup distance past min non-dup 19) |
 | 06-rate-limiting | 2026-08-27 | typescript | virtual-time clock (deterministic timer ordering by (time, seq), deadlock detection, run-until-settled driver) + continuous-refill token bucket shared by server admission and client pacing + backoff policies (fixed, capped exponential, full/equal/decorrelated jitter per the aws formulations) + bounded retry loop with optional retry-after compliance + simulated api with seeded latency and transient 503s; measured on a 40-client x 5-request herd against 20 req/s — no-jitter retries collide 20-wide at the same instant vs 1 jittered, but full jitter's peak-window load is higher (104 vs 61 per 100ms, mean delay is half), fixed-100ms burns 15.32 attempts/success and still fails 56.5%, retry-after makespan 9.47s vs 9.0s ideal, client pacing 1.11 att/ok with every leftover 429 downstream of 503 retries that bypass the pacing bucket |
-| 05-token-streaming | 2026-08-26 | typescript | incremental sse parser over raw bytes (whatwg subset: lf/crlf/bare-cr incl. cr on a chunk boundary, streaming utf-8 decode, multi-line data, last-event-id, dispatch only on non-empty data) + partial-json prefix parser (single left-to-right scan: container stack, in-progress token, safe-index truncation; unambiguous completion — close string, tru->true, trim 12. to 12 — else drop the dangling piece) + bounded async queue whose await-push blocks when full, with high-water/stall instrumentation; measured — first text at 2.5% of a buffering client's wait, tool-arg fields readable at 44-89% of stream bytes vs 100% waiting for the closing brace, bounded(8) queue holds high-water at 8 chunks vs 419 unbounded at identical wall time, 300/300 seeded byte-level chunkings parse identically |
+| 05-token-streaming | 2026-08-26 | typescript | incremental sse parser over raw bytes (whatwg subset: lf/crlf/bare-cr incl. cr on a chunk boundary, streaming utf-8 decode, multi-line data, last-event-id, dispatch only on non-empty data) + partial-json prefix parser (single left-to-right scan: container stack, in-progress token, safe-index truncation; unambiguous completion — close string, tru->true, trim 12. to 12 — else drop the dangling piece) + bounded async queue whose await-push blocks when full, with high-water/stall instrumentation; measured — first text at 2.5% of a buffering client's wait, tool-arg fields first parsed at 44-89% of stream bytes vs 100% waiting for the closing brace and first carrying a value at 44-89% too except the one object-valued field, which parses empty at 60.5% and holds a filter at 63.8%, bounded(8) queue holds high-water at 8 chunks vs 419 unbounded at identical wall time, 300/300 seeded byte-level chunkings parse identically |
 | 04-bpe-tokenizer | 2026-08-25 | python | byte-level bpe from scratch: pair counting weighted by pretoken piece frequency, deterministic lexicographic tie-break, rank-ordered merge application, byte fallback, replacement-char-safe decode; merge-prefix truncation lets one training serve a whole vocab sweep; measured — vocab 256→1246 cuts heldout prose 3106→1058 tokens (2.9x cost), domain transfer with a vocab-matched control (prose-trained 1.49 vs mixed-trained 2.56 bytes/token on code at equal vocab — the domain, not the slots), script cost (cjk 9.0x english tokens/char, zero merges learned), baselines at matched vocab (word tokenizer 20.3% oov on heldout prose, char tokenizer misses 277 chars, byte-level oov is structurally 0%) |
 | 02-retrieval-eval, bootstrap extension | 2026-08-25 | python | paired bootstrap over per-query reciprocal ranks (10000 resamples, seeded, stdlib only): 95% percentile confidence intervals on each system's mrr and on paired per-query mrr differences, plus a direction-stability fraction (share of resamples where the gap is <= 0); measured verdict — bm25 vs tf-idf +0.018 [+0.000, +0.048] includes zero, the gap rests on 2 of 38 queries even though bm25 never loses one, while bm25 vs b=0 +0.041 [+0.001, +0.091] excludes zero |
 | 03-hybrid-search | 2026-08-25 | python | okapi bm25 from scratch + lsa dense retrieval (tf-idf → seeded truncated svd) over one shared stemmer/compound-splitting tokenizer; rrf and weighted score fusion with alpha sweep; recall@1/5 + mrr on 100 docs / 40 golden queries split keyword vs paraphrase (paraphrase mrr@10: bm25 0.765, dense 0.794, hybrid rrf 0.799; overall rrf best at 0.899; keyword saturated for both — corpus-fit lsa has no oov failure mode) |
@@ -43,19 +43,25 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
-- [high] 05 — the field-availability table counts a field as available the moment
-  its value *starts*, not when it carries anything. `query` is first seen at
-  4.6% of the argument json as `""` and `filters` at 33.3% as `{}` — both empty.
-  the readme turns that into "a UI can show the query being searched, or a
-  dispatcher can start validating it, at 44% of the stream", and the root readme
-  into "partial parsing makes tool-call fields readable at 44% of the stream" —
-  neither is true of an empty string. `top_k` (5) and `include_snippets` (true)
-  are genuinely final when first seen, so the metric is right for scalars and
-  wrong for the two container-valued fields it leads with. the design notes do
-  disclose the mechanism ("a key doesnt exist until its value has started"), so
-  the machinery is honest and the headline drawn from it is not. a first-
-  non-empty-value column next to the first-seen one would settle it.
-  found 2026-08-27
+- [fixed 2026-08-27] 05 — the field-availability table counted a field as
+  available the moment its value *started*, not when it carried anything.
+  the finding as first written named two fields; on checking it, only one is
+  real. snapshots are taken once per `tool_args_delta`, and the fixture's
+  fragment sizes ([4,9,2,6,13,3]) mean `query` is never observed as `""` — it
+  is first seen holding `"bre"`, a genuine prefix of a string that only grows,
+  which is exactly what a streaming UI renders. `filters` is the real one: it
+  is first seen as `{}` at 60.5% and does not hold a filter until 63.8%, so
+  the row said a dispatcher could read filters that werent there. the readme
+  drew "a dispatcher can start validating it, at 44% of the stream" off the
+  table and the root readme "tool-call fields readable at 44% of the stream";
+  both now say what the columns mean. `runPipeline` records a second point per
+  field — when the value first carries anything (non-empty string, container
+  with an entry, any scalar), `null` if it never does — and the demo prints
+  both. `filters` 60.5% → 63.8%; every other field's two columns coincide, and
+  no other number in the project moved. the never-carries case has no instance
+  in the fixture so it is pinned by a synthetic wire in the tests. no other
+  project computes field availability, so nothing to port. found 2026-08-27,
+  fixed 2026-08-27
 - [low] 05 — the sse parser strips a byte order mark twice: `TextDecoder("utf-8")`
   already removes a leading bom (ignoreBOM defaults false), and `processLine`
   then strips another from the first line, so a stream opening with two boms
@@ -205,9 +211,16 @@ listed low. the queue is fifo, honours capacity, and wakes waiting consumers on
 close. the defect was in what the backpressure demo *reported*: peak buffered
 memory computed as chunk count times the largest possible chunk, fixed above.
 the field-availability metric under measurement 2 is the other side of that
-coin and is now the open high finding — the timing columns, which are wall
-clock and move a few percent per run, are labelled as such in the readme now
-rather than quoted as fixed measurements.
+coin and was raised as a second high finding, then fixed the same day — the
+timing columns, which are wall clock and move a few percent per run, are
+labelled as such in the readme now rather than quoted as fixed measurements.
+
+fix run on the availability finding turned up one thing worth recording as a
+habit: the finding named `query` and `filters` as both first-seen-empty, and
+`query` isnt. snapshot granularity is one per `tool_args_delta` event, not per
+byte, so a state the byte stream passes through can be invisible to the
+measurement that samples it. reviewing means checking the finding against a
+run, not just against the source — half a finding still ships half a fix.
 
 03 came back clean on retrieval and clean on measurement: bm25 matches the
 lucene formula term by term and dedupes repeated query terms like 02, the lsa
