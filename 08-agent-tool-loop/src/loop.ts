@@ -54,7 +54,7 @@ export interface TaskOutcome {
   virtualMs: number;
 }
 
-const MODEL_LATENCY_BASE_MS = 600;
+export const MODEL_LATENCY_BASE_MS = 600;
 const MODEL_LATENCY_JITTER_MS = 400;
 const IDENTICAL_INVALID_LIMIT = 3;
 

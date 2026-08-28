@@ -70,18 +70,20 @@ task with the flaw stripped:
 
 ```
 group           tasks  ok  extra-model-calls  extra-tokens  extra-cost  extra-ms
-wrong-type         4   4                1.3           218     $0.0010       983
-missing-field      3   3                1.0           139     $0.0007       800
-extra-field        2   2                1.0           146     $0.0008      1269
-unknown-tool       2   2                1.0           151     $0.0008       584
-stubborn           3   0                1.0           153     $0.0007       785
-slow-corrector     1   0                1.0           172     $0.0009       662
+wrong-type         4   4                1.3           218     $0.0010       964
+missing-field      3   3                1.0           139     $0.0007       844
+extra-field        2   2                1.0           146     $0.0008       895
+unknown-tool       2   2                1.0           151     $0.0008       723
+stubborn           3   0                1.0           153     $0.0007       836
+slow-corrector     1   0                1.0           172     $0.0009       991
 ```
 
 a one-round correction costs one extra model call and roughly 140 to 220 extra
 tokens, because the retry pays for the flawed emission, the error message, and a
-re-read of the whole longer history. the extra-ms column is noisier than the
-rest; per-call latency carries seeded jitter, so treat those as rough.
+re-read of the whole longer history. the twin runs on the same seed as the
+flawed run, so the calls they share draw identical latency jitter and cancel -
+the extra-ms is the marginal cost of the flaw, not a difference of two
+independent runs.
 
 the stubborn tasks are where the policies really separate:
 
@@ -117,6 +119,17 @@ typescript because this is the applied side of the stack where agent runtimes
 actually ship: the interesting parts are zod schema design, discriminated
 unions over message types, and async loop control, and the strict compiler
 holds the message-passing honest end to end.
+
+## fixes
+
+- 2026-08-28 — each flawed task is priced against its own clean twin, but the
+  twin ran on its own seed, so the two runs drew independent latency jitter
+  and the difference carried both runs noise instead of cancelling -
+  unknown-tool printed 584ms for one extra model call, under the 600ms a
+  model call costs at minimum. the twin reuses the flawed runs seed now. only
+  extra-ms moved: wrong-type 983 → 964, missing-field 800 → 844, extra-field
+  1269 → 895, unknown-tool 584 → 723, stubborn 785 → 836, slow-corrector
+  662 → 991
 
 ## open questions
 

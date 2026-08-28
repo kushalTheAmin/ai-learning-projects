@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { flawGroup, runExperiment, type ExperimentReport } from "../src/experiment.js";
+import { MODEL_LATENCY_BASE_MS } from "../src/loop.js";
 import { loadCities, loadNotes, loadTasks } from "../src/tasks.js";
 import { renderReport } from "../src/report.js";
 
@@ -82,6 +83,21 @@ describe("experiment over the committed dataset", () => {
       } else {
         expect(row.completed).toBe(row.tasks);
       }
+    }
+  });
+
+  it("an extra model call never prices below one model call of latency", async () => {
+    const r = await report();
+    for (const row of r.flawCosts) {
+      // A group that completes every task runs exactly the tool calls its
+      // twins run, so the whole paired difference is extra model calls. Each
+      // of those costs at least MODEL_LATENCY_BASE_MS of virtual time, which
+      // only holds if the twin replays the flawed run's latency draws — run
+      // it on a different seed and the shared calls stop cancelling.
+      if (row.completed !== row.tasks) continue;
+      expect(row.meanExtraMs).toBeGreaterThanOrEqual(
+        MODEL_LATENCY_BASE_MS * row.meanExtraModelCalls,
+      );
     }
   });
 

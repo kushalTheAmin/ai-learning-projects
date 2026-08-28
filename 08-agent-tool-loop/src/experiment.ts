@@ -14,6 +14,16 @@ import { buildRegistry, type CityRecord, type NoteRecord } from "./tools.js";
 
 const BASE_SEED = 0xa9e17;
 
+/**
+ * One seed per (policy, task). The clean twin of a task reuses the seed of
+ * the run it is subtracted from, so both draw the same latency jitter for
+ * the calls they share and the difference is the marginal cost of the flaw
+ * rather than the marginal cost plus two independent noise streams.
+ */
+function seedFor(policyIndex: number, taskIndex: number): number {
+  return BASE_SEED + policyIndex * 10007 + taskIndex * 101;
+}
+
 export interface PolicyAggregate {
   policy: string;
   tasks: number;
@@ -131,21 +141,22 @@ export async function runExperiment(inputs: ExperimentInputs): Promise<Experimen
       const outcomes: TaskOutcome[] = [];
       for (let t = 0; t < inputs.tasks.length; t++) {
         const task = inputs.tasks[t]!;
-        outcomes.push(await runOne(task, policy, inputs, clock, BASE_SEED + p * 10007 + t * 101));
+        outcomes.push(await runOne(task, policy, inputs, clock, seedFor(p, t)));
       }
       perPolicy.push(aggregate(policy.name, outcomes));
       if (policy.name === "guarded") guardedOutcomes = outcomes;
       if (policy.name === "feedback") feedbackOutcomes = outcomes;
     }
 
-    const guardedPolicy = POLICIES.find((p) => p.name === "guarded")!;
+    const guardedIndex = POLICIES.findIndex((p) => p.name === "guarded");
+    const guardedPolicy = POLICIES[guardedIndex]!;
     for (let t = 0; t < inputs.tasks.length; t++) {
       const task = inputs.tasks[t]!;
       if (flawGroup(task) === undefined) continue;
       const twin = cleanTwin(task);
       guardedTwinOutcomes.set(
         task.id,
-        await runOne(twin, guardedPolicy, inputs, clock, BASE_SEED + 777_000 + t * 101),
+        await runOne(twin, guardedPolicy, inputs, clock, seedFor(guardedIndex, t)),
       );
     }
 
