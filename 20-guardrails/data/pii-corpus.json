@@ -1,0 +1,132 @@
+[
+  {
+    "id": "pii-01",
+    "note": "plain email and formatted us phone",
+    "marked": "hi, you can reach me at ⟦EMAIL⟧jordan.lee@example.com⟦/⟧ or call ⟦PHONE⟧415-555-0199⟦/⟧ after 3pm."
+  },
+  {
+    "id": "pii-02",
+    "note": "email with plus tag and dotted phone",
+    "marked": "forward the invoice to ⟦EMAIL⟧billing+acme@mail-server.co.uk⟦/⟧ and cc ⟦PHONE⟧212.555.0147⟦/⟧."
+  },
+  {
+    "id": "pii-03",
+    "note": "international phone with country code",
+    "marked": "our london office line is ⟦PHONE⟧+44 20 7946 0958⟦/⟧, ask for support."
+  },
+  {
+    "id": "pii-04",
+    "note": "visa card that passes luhn, with dashes",
+    "marked": "charge it to ⟦CARD⟧4111-1111-1111-1111⟦/⟧, expires next year."
+  },
+  {
+    "id": "pii-05",
+    "note": "mastercard with spaces plus a valid ssn",
+    "marked": "card ⟦CARD⟧5555 5555 5555 4444⟦/⟧ belongs to ssn ⟦SSN⟧123-45-6789⟦/⟧."
+  },
+  {
+    "id": "pii-06",
+    "note": "amex 15 digit spaced",
+    "marked": "amex on file: ⟦CARD⟧3782 822463 10005⟦/⟧, do not store the cvv."
+  },
+  {
+    "id": "pii-07",
+    "note": "discover joined digits",
+    "marked": "backup card ⟦CARD⟧6011111111111117⟦/⟧ for the annual renewal."
+  },
+  {
+    "id": "pii-08",
+    "note": "openai style secret key by prefix",
+    "marked": "set OPENAI_API_KEY=⟦SECRET⟧sk-abc123DEF456ghi789JKL012mno345⟦/⟧ in the env."
+  },
+  {
+    "id": "pii-09",
+    "note": "github token and aws access key id by prefix",
+    "marked": "rotate ⟦SECRET⟧ghp_1234567890abcdefABCDEF1234567890abcd⟦/⟧ and ⟦SECRET⟧AKIAIOSFODNN7EXAMPLE⟦/⟧ today."
+  },
+  {
+    "id": "pii-10",
+    "note": "high-entropy prefixless secret plus ipv4",
+    "marked": "token ⟦SECRET⟧xQ9zR2mK7bV4nT1pL8wY3jH6dF0sA5cG⟦/⟧ authenticates against ⟦IP⟧10.42.7.199⟦/⟧."
+  },
+  {
+    "id": "pii-11",
+    "note": "two emails, one repeated later in text",
+    "marked": "loop in ⟦EMAIL⟧ana@corp.example⟦/⟧ and ⟦EMAIL⟧sam@corp.example⟦/⟧; if ⟦EMAIL⟧ana@corp.example⟦/⟧ bounces try her personal line."
+  },
+  {
+    "id": "pii-12",
+    "note": "ssn at sentence start and a phone with parens",
+    "marked": "⟦SSN⟧001-28-0044⟦/⟧ is the applicant ssn; daytime number ⟦PHONE⟧(650) 555-0161⟦/⟧."
+  },
+  {
+    "id": "pii-13",
+    "note": "clean negatives: an order number, a price, a year range, no pii",
+    "marked": "order 998877 shipped for $1,299 covering the 2019-2024 warranty window."
+  },
+  {
+    "id": "pii-14",
+    "note": "negative: 16 digit run that fails luhn and has no card prefix",
+    "marked": "the tracking id 1234567890123456 was scanned at the depot."
+  },
+  {
+    "id": "pii-15",
+    "note": "negative: invalid ssn area 000 should not be detected",
+    "marked": "the placeholder value 000-45-6789 is used in the fixture, not a real ssn."
+  },
+  {
+    "id": "pii-16",
+    "note": "negative: version string and semver, low entropy, not a secret",
+    "marked": "upgrade to release 2024.11.03-stable build 00000000 before monday."
+  },
+  {
+    "id": "pii-17",
+    "note": "negative: ip-shaped but an octet over 255",
+    "marked": "the sku code 10.42.7.301 maps to the discontinued unit."
+  },
+  {
+    "id": "pii-18",
+    "note": "email and slack token adjacent in one config line",
+    "marked": "admin ⟦EMAIL⟧root@svc.internal⟦/⟧ uses slack token ⟦SECRET⟧xoxb-2468013579-abcdefghijkl⟦/⟧"
+  },
+  {
+    "id": "pii-19",
+    "note": "unicode name around an email, offsets must count code units correctly",
+    "marked": "café notes from józef: ping ⟦EMAIL⟧jozef@bistro.example⟦/⟧ about the ☕ delivery."
+  },
+  {
+    "id": "pii-20",
+    "note": "multiple cards in a list",
+    "marked": "test cards: ⟦CARD⟧4012888888881881⟦/⟧, ⟦CARD⟧5105105105105100⟦/⟧, ⟦CARD⟧371449635398431⟦/⟧."
+  },
+  {
+    "id": "pii-21",
+    "note": "phone without separators is out of scope, only the email is gold",
+    "marked": "text me at 4155550199 or email ⟦EMAIL⟧quick@example.org⟦/⟧, either works."
+  },
+  {
+    "id": "pii-22",
+    "note": "ipv4 in a log line with a port after it",
+    "marked": "connection refused from ⟦IP⟧192.168.1.24⟦/⟧:8080 during the deploy."
+  },
+  {
+    "id": "pii-23",
+    "note": "ssn and card and email in one dense record",
+    "marked": "record: ssn ⟦SSN⟧078-05-1120⟦/⟧, card ⟦CARD⟧4111111111111111⟦/⟧, contact ⟦EMAIL⟧pat.doe@example.net⟦/⟧."
+  },
+  {
+    "id": "pii-24",
+    "note": "clean prose, absolutely no pii",
+    "marked": "thanks for the update, the rollout looks good and the dashboard is clear now."
+  },
+  {
+    "id": "pii-25",
+    "note": "negative: visa-prefix 16 digit reference number that fails the luhn check",
+    "marked": "internal reference 4000 1234 5678 9010 tracks the failed batch job."
+  },
+  {
+    "id": "pii-26",
+    "note": "negative: long alphanumeric placeholder with entropy far below the secret gate",
+    "marked": "the seed string aaaaaaaaaa1111111111 fills the example config, replace it before deploy."
+  }
+]
