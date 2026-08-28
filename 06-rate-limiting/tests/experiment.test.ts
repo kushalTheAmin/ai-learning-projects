@@ -62,6 +62,44 @@ describe("runScenario", () => {
     expect(r).toMatchObject({ requests: 1, succeeded: 1, failed: 0, totalAttempts: 1, count429: 0 });
   });
 
+  it("reports a latency over every request, not only over the ones that succeeded", async () => {
+    // 20 clients, one request each, all at t=0 against a burst of 2: two are
+    // admitted and pay 10ms, eighteen are rejected instantly and give up. A
+    // success-only median says 10ms; the median request took 0ms.
+    const r = await runScenario(
+      { name: "no-retry", retry: { policy: { kind: "none" }, maxRetries: 0, respectRetryAfter: false } },
+      makeOpts({
+        clients: 20,
+        requestsPerClient: 1,
+        serverBurst: 2,
+        faultRate: 0,
+        latencyMsMin: 10,
+        latencyMsMax: 10,
+      }),
+    );
+    expect(r.succeeded).toBe(2);
+    expect(r.failed).toBe(18);
+    expect(r.p50LatencyMs).toBe(10);
+    expect(r.p50AllMs).toBe(0);
+  });
+
+  it("counts the time a given-up request spent retrying", async () => {
+    // Every request is rejected, so each burns its whole retry budget: three
+    // 10ms waits before giving up at 30ms. No request succeeds, so the
+    // success-only percentile has nothing to report and the all-request one
+    // still does.
+    const r = await runScenario(
+      {
+        name: "doomed",
+        retry: { policy: { kind: "fixed", delayMs: 10 }, maxRetries: 3, respectRetryAfter: false },
+      },
+      makeOpts({ clients: 4, requestsPerClient: 1, serverRatePerSec: 1, serverBurst: 1, faultRate: 1 }),
+    );
+    expect(r.succeeded).toBe(0);
+    expect(Number.isNaN(r.p50LatencyMs)).toBe(true);
+    expect(r.p50AllMs).toBeGreaterThan(0);
+  });
+
   it("reports failures when demand far exceeds capacity and retries run out", async () => {
     const r = await runScenario(
       {

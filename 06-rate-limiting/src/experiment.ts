@@ -43,8 +43,16 @@ export interface StrategyResult {
   count429OnFirstAttempt: number;
   count503: number;
   makespanMs: number;
+  /** Percentiles over requests that succeeded; NaN when none did. */
   p50LatencyMs: number;
   p99LatencyMs: number;
+  /**
+   * Median over every request, give-ups included. Strategies differ wildly in
+   * how much they give up on, so the success-only median is not comparable
+   * across them: an instant rejection is 0ms of latency the success-only
+   * figure never sees.
+   */
+  p50AllMs: number;
   peakArrivalsPerWindow: number;
   maxSimultaneousRetries: number;
 }
@@ -93,6 +101,7 @@ export async function runScenario(
 
   const succeeded = outcomes.filter((o) => o.ok);
   const latencies = succeeded.map((o) => o.endMs - o.startMs).sort((a, b) => a - b);
+  const allLatencies = outcomes.map((o) => o.endMs - o.startMs).sort((a, b) => a - b);
   return {
     name: spec.name,
     requests: outcomes.length,
@@ -106,6 +115,7 @@ export async function runScenario(
     makespanMs: outcomes.length === 0 ? 0 : Math.max(...outcomes.map((o) => o.endMs)),
     p50LatencyMs: latencies.length === 0 ? Number.NaN : percentile(latencies, 0.5),
     p99LatencyMs: latencies.length === 0 ? Number.NaN : percentile(latencies, 0.99),
+    p50AllMs: allLatencies.length === 0 ? Number.NaN : percentile(allLatencies, 0.5),
     peakArrivalsPerWindow: api.peakArrivalsPerWindow(opts.peakWindowMs),
     maxSimultaneousRetries: api.maxSimultaneousRetries(),
   };

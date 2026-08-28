@@ -124,8 +124,9 @@ async function main(): Promise<void> {
     "429s".padStart(6),
     "503s".padStart(5),
     "makespan".padStart(9),
-    "p50".padStart(7),
-    "p99".padStart(8),
+    "p50 ok".padStart(7),
+    "p99 ok".padStart(8),
+    "p50 all".padStart(8),
     "peak/100ms".padStart(11),
     "collide".padStart(8),
   ].join("  ");
@@ -143,6 +144,7 @@ async function main(): Promise<void> {
         `${fmt(r.makespanMs / 1000, 2)}s`.padStart(9),
         `${fmt(r.p50LatencyMs)}ms`.padStart(7),
         `${fmt(r.p99LatencyMs)}ms`.padStart(8),
+        `${fmt(r.p50AllMs)}ms`.padStart(8),
         fmt(r.peakArrivalsPerWindow).padStart(11),
         fmt(r.maxSimultaneousRetries).padStart(8),
       ].join("  "),
@@ -155,6 +157,13 @@ async function main(): Promise<void> {
   const retryAfter = byName.get("full-jitter+retry-after")!;
   const pacing = byName.get("full-jitter+pacing")!;
   const fixed = byName.get("fixed-100ms")!;
+  const noRetry = byName.get("no-retry")!;
+
+  console.log(
+    `\n'p50 ok' and 'p99 ok' cover requests that succeeded; 'p50 all' covers every ` +
+      `request, give-ups included. read the ok columns down the table only where ` +
+      `success rates match.`,
+  );
 
   console.log("\nfindings:");
   console.log(
@@ -168,6 +177,14 @@ async function main(): Promise<void> {
     `- wasted work: fixed-100ms hammers ${fixed.totalAttempts} attempts for ${fixed.succeeded} successes ` +
       `(${fixed.attemptsPerSuccess.toFixed(2)} att/ok) and still fails ${pct(fixed.failed / fixed.requests)} of requests; ` +
       `every exponential variant lands near ${fullJitter.attemptsPerSuccess.toFixed(2)} att/ok`,
+  );
+  console.log(
+    `- a latency measured only over successes flatters whatever gives up most: no-retry ` +
+      `looks like the fastest strategy in the table at ${fmt(noRetry.p50LatencyMs)}ms p50 ok, but ` +
+      `${pct(noRetry.failed / noRetry.requests)} of its requests were rejected instantly, so its median ` +
+      `request took ${fmt(noRetry.p50AllMs)}ms. fixed-100ms reads ${fmt(fixed.p50LatencyMs)}ms ok vs ` +
+      `${fmt(fixed.p50AllMs)}ms over every request, because a give-up burns the full ` +
+      `${MAX_RETRIES}-retry budget before it counts as anything`,
   );
   console.log(
     `- the server knows best: honoring Retry-After finishes in ${(retryAfter.makespanMs / 1000).toFixed(2)}s, ` +

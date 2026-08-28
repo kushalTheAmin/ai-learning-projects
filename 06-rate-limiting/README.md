@@ -32,19 +32,23 @@ of the seed. Rerun it and every number below reproduces exactly.
 
 ## results (seed 42, printed by `npm start`)
 
-| strategy | success | attempts | att/ok | 429s | makespan | p50 | p99 | peak/100ms | collide |
-|---|---|---|---|---|---|---|---|---|---|
-| no-retry | 10.5% | 200 | 9.52 | 179 | 0.07s | 40ms | 56ms | 200 | 0 |
-| fixed-100ms | 43.5% | 1333 | 15.32 | 1245 | 3.50s | 229ms | 849ms | 69 | 20 |
-| exp-no-jitter | 100.0% | 593 | 2.96 | 393 | 12.90s | 152ms | 6353ms | 61 | 20 |
-| exp-full-jitter | 99.0% | 592 | 2.99 | 392 | 14.66s | 56ms | 10636ms | 104 | 1 |
-| exp-equal-jitter | 100.0% | 569 | 2.85 | 366 | 11.35s | 108ms | 10601ms | 86 | 1 |
-| decorrelated | 96.5% | 615 | 3.19 | 420 | 10.92s | 240ms | 7715ms | 61 | 1 |
-| full-jitter+retry-after | 99.5% | 591 | 2.97 | 390 | 9.47s | 56ms | 8908ms | 92 | 12 |
-| full-jitter+pacing | 100.0% | 223 | 1.11 | 20 | 16.63s | 40ms | 5611ms | 21 | 1 |
+| strategy | success | attempts | att/ok | 429s | makespan | p50 ok | p99 ok | p50 all | peak/100ms | collide |
+|---|---|---|---|---|---|---|---|---|---|---|
+| no-retry | 10.5% | 200 | 9.52 | 179 | 0.07s | 40ms | 56ms | 0ms | 200 | 0 |
+| fixed-100ms | 43.5% | 1333 | 15.32 | 1245 | 3.50s | 229ms | 849ms | 800ms | 69 | 20 |
+| exp-no-jitter | 100.0% | 593 | 2.96 | 393 | 12.90s | 152ms | 6353ms | 152ms | 61 | 20 |
+| exp-full-jitter | 99.0% | 592 | 2.99 | 392 | 14.66s | 56ms | 10636ms | 56ms | 104 | 1 |
+| exp-equal-jitter | 100.0% | 569 | 2.85 | 366 | 11.35s | 108ms | 10601ms | 108ms | 86 | 1 |
+| decorrelated | 96.5% | 615 | 3.19 | 420 | 10.92s | 240ms | 7715ms | 277ms | 61 | 1 |
+| full-jitter+retry-after | 99.5% | 591 | 2.97 | 390 | 9.47s | 56ms | 8908ms | 57ms | 92 | 12 |
+| full-jitter+pacing | 100.0% | 223 | 1.11 | 20 | 16.63s | 40ms | 5611ms | 40ms | 21 | 1 |
 
 `att/ok` = server-side attempts per successful request. `collide` = the most
-retries arriving at the exact same virtual instant.
+retries arriving at the exact same virtual instant. `p50 ok` and `p99 ok` cover
+requests that succeeded; `p50 all` covers every request, give-ups included. The
+two agree wherever a strategy lands nearly everything, and part company exactly
+where it doesnt, so read the `ok` columns down the table only between rows whose
+success rates match.
 
 ## what the numbers say
 
@@ -54,7 +58,8 @@ exactly t=100ms, then exactly t=300ms, 20-wide collisions against a bucket
 that refills 2 tokens per 100ms. Full jitter never collides more than 1-wide.
 But its *peak-window load is higher* (104 vs 61 arrivals/100ms): full jitter
 draws from [0, exp), so its mean delay is half the exponential and it retries
-sooner. The p50 shows the same trade from the client's side, 56ms vs 152ms.
+sooner. The p50 shows the same trade from the client's side, 56ms vs 152ms
+(both strategies land nearly every request, so those two medians compare).
 Jitter doesnt spread load thinner here; it stops the herd from arriving as a
 wall.
 
@@ -64,6 +69,15 @@ variant, and still fails 56.5% of requests, because 9 attempts spaced 100ms
 apart only ever sample ~0.8s of a congestion window that takes ~9s to drain.
 The exponential variants all succeed on ~3 attempts per request by reaching
 multi-second delays that actually outlive the congestion.
+
+**A latency measured only over successes flatters whatever gives up most.**
+Read the `p50 ok` column alone and no-retry is the fastest strategy here at
+40ms, ahead of every variant that actually works. It isnt fast, it quits: 89.5%
+of its requests were rejected at t=0 and never appear in that number, so its
+median request took 0ms. Fixed-100ms reads 229ms `ok` against 800ms over every
+request, because a give-up spends the whole 8-retry budget first and then
+counts for nothing. This is the trap in every dashboard that charts p50 over
+2xx only, and it is why the table carries both populations.
 
 **The server knows best.** Honoring Retry-After (the time until the bucket's
 next token) finishes in 9.47s, closest to the 9.0s ideal, while every
@@ -115,10 +129,20 @@ The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
 
 ```
 npm ci
-npm test        # 47 tests
+npm test        # 49 tests
 npm start       # the table above
 npm run typecheck
 ```
+
+## fixes
+
+- 2026-08-28 — the p50/p99 columns only ever covered requests that succeeded,
+  with nothing in the table saying so, and success rates run 10.5% to 100%
+  down that column - no-retry read 40ms while 89.5% of its requests were
+  rejected instantly. added `p50 all` over every request, relabelled the old
+  columns `p50 ok`/`p99 ok`. no-retry 40ms → 0ms all, fixed-100ms 229ms →
+  800ms all, every other row within 37ms of its ok value, no other number
+  moved
 
 ## open questions
 
