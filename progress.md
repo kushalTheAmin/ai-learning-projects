@@ -51,6 +51,70 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-28] 07 — the separability section printed the hardest
+  non-duplicate pair with a hardcoded `(same-topic vocabulary overlap)`
+  annotation, whatever pair came out on top, and the readme repeated it as
+  "two same-topic paragraphs about limiters". the pair is
+  `cache-03--truncate` vs `ratelimit-03--truncate` at 0.024 — caching against
+  rate limiting, two different topics that happen to share retry vocabulary.
+  so the readme's demonstration that "topical overlap is nearly invisible at
+  the shingle level" rested on a pair with no shared topic at all. the cause
+  is upstream: `docs.jsonl` has carried a `topic` field from the start and
+  `load_base_docs` read `doc_id` and `text` and dropped it, so nothing in the
+  code could check the claim. `Doc` carries `topic` now, `build_corpus`
+  propagates it to mutants, and `topic_relation` derives the label from the
+  two docs instead of asserting it. the entry point also prints the hardest
+  pair that genuinely is same-topic (`index-02--truncate` vs
+  `index-03--drop` at 0.011, less than half the cross-topic ceiling) and both
+  means (same-topic 0.0005 over 864 pairs, cross-topic 0.0001 over 9072), so
+  the claim now has the evidence it needs: sharing a topic does move a pair
+  up, 5x, but 5x of nearly nothing, and one shared turn of phrase across
+  topics clears the whole same-topic ceiling. the conclusion survives, its
+  supporting number was the wrong one. no measured number moved — every
+  other line of the entry point is character-identical. no other project
+  makes a same-topic claim or carries a topic field, so nothing to port.
+  found and fixed 2026-08-28
+- [medium] 07 — `shuffle_sentences` loops on `while sentences == original:
+  rng.shuffle(sentences)`, so a document whose sentences are all identical
+  never escapes: shuffling a list of equal elements can never compare
+  unequal. confirmed as a hang, not an exception — `shuffle_sentences("hi
+  there. hi there.", Random(1))` runs forever. boilerplate with a repeated
+  sentence is exactly the duplication pattern the mutation set says it
+  models, so this is reachable on real input. the committed corpus has no
+  such doc. a bounded attempt count that gives up and returns the original
+  would close it. found 2026-08-28
+- [medium] 07 — both head-to-head operating points are read off the same
+  10296 labeled pairs they are then scored on. `best_t` is picked by max f1
+  over `JACCARD_SWEEP` and `best_d` by max f1 over `HAMMING_SWEEP`, then the
+  final section reports "minhash lsh + verify 1.000, simhash 0.942" as each
+  method's number. for exact jaccard it costs nothing — separation is 0.024
+  to 0.280, so every threshold in that band scores 1.000 and the choice is
+  not load-bearing. for simhash it is load-bearing: d<=20 wins only because
+  it is best on this set, and it already sits past the nearest non-duplicate
+  at 19, so 0.942 is an oracle number no deployed threshold could pick. the
+  readme notes the d=19 overlap but never says the operating point was
+  selected on the scored set. found 2026-08-28
+- [low] 07 — `with_typos` falls through: the `elif op == "drop"` arm is only
+  reached when the swap guard fails, so `op == "swap"` at the last index (and
+  `op == "drop"` on a 1-character string) lands in the `else` and doubles a
+  character instead. over 30000 draws on a 10-char string the split comes out
+  10964 double / 10144 drop / 8892 swap against the uniform thirds the
+  docstring implies. it is a mutation generator and the corpus is seeded, so
+  no measured number depends on it. same species as 03's stem fall-through.
+  found 2026-08-28
+- [low] 07 — the minhash accuracy table prints `mean abs err X all pairs,
+  Y duplicate pairs (max Z)` where Z is `max_absolute_error` over all 10296
+  pairs while Y is over the 360 duplicate pairs, so the parenthetical sits
+  next to a number computed over a different population and reads as its max.
+  checked at every k in the sweep: the all-pairs argmax is a duplicate pair
+  each time (k=8 through k=128), so the five published maxima are all
+  correct as duplicate-pair maxima too and nothing needs restating. the
+  label is still unqualified. same shape as the fixed 06 finding.
+  found 2026-08-28
+- [low] 07 — `hamming_distance` calls `int.bit_count()`, which is python
+  3.10+, and the readme's run instructions name no minimum version while
+  `requirements.txt` pins only pytest. on 3.9 the project fails at the first
+  simhash comparison. found 2026-08-28
 - [fixed 2026-08-28] 06 — the results table's `p50` and `p99` columns were
   computed over requests that succeeded, and nothing in the table said so.
   success rates run 10.5% to 100% down that column, so the rows are latencies
@@ -203,6 +267,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 07-near-duplicates | 2026-08-28 |
 | 06-rate-limiting | 2026-08-28 |
 | 05-token-streaming | 2026-08-27 |
 | 03-hybrid-search | 2026-08-27 |
