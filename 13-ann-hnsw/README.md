@@ -78,9 +78,9 @@ recall 0.979 at 18.5x fewer distance computations than the exact scan, and
 recall costs more than the first 97.9% did.
 
 M sweep at ef=32 shows the other axis, build cost. M=4 builds for 445 distance
-computations per vector and searches at 0.963; M=32 builds 16x more expensive
-(7373 per vector) for 0.998. M=16 is the usual production default and lands at
-0.997 for 2476 per vector.
+computations per vector and searches at 0.963; M=32 spends 7373 per vector to
+reach 0.998. M=16 is the usual production default and lands at 0.997 for 2476
+per vector.
 
 neighbor selection ablation, M=8, ef=32:
 
@@ -102,7 +102,7 @@ the same recall.
 
 ## wall clock, and where the distance count lies
 
-one run on this machine printed hnsw ef=32 at 0.360 ms/query vs 0.339 for the
+one run on this machine printed hnsw ef=32 at 0.339 ms/query vs 0.328 for the
 exact scan; those two numbers move a few percent run to run and even swap
 order between runs, nothing like the 15x the distance counts promise. the
 exact scan is one vectorized numpy pass, hnsw pays python-level overhead per
