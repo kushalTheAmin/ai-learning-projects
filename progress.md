@@ -52,6 +52,63 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-28] 08 — the flaw-pricing table is a paired comparison, each
+  flawed task against its own clean twin under the guarded policy, but the
+  twin was run on an unrelated seed (`BASE_SEED + 777_000 + t * 101`) while
+  the flawed run used the policy seed (`BASE_SEED + p * 10007 + t * 101`).
+  the two runs therefore drew independent model-latency jitter, so the
+  `extra-ms` column carried the noise of both runs instead of cancelling it.
+  the estimator stays unbiased, but the published value for `unknown-tool`
+  came out at 584ms for 1.0 extra model calls — below the 600ms base latency
+  a single model call costs, a marginal cost the mechanism cannot produce.
+  every flawed task has `fetchTransientFailures: 0`, so model latency is the
+  only rng consumer and the twin's draws are an exact prefix of the flawed
+  run's once the seeds match: the shared calls cancel term for term and the
+  difference is the marginal cost of the flaw. `seedFor(policyIndex,
+  taskIndex)` is now one helper and the twin reuses the seed of the run it is
+  subtracted from. token, cost and model-call columns are seed-independent
+  and are character-identical; only `extra-ms` moved (wrong-type 983 → 964,
+  missing-field 800 → 844, extra-field 1269 → 895, unknown-tool 584 → 723,
+  stubborn 785 → 836, slow-corrector 662 → 991) and the readme sentence that
+  called the column "rough" is replaced by what it now is. the readme's
+  policy table and the stubborn-burn block are untouched. no other project
+  runs a paired twin comparison, so nothing to port. found and fixed
+  2026-08-28
+- [medium] 08 — `scriptedModelTurn` builds the final answer with
+  `task.finalTemplate.replace("{last}", lastValue)`, and `String.replace`
+  reads `$&`, `` $` `` and `$'` in the *replacement* as patterns. a tool value
+  containing any of them is rewritten: `search_notes` returning a note titled
+  `a $& b` produces `result: a {last} b`, silently scored wrong-answer with
+  no sign the answer was mangled rather than mis-derived. tool output is the
+  one string here that is not authored in the dataset, so this is exactly
+  where it can appear. the committed corpus has none. `replaceAll` with a
+  function replacement, or a split/join, closes it. found 2026-08-28
+- [medium] 08 — `runExperiment` on an empty task list throws `cannot take a
+  percentile of an empty list` out of 06's `percentile`, and `loadTasks`
+  explicitly accepts an empty dataset (`tests/tasks.test.ts` pins it). so the
+  one edge case the loader promises to support crashes one layer down with an
+  error naming a statistic instead of the empty corpus, and `meanTaskMs`
+  would be NaN even if it survived. `savedPct` in `report.ts` is the same
+  shape: 0/0 when no task is stubborn. found 2026-08-28
+- [low] 08 — `flawGroup` labels a multi-flaw task by `kinds[0]`, so a task
+  carrying a wrong-type and a missing-field intent is priced entirely under
+  wrong-type. no committed task has two flaw kinds, so no published number is
+  affected; the classifier is just narrower than the dataset it might be
+  handed. found 2026-08-28
+- [low] 08 — a tool result with `ok: false` advances the scripted model to the
+  next intent exactly like a success, and `lastValue` keeps the previous
+  successful value, so a task whose second tool errors still emits a final
+  answer built from the first tool's output. documented as "intents advance
+  on tool results" and no committed task makes a tool fail (`fetch-flaky-4`
+  succeeds on attempt 5 of 5), so nothing measured depends on it — but the
+  readme's open question about garbage tool results lands here, and today the
+  loop would report an error result as progress. found 2026-08-28
+- [low] 11, 08 — 11-prompt-caching imports 08's `estimateTokens` in
+  `cache.ts` but computes the same quantity inline in `workload.ts:233` as
+  `Math.ceil(turn.assistantText.length / 4)`, without the `max(1, ...)` floor
+  the shared helper applies. the two disagree only on empty text (1 vs 0) and
+  11's assistant turns are never empty, so no number moves; it is the same
+  metric computed twice in one repo. found 2026-08-28
 - [fixed 2026-08-28] 07 — the separability section printed the hardest
   non-duplicate pair with a hardcoded `(same-topic vocabulary overlap)`
   annotation, whatever pair came out on top, and the readme repeated it as
@@ -268,6 +325,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 08-agent-tool-loop | 2026-08-28 |
 | 07-near-duplicates | 2026-08-28 |
 | 06-rate-limiting | 2026-08-28 |
 | 05-token-streaming | 2026-08-27 |
@@ -359,6 +417,31 @@ was computed over the wrong set. every metric in a comparison table needs its
 population named, because the strategy that gives up most is the one a
 success-only average flatters most — and that is the strategy the table exists
 to warn about.
+
+08 came back clean on the loop and dirty on one column of the pricing table.
+the three policies do what the readme says term for term: strict dies on the
+first invalid emission (15 of 15 flawed tasks, `validation-error`), feedback
+allows exactly `maxFeedbackPerIntent` rounds and gives up on the 7th emission,
+the guard fires on the 3rd identical invalid call and so kills the corrector
+that needs 3 rounds while sparing the one that needs 2, and the feedback
+budget resets per intent rather than per task. the loop guard keys on
+canonical (name, args) and counts only invalid emissions, so `dup-calls`
+doesn't trip it. every authored `flawedCall` in `tasks.json` is genuinely
+rejected by the tool schema it targets and every authored `call` is genuinely
+accepted — checked call by call, so no flaw is priced for a call that would
+have validated. the run is byte-identical across reruns, the stubborn saving
+really is input-side (input 3528 → 570 of the 3210-token total), and every
+number in the readme matched `npm start` before the fix. the defect was in the
+pairing: the clean twin ran on a seed unrelated to the run it was subtracted
+from, so `unknown-tool` published 584ms of extra latency for one extra model
+call that costs 600ms at minimum. fixed above. four smaller findings came out
+of the same read, one of them a cross-project inconsistency in 11.
+
+worth recording as a habit: a paired comparison that doesn't share its random
+draws is a paired comparison in name only. the tell was cheap — an extra model
+call priced under the floor of one model call — and it is worth looking for
+wherever two runs get subtracted: does the difference have a value the
+mechanism could not produce.
 
 ## MECHANISMS
 
