@@ -64,13 +64,15 @@ async function main(): Promise<void> {
   const batch = await runBatchSizeSweep();
   console.log(
     table(
-      ["batch", "calls", "in tok/item", "$/1k items", "makespan", "item p50", "item p95"],
+      ["batch", "calls", "in tok/item", "$/1k items", "makespan", "call p50", "call p95", "item p50", "item p95"],
       batch.map((r) => [
         String(r.batchSize),
         String(r.calls),
         f1(r.inputTokensPerItem),
         usd(r.usdPer1kItems),
         sec(r.makespanMs),
+        ms(r.callP50Ms),
+        ms(r.callP95Ms),
         ms(r.itemP50Ms),
         ms(r.itemP95Ms),
       ]),

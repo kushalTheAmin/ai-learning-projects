@@ -42,17 +42,38 @@ describe("batch size sweep", () => {
     expect(await runBatchSizeSweep(SMALL_BATCHES)).toEqual(await runBatchSizeSweep(SMALL_BATCHES));
   });
 
-  it("trades per-item cost against per-item latency", async () => {
+  it("makes each call slower and each item cheaper as the batch grows", async () => {
     const rows = await runBatchSizeSweep(SMALL_BATCHES);
     for (let i = 1; i < rows.length; i++) {
       expect(rows[i]!.inputTokensPerItem).toBeLessThan(rows[i - 1]!.inputTokensPerItem);
       expect(rows[i]!.usdPer1kItems).toBeLessThan(rows[i - 1]!.usdPer1kItems);
-      expect(rows[i]!.itemP50Ms).toBeGreaterThan(rows[i - 1]!.itemP50Ms);
+      expect(rows[i]!.callP50Ms).toBeGreaterThan(rows[i - 1]!.callP50Ms);
       expect(rows[i]!.calls).toBeLessThan(rows[i - 1]!.calls);
     }
     // Overhead amortization is exact: 400/n + 60 input tokens per item.
     expect(rows[0]!.inputTokensPerItem).toBeCloseTo(460, 9);
     expect(rows[2]!.inputTokensPerItem).toBeCloseTo(400 / 16 + 60, 9);
+  });
+
+  it("reports what an item waits, not just what a call takes", async () => {
+    const rows = await runBatchSizeSweep(SMALL_BATCHES);
+    for (const row of rows) {
+      // An item's wait is measured from job start, so it is never shorter
+      // than the call carrying it and never longer than the whole job.
+      expect(row.itemP50Ms).toBeGreaterThanOrEqual(row.callP50Ms);
+      expect(row.itemP95Ms).toBeLessThanOrEqual(row.makespanMs);
+    }
+    // At batch 1 the gap is the whole point: a call takes ~100ms but an item
+    // spends most of its wait queued behind other items in the client pool.
+    expect(rows[0]!.itemP50Ms).toBeGreaterThan(4 * rows[0]!.callP50Ms);
+
+    // Across the sweep the two columns point in opposite directions. Reading
+    // the call column as an item's latency inverts the conclusion.
+    const first = rows[0]!;
+    const last = rows.at(-1)!;
+    expect(last.callP50Ms).toBeGreaterThan(first.callP50Ms);
+    expect(last.itemP50Ms).toBeLessThan(first.itemP50Ms);
+    expect(last.makespanMs).toBeLessThan(first.makespanMs);
   });
 });
 

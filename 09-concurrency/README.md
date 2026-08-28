@@ -15,8 +15,10 @@ which item did it) is one authored failure mode, not a survey of real ones.
 Batching and parallelism are the two knobs every high-volume LLM workload
 turns, and both get sold as free wins. Neither is. Client workers past the
 server's concurrency cap buy nothing but inflated latency. Bigger batches buy
-cheaper items but slower ones, and they widen the blast radius of a single bad
-item. Where exactly does each knob stop paying? Numbers or it didnt happen.
+cheaper items and slower calls — whether that slower call reaches the item
+depends on whether the items were queued behind each other anyway — and they
+widen the blast radius of a single bad item. Where exactly does each knob stop
+paying? Numbers or it didnt happen.
 
 ## the setup
 
@@ -71,20 +73,30 @@ capped server is how you buy timeout-triggered retries with extra steps.
 240 items, 4 client workers, batch size swept:
 
 ```
-batch  calls  in tok/item  $/1k items  makespan  item p50  item p95
-    1    240        460.0      $1.830     6.05s     100ms     109ms
-    2    120        260.0      $1.230     3.61s     120ms     130ms
-    4     60        160.0      $0.930     2.40s     159ms     172ms
-    8     30        110.0      $0.780     1.88s     239ms     258ms
-   16     15         85.0      $0.705     1.61s     402ms     431ms
-   32      8         73.3      $0.670     1.46s     724ms     771ms
+batch  calls  in tok/item  $/1k items  makespan  call p50  call p95  item p50  item p95
+    1    240        460.0      $1.830     6.05s     100ms     109ms    3040ms    5744ms
+    2    120        260.0      $1.230     3.61s     120ms     130ms    1841ms    3470ms
+    4     60        160.0      $0.930     2.40s     159ms     172ms    1256ms    2367ms
+    8     30        110.0      $0.780     1.88s     239ms     258ms     984ms    1875ms
+   16     15         85.0      $0.705     1.61s     402ms     431ms     838ms    1610ms
+   32      8         73.3      $0.670     1.46s     724ms     771ms     771ms    1458ms
 ```
 
 The cost curve is just overhead amortization, 400/n + 60 tokens per item, so
 it collapses fast then flattens: batch 8 already captures 90% of the saving
-batch 32 gets. The latency curve doesnt flatten, it keeps climbing with n.
-So the knee is early: past batch 8 or so you are trading a lot of latency
-for cents.
+batch 32 gets.
+
+Two latency columns and they point opposite ways. `call p50` is how long one
+call takes once a worker picks it up, and it climbs with n — 100ms to 724ms.
+`item p50` is how long an item waits for its own answer, measured from the
+start of the job, and it falls — 3040ms to 771ms. All 240 items are sitting
+there at t=0, so most of what an item waits is queue time behind the other
+239, and a bigger batch drains that queue sooner. Makespan says the same
+thing, 6.05s to 1.46s.
+
+So on a closed job like this, batching isnt a latency-for-cost trade at all.
+It wins both. The call getting slower is real but it never reaches the item,
+because the item was going to be waiting anyway.
 
 ### 3. micro-batching a live arrival stream
 
@@ -99,9 +111,12 @@ max wait  calls  mean batch  in tok/item  $/1k items  lat p50  lat p95  makespan
    250ms     46       13.04         90.7      $0.722    489ms    624ms    12.27s
 ```
 
-Same trade as the static sweep but the batch size is now bought with waiting:
-holding the batch open 100ms fills it to 6 items on this arrival rate and cuts
-cost 55%, for +175ms p50. Makespan barely moves at all (11.98s to 12.27s)
+This is where the trade actually lives. Items arrive over time instead of all
+at once, so nothing is queued behind anything — the batch size is bought with
+pure waiting, and the item pays it. `lat p50` here is measured from submit,
+so it is the same quantity as section 2's `item p50` and it moves the other
+way: holding the batch open 100ms fills it to 6 items on this arrival rate and
+cuts cost 55%, for +175ms p50. Makespan barely moves at all (11.98s to 12.27s)
 because the arrival stream, not the server, is the bottleneck here; the wait
 budget prices latency against cost, not against throughput. Note the mean
 batch at 250ms is 13, not 16: at 20ms arrivals the timer usually beats the
@@ -144,10 +159,18 @@ Three separate queues hide in "call the API in parallel": the client pool, the
 server's admission queue, and the batcher holding items open. Each one trades
 the same three currencies (cost, latency, throughput) at a different rate, and
 the numbers say the knees are sharp: workers stop paying exactly at the server
-cap, batch size stops paying around 8, wait budgets pay only while arrivals
-are dense enough to fill batches. And batching has a fourth currency the first
-two knobs dont: blast radius. A batch is a bet that all n items are good, and
-the recovery strategy decides what losing that bet costs.
+cap, batch size stops paying on cost around 8, wait budgets pay only while
+arrivals are dense enough to fill batches.
+
+The other thing the numbers say: pick your latency carefully. A call's
+duration and an item's wait are different quantities and they can point in
+opposite directions in the same experiment — at batch 1 in section 2 a call
+takes 100ms while the item in it waits 3040ms. Which one is the honest
+latency depends on whether the work is queued or arriving.
+
+And batching has a fourth currency the first two knobs dont: blast radius. A
+batch is a bet that all n items are good, and the recovery strategy decides
+what losing that bet costs.
 
 ## typescript, and why
 
@@ -160,6 +183,16 @@ simulate the same math but asyncio would not be the thing under test.
 
 Imports rather than rewrites: the virtual clock and percentile come from
 06-rate-limiting, the seeded rng from 05-token-streaming.
+
+## fixes
+
+- 2026-08-28 — the batch sweep called its latency column `item p50` but
+  measured a call's duration, which leaves out the client queue the batching
+  removes — so the readme read it as "past batch 8 you are trading a lot of
+  latency for cents" while every item was actually getting faster. the sweep
+  reports both now, `call p50/p95` (the old numbers, unchanged) and `item
+  p50/p95` from job start. item p50 goes 3040ms at batch 1 down to 771ms at
+  batch 32 — the opposite direction from the call column
 
 ## where it breaks down
 

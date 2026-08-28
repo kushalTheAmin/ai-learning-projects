@@ -5,7 +5,7 @@
  * 1. worker sweep — what does client-side parallelism buy against a server
  *    that only works `maxConcurrent` calls at a time?
  * 2. batch-size sweep — what does putting n items in one call do to cost per
- *    item and to per-item latency?
+ *    item, to how long a call takes, and to how long an item waits?
  * 3. micro-batching under arrivals — with items trickling in, how long is it
  *    worth holding a batch open to fill it?
  * 4. poisoned batches — when one bad item fails the whole call, what does
@@ -94,6 +94,15 @@ export interface BatchSizeRow {
   inputTokensPerItem: number;
   usdPer1kItems: number;
   makespanMs: number;
+  /** How long one call takes once a client worker picks it up. */
+  callP50Ms: number;
+  callP95Ms: number;
+  /**
+   * How long an item waits for its own result, measured from the start of
+   * the job. Every item is handed to the pool at t=0 here, so this includes
+   * the client-queue time the call latency leaves out — and that queue is
+   * exactly what a bigger batch shortens.
+   */
   itemP50Ms: number;
   itemP95Ms: number;
 }
@@ -125,13 +134,20 @@ export async function runBatchSizeSweep(cfg: BatchSizeConfig = BATCH_SWEEP): Pro
   for (const batchSize of cfg.batchSizes) {
     const clock = new VirtualClock();
     const api = new SimulatedApi(clock, createRng(cfg.seed));
-    const latencies: number[] = [];
+    const callLatencies: number[] = [];
+    const itemLatencies: number[] = [];
     const batches = chunk(makeItems(cfg.itemCount), batchSize);
     const run = mapBoundedSettled(batches, cfg.clientConcurrency, async (batch) => {
       const startedAt = clock.now();
       const result = await api.call(batch);
       const elapsed = clock.now() - startedAt;
-      for (let i = 0; i < batch.length; i++) latencies.push(elapsed);
+      // Every batch is submitted at t=0, so the clock reading at completion
+      // is the item's own wait, client queue included.
+      const finishedAt = clock.now();
+      for (let i = 0; i < batch.length; i++) {
+        callLatencies.push(elapsed);
+        itemLatencies.push(finishedAt);
+      }
       return result;
     });
     const { results } = await clock.runUntil(run);
@@ -143,8 +159,10 @@ export async function runBatchSizeSweep(cfg: BatchSizeConfig = BATCH_SWEEP): Pro
       inputTokensPerItem: stats.inputTokens / cfg.itemCount,
       usdPer1kItems: (costUsd(stats.inputTokens, stats.outputTokens, api.opts) / cfg.itemCount) * 1000,
       makespanMs: clock.now(),
-      itemP50Ms: p(latencies, 0.5),
-      itemP95Ms: p(latencies, 0.95),
+      callP50Ms: p(callLatencies, 0.5),
+      callP95Ms: p(callLatencies, 0.95),
+      itemP50Ms: p(itemLatencies, 0.5),
+      itemP95Ms: p(itemLatencies, 0.95),
     });
   }
   return rows;
