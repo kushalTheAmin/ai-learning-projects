@@ -44,6 +44,33 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-28] 06 — the results table's `p50` and `p99` columns were
+  computed over requests that succeeded, and nothing in the table said so.
+  success rates run 10.5% to 100% down that column, so the rows are latencies
+  over different populations and reading the column down compares them as if
+  they werent. no-retry read `p50 40ms`, the fastest number in the table, ahead
+  of every strategy that actually works — but 89.5% of its requests were
+  rejected at t=0 and never entered the percentile, so its median request took
+  0ms. fixed-100ms read 229ms against 800ms over every request, because a
+  give-up spends its whole 8-retry budget and then counts for nothing.
+  `runScenario` reports `p50AllMs` over every outcome now, the old columns are
+  labelled `p50 ok` / `p99 ok`, and the readme carries a bullet on the trap
+  plus a note on which column is readable across rows. no-retry 40ms → 0ms all,
+  fixed-100ms 229ms → 800ms all, decorrelated 240 → 277, retry-after 56 → 57,
+  every other row identical; no previously published number moved and the two
+  latency-free conclusions (synchronization, wasted work) are unchanged. p99
+  stays success-only on purpose — the "fatter success tail" bullet is a claim
+  about successes. 09 computes the same percentiles but records every item's
+  latency unconditionally and asserts all-ok, so it has no equivalent defect
+  and there was nothing to port. found and fixed 2026-08-28
+- [low] 06 — `peakArrivalsPerWindow` bins arrivals by `floor(t / windowMs)`
+  rather than sliding a window across them, while its docstring says "largest
+  number of arrivals landing inside any single window" — a burst straddling a
+  bin edge is split between two counts. checked against a real sliding maximum
+  on all eight strategies: only fixed-100ms differs, 69 binned vs 70 sliding,
+  so no published number is wrong and the 104-vs-61 comparison the readme
+  rests on holds either way. the definition is still not what the docstring
+  claims. found 2026-08-28
 - [fixed 2026-08-27] 05 — the field-availability table counted a field as
   available the moment its value *started*, not when it carried anything.
   the finding as first written named two fields; on checking it, only one is
@@ -169,6 +196,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 06-rate-limiting | 2026-08-28 |
 | 05-token-streaming | 2026-08-27 |
 | 03-hybrid-search | 2026-08-27 |
 | 04-bpe-tokenizer | 2026-08-27 |
@@ -236,6 +264,28 @@ leaves" and refuses to name a production constant, so it is disclosed, not
 claimed. the defect was one layer down in the shared tokenizer: the stemmer
 split words from their own inflections, fixed above. two smaller tokenizer
 findings came out of the same read and are listed open.
+
+06 came back clean on every algorithm and dirty on how the results were
+reported. all five backoff policies match the aws architecture blog term for
+term (full jitter draws [0, exp), equal jitter floors at exp/2, decorrelated
+draws [base, prev*3) capped and is the only one carrying prev forward, and the
+retry loop passes the policy's own delay forward rather than the retry-after
+override, so the decorrelated chain stays the policy's); the retry loop is
+1-indexed with `retriesUsed = attempt - 1` and stops exactly at maxRetries; the
+token bucket refills continuously and is the same class on both sides of the
+wire, so server and client cant disagree about what 20 req/s means; the virtual
+clock orders timers by (time, seq) and every strategy reruns byte-identical;
+`percentile` matches 02's interpolation; and all 8 rows of readme numbers match
+`npm start` today. the defect was one level up, in the table itself: the
+latency columns silently conditioned on success while success rates spanned
+10.5% to 100%, fixed above. one low finding on the peak-window definition came
+out of the same read and is listed open.
+
+worth recording as a habit: the wrong number here was not computed wrong, it
+was computed over the wrong set. every metric in a comparison table needs its
+population named, because the strategy that gives up most is the one a
+success-only average flatters most — and that is the strategy the table exists
+to warn about.
 
 ## MECHANISMS
 
