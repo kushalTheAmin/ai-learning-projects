@@ -28,7 +28,10 @@ def run_pipeline() -> tuple[list[float], int, int]:
 def test_pipeline_recall_rises_to_near_exact() -> None:
     recalls, build_dists, search_dists = run_pipeline()
     assert recalls == sorted(recalls)
-    assert recalls[-1] >= 0.95
+    # pinned: this seeded pipeline scores perfect recall at every ef, and the
+    # value is deterministic. a traversal change that quietly explores less
+    # (an early beam break, a skipped neighbor expansion) shows up here first
+    assert recalls == [1.0, 1.0, 1.0]
     assert build_dists > 0
     # 3 sweeps x 30 queries against a 250-vector corpus, still cheaper than
     # one exhaustive pass per query

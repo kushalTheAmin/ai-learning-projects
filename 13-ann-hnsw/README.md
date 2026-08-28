@@ -102,11 +102,12 @@ the same recall.
 
 ## wall clock, and where the distance count lies
 
-one run on this machine printed hnsw ef=32 at 0.331 ms/query vs 0.357 for the
-exact scan; those two numbers move a few percent run to run and the gap is
-nothing like the 15x the distance counts promise. the exact scan is one
-vectorized numpy pass, hnsw pays python-level overhead per visited node. at
-n=3000 they finish near a tie. the distance count is the portable number: it
+one run on this machine printed hnsw ef=32 at 0.360 ms/query vs 0.339 for the
+exact scan; those two numbers move a few percent run to run and even swap
+order between runs, nothing like the 15x the distance counts promise. the
+exact scan is one vectorized numpy pass, hnsw pays python-level overhead per
+visited node. at n=3000 they finish near a tie. the distance count is the
+portable number: it
 says what an implementation with a compiled per-candidate kernel (which is
 what hnswlib and faiss are) gets to keep. the honest claim is 15x fewer
 distance computations, not 15x faster in this runtime.
