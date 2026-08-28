@@ -74,7 +74,39 @@ class TestHeadlineResults:
         assert max(dup) > min(non)
 
 
+class TestTopicRelation:
+    def test_reads_the_docs_topics(self):
+        docs, _ = build()
+        by_id = {d.doc_id: d for d in docs}
+        assert entry.topic_relation(by_id, ("cache-01", "cache-02--typo")) == "same-topic"
+        assert (
+            entry.topic_relation(by_id, ("cache-03--truncate", "ratelimit-03--truncate"))
+            == "cross-topic"
+        )
+
+
 class TestEntryPoint:
+    def test_hardest_non_duplicate_is_labelled_by_its_real_topics(self, capsys):
+        # the widest non-duplicate on this corpus is cache-03 (thundering
+        # herd) against ratelimit-03 (retry hints) — two different topics.
+        # calling it same-topic overlap is the claim this pins.
+        entry.main()
+        out = capsys.readouterr().out
+        line = next(l for l in out.splitlines() if "hardest non-duplicate" in l)
+        assert "cache-03--truncate" in line and "ratelimit-03--truncate" in line
+        assert "cross-topic" in line
+        assert "same-topic" not in line
+
+    def test_reports_the_hardest_same_topic_non_duplicate(self, capsys):
+        # the ceiling that "topical overlap is invisible at the shingle
+        # level" actually rests on has to be measured, not assumed.
+        entry.main()
+        out = capsys.readouterr().out
+        line = next(
+            l for l in out.splitlines() if "hardest same-topic non-duplicate" in l
+        )
+        assert "index-02--truncate" in line and "index-03--drop" in line
+
     def test_full_run_prints_pinned_numbers(self, capsys):
         entry.main()
         out = capsys.readouterr().out

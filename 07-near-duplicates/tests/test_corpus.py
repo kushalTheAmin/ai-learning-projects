@@ -21,6 +21,11 @@ class TestLoadBaseDocs:
         assert all(d.kind == "base" for d in docs)
         assert len({d.doc_id for d in docs}) == 24
 
+    def test_topic_is_loaded(self):
+        by_id = {d.doc_id: d for d in load_base_docs(DATA_PATH)}
+        assert by_id["cache-01"].topic == "caching"
+        assert by_id["ratelimit-03"].topic == "rate limiting"
+
     def test_empty_file_raises(self, tmp_path):
         empty = tmp_path / "empty.jsonl"
         empty.write_text("\n\n", encoding="utf-8")
@@ -62,6 +67,12 @@ class TestBuildCorpus:
         base = load_base_docs(DATA_PATH)
         for d in build_corpus(base, seed=42):
             assert d.doc_id.startswith(d.group)
+
+    def test_mutants_keep_topic(self):
+        base = load_base_docs(DATA_PATH)
+        topics = {d.doc_id: d.topic for d in base}
+        for d in build_corpus(base, seed=42):
+            assert d.topic == topics[d.group]
 
 
 class TestPairs:

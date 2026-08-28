@@ -45,6 +45,12 @@ def pair_kind(docs_by_id: dict[str, Doc], pair: tuple[str, str]) -> str:
     return "mutant-mutant"
 
 
+def topic_relation(docs_by_id: dict[str, Doc], pair: tuple[str, str]) -> str:
+    """Whether a pair's two documents were written about the same topic."""
+    a, b = docs_by_id[pair[0]], docs_by_id[pair[1]]
+    return "same-topic" if a.topic == b.topic else "cross-topic"
+
+
 def recall_by_kind(
     docs_by_id: dict[str, Doc],
     predicted: set[tuple[str, str]],
@@ -105,9 +111,25 @@ def main() -> None:
     )
     nondup = [(exact[p], p) for p in pairs if p not in truth]
     hardest_val, hardest_pair = max(nondup)
+    ha, hb = docs_by_id[hardest_pair[0]], docs_by_id[hardest_pair[1]]
+    relation = topic_relation(docs_by_id, hardest_pair)
+    detail = ha.topic if relation == "same-topic" else f"{ha.topic} / {hb.topic}"
     print(
         f"  hardest non-duplicate: {hardest_pair[0]} vs {hardest_pair[1]} "
-        f"at {hardest_val:.3f} (same-topic vocabulary overlap)"
+        f"at {hardest_val:.3f} ({relation}: {detail})"
+    )
+    nd_same = [(v, p) for v, p in nondup if topic_relation(docs_by_id, p) == "same-topic"]
+    nd_cross = [(v, p) for v, p in nondup if topic_relation(docs_by_id, p) == "cross-topic"]
+    same_val, same_pair = max(nd_same)
+    print(
+        f"  hardest same-topic non-duplicate: {same_pair[0]} vs {same_pair[1]} "
+        f"at {same_val:.3f} ({docs_by_id[same_pair[0]].topic})"
+    )
+    print(
+        f"  non-duplicate means: same-topic "
+        f"{sum(v for v, _ in nd_same) / len(nd_same):.4f} over {len(nd_same)} pairs, "
+        f"cross-topic {sum(v for v, _ in nd_cross) / len(nd_cross):.4f} "
+        f"over {len(nd_cross)}"
     )
 
     print("\n== brute-force exact jaccard, threshold sweep ==")

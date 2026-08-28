@@ -22,6 +22,7 @@ class Doc:
     doc_id: str
     group: str
     kind: str  # "base" or the mutation name
+    topic: str
     text: str
 
 
@@ -32,7 +33,13 @@ def load_base_docs(path: Path) -> list[Doc]:
             continue
         row = json.loads(line)
         docs.append(
-            Doc(doc_id=row["doc_id"], group=row["doc_id"], kind="base", text=row["text"])
+            Doc(
+                doc_id=row["doc_id"],
+                group=row["doc_id"],
+                kind="base",
+                topic=row["topic"],
+                text=row["text"],
+            )
         )
     if not docs:
         raise ValueError(f"no documents found in {path}")
@@ -54,6 +61,7 @@ def build_corpus(base_docs: list[Doc], seed: int) -> list[Doc]:
                     doc_id=f"{doc.group}--{name}",
                     group=doc.group,
                     kind=name,
+                    topic=doc.topic,
                     text=mutate(doc.text, rng),
                 )
             )

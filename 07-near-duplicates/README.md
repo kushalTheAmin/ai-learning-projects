@@ -22,7 +22,7 @@ no api key, no network, stdlib plus pytest. runs in about half a second.
 
 corpus: 24 base docs x 5 mutations, 144 docs, 10296 pairs, 360 true duplicate pairs.
 
-separability first. exact jaccard on 3-word shingles puts every duplicate pair at 0.280 or above (mutant vs mutant pairs compound two mutations, so they sit lowest) while the hardest non-duplicate pair, two same-topic paragraphs about limiters, lands at 0.024. topical overlap is nearly invisible at the shingle level; two docs about caching share vocabulary but almost no 3-word sequences. so a threshold of 0.2 gives brute-force exact jaccard precision 1.000, recall 1.000 on this corpus, and the interesting question becomes what the approximations lose.
+separability first. exact jaccard on 3-word shingles puts every duplicate pair at 0.280 or above (mutant vs mutant pairs compound two mutations, so they sit lowest) while the hardest non-duplicate lands at 0.024 — cache-03 (thundering herd) against ratelimit-03 (retry hints), which is a cross-topic pair, not a same-topic one. the hardest pair that really does share a topic is index-02 vs index-03 at 0.011, less than half of it. the means say the same thing in the other direction: same-topic non-duplicates average 0.0005 over 864 pairs, cross-topic 0.0001 over 9072 — sharing a topic does move you up, 5x, but 5x of nearly nothing, and one shared turn of phrase across two topics clears the whole same-topic ceiling. topical overlap is nearly invisible at the shingle level either way; two docs about caching share vocabulary but almost no 3-word sequences. so a threshold of 0.2 gives brute-force exact jaccard precision 1.000, recall 1.000 on this corpus, and the interesting question becomes what the approximations lose.
 
 minhash estimator error on duplicate pairs, against exact jaccard:
 
@@ -72,6 +72,18 @@ minhash + lsh keeps a tunable estimate of jaccard and a tunable candidate curve,
 ## why python
 
 the ml-adjacent dedup literature and tooling (datasketch, spark minhash) live here, and the project is set arithmetic over big integers, which python does natively with zero dependencies; the whole thing is stdlib plus pytest and runs offline. the typescript version would spend its effort fighting 64-bit integer hashing in a language with 53-bit doubles.
+
+## fixes
+
+- 2026-08-28 — the hardest non-duplicate was printed with a hardcoded
+  "(same-topic vocabulary overlap)" label and the readme repeated it as "two
+  same-topic paragraphs about limiters", but the pair is cache-03 vs
+  ratelimit-03 - two different topics. `topic` was in `docs.jsonl` all along
+  and `load_base_docs` threw it away, so nothing could check. `Doc` carries
+  `topic` now and the entry point derives the label instead of asserting it,
+  plus prints the hardest genuinely same-topic pair and both means. hardest
+  non-duplicate still 0.024, now labelled cross-topic; same-topic ceiling is
+  0.011, means 0.0005 same vs 0.0001 cross. no measured number moved
 
 ## open questions
 
