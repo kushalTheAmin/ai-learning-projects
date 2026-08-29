@@ -132,10 +132,10 @@ fixture arguments match the rescan baseline at every fragment boundary.
 
 | doc chars | fragments | rescan+reparse | resumable view | speedup | snapshot per fragment |
 |---|---|---|---|---|---|
-| 266 | 23 | 0.09ms | 0.02ms | 3.7x | 0.08ms |
-| 1071 | 88 | 0.90ms | 0.17ms | 5.1x | 0.53ms |
-| 8273 | 662 | 40.58ms | 0.57ms | 71.1x | 12.79ms |
-| 65619 | 5264 | 2483.74ms | 3.85ms | 644.8x | 712.94ms |
+| 266 | 23 | 0.09ms | 0.03ms | 3.4x | 0.08ms |
+| 1071 | 88 | 0.90ms | 0.16ms | 5.5x | 0.57ms |
+| 8273 | 662 | 41.13ms | 0.71ms | 57.7x | 12.59ms |
+| 65619 | 5264 | 2457.96ms | 3.71ms | 662.5x | 669.45ms |
 
 Wall times are medians (50/20/5/3 repeats by row) on the machine that ran
 it and move a few percent run to run; the fragment and character counts are
@@ -144,12 +144,12 @@ this: at 65619 doc chars the baseline feeds 172521764 chars through its
 scanner, 2629.1x the document, and then pays roughly the same again in
 `JSON.parse` of the repaired text. The resumable scanner reads 65619 chars,
 1.0x, no reparse. At 1048586 chars the resumable view finishes the whole
-replay in 70.2ms over 84070 fragments, about 0.8µs per fragment; the
-baseline projects to ~635.9s by the n² law (projected, not run, that is ten
+replay in 69.1ms over 84070 fragments, about 0.8µs per fragment; the
+baseline projects to ~629.2s by the n² law (projected, not run, that is ten
 minutes of CPU for one megabyte of streamed JSON).
 
 The snapshot column is the honest asterisk: a deep copy per fragment is
-O(tree) again, so it grows quadratically too, 3.5x cheaper than the
+O(tree) again, so it grows quadratically too, 3.7x cheaper than the
 baseline at 64KB but the same shape. The win lives in `view()`, and `view()`
 comes with a contract: the value is the parser's live tree, valid until the
 next call, never to be mutated. Cheap reads or owned reads, pick per call.
