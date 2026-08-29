@@ -77,6 +77,55 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-29] 12 — `extract_numbers` ran `\d+(?:\.\d+)?` over the raw
+  text with no token boundary, so it pulled digits out of the middle of
+  identifiers: "p99" yielded 99, "ES256" yielded 256. those are not quantities
+  the text asserts, and because the context spells them the same way the
+  phantom number always matched, inflating both sides of the
+  `matched / claimed` fraction the numeric gate scores on. the one number swap
+  the gate misses, c06-5, swaps 210 ms for 610 ms — two figures, one right —
+  and scored 2/3 instead of 1/2 because "p99" was counted as a third figure
+  that checked out. the readme already stated the honest number ("half its
+  numbers check out and the score (0.5) clears the threshold") while the code
+  printed 0.667, and `test_integers_and_decimals` pinned the wrong behaviour
+  with the p99 case written into it. a literal has to start at a token
+  boundary now (`(?<![\w.])`), which also stops "v1.2.3" reading as 2.3 and 3.
+  no operating point and no category cell moved — c06-5 clears 0.328 either
+  way — but c06-5 goes 0.667 → 0.500 and four published numbers follow it:
+  numeric_gated AUC 0.553 → 0.560 and mean unsup 0.604 → 0.599,
+  negation_aware AUC 0.615 → 0.622 and mean unsup 0.439 → 0.435. readme table
+  and the "ceiling: AUC" sentence updated; root readme quotes only
+  sentence_cosine's row, which is byte-identical. nothing else in the repo
+  extracts numbers from text, so nothing to port. found and fixed 2026-08-29
+- [low] 12 — residual limit of the same fix: the boundary guard is on the left
+  only, so a digit run glued to a *following* word still reads as a number
+  ("38ms" → 38, which is right) and one glued after a hyphen still reads as
+  one ("COVID-19" → 19, which is not). deliberate — a number followed by its
+  unit is a genuine assertion and this dataset has no hyphenated identifiers —
+  but the rule is asymmetric and worth knowing before the extractor is reused.
+  found 2026-08-29
+- [low] 12 — "the only claims they trust are the verbatim copies" is true of
+  the supported side, which is what the sentence's own FPR clause is about,
+  but overlap at its 1.000 threshold leaves three unsupported claims unflagged
+  too. two are the bag-identical antonym flips the readme discusses four
+  bullets later; the third, c07-4, is nowhere: it deletes "not" from
+  "Delivery order is not guaranteed", so its content tokens are a strict
+  subset of the context and precision comes out exactly 1.0. deleting a word
+  is invisible to a precision metric — that is the sharper version of the
+  point the paragraph is making, and it is missing from it. found 2026-08-29
+- [medium] 12 — `main.py` indexes `rates[category]` for all 10 names in
+  `CATEGORY_ORDER`, so a dataset missing any one category dies with a bare
+  `KeyError`, and the row's `n` is read off the `total` left behind by the
+  last method's loop rather than from the category itself. both are
+  unreachable from the entry point, which pins the committed 60 claims and all
+  10 categories. same shape as the 01, 09, 10 and 11 findings above. found
+  2026-08-29
+- [low] 12 — `main.py` recomputes `flag_rates_by_category` inside the
+  category × method loop: 40 full passes over the 60 scored claims where 4
+  would do, since the threshold only varies by method. recomputation per row
+  rather than per method, so it is wrong in kind, but at n=60 it is
+  microseconds. `auc` likewise sorts both score lists and never uses the
+  ordering — dead, not wrong. found 2026-08-29
 - [fixed 2026-08-29] 11 — the volatile-header experiment divided both of its
   rows by the *stable* workload's no-caching cost, so the volatile row priced
   one traffic shape against a different one's baseline. the per-request
@@ -471,6 +520,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 12-groundedness-scoring | 2026-08-29 |
 | 11-prompt-caching | 2026-08-29 |
 | 10-chunking-strategies | 2026-08-29 |
 | 09-concurrency | 2026-08-28 |
@@ -650,6 +700,38 @@ the fifth reached for a baseline computed elsewhere in the function, and the
 0.002 it cost was too small to notice by reading the number. the check that
 catches it is structural, not arithmetic — for every ratio, name the
 denominator's population out loud and see whether it is the numerator's.
+
+12 came back clean on the evaluation and dirty on one scorer's input. the AUC
+is the mann-whitney statistic done exactly over all 25x35 pairs with ties at
+0.5 and it reads in the right direction (P(unsupported below supported), so
+sentence_cosine's 0.432 really is worse than chance); the youden sweep tries
+every threshold producing a distinct flagging — each unique score plus one
+above the max, which is the complete set for a strict `<` rule — and ties go
+to the lowest, which flags least; precision, recall and FPR are each computed
+over the right population and J is recall minus FPR row by row. evaluation
+hygiene holds: the tf-idf index is fitted per context on that context's own
+sentences and nothing from the claim set touches the fit, so there is no leak
+from the thing being scored into the thing scoring it. the thresholds are
+tuned and reported on the same 60 claims, which is the classic
+misleading-measurement shape, but the readme names it as such and refuses to
+publish an operating point as a setting — disclosed, not claimed. reuse is
+real: 02's tokenizer and TfidfIndex and 10's sentence splitter are imported,
+not reimplemented. output is byte-identical across reruns and under
+PYTHONHASHSEED, and every readme number matched `python main.py` before the
+fix. the defect was one layer down, in what counted as a number — `p99` was
+being read as the quantity 99 — fixed above. four smaller findings came out of
+the same read and are listed open.
+
+worth recording as a habit: the readme was right and the code was wrong. it
+said c06-5 scores 0.5 and the program printed 0.667, and the gap sat there
+because the review that produced the sentence reasoned about the claim's two
+figures while the code reasoned about three regex matches. when prose and
+output disagree by a little, the prose is often the honest one — it was
+written by someone counting the actual thing. the test made it worse: the
+p99 case was written into `test_integers_and_decimals` and its wrong answer
+pinned as expected, so the suite defended the bug. an example chosen because
+it is tricky needs its expected value derived from the definition, not from
+what the code happened to print.
 
 ## MECHANISMS
 
