@@ -76,7 +76,7 @@ def main() -> None:
     print(f"build distance computations: {build_dists} ({build_dists / n:.0f} per vector)")
     print(f"nodes per top level, bottom up: {levels}")
     print(f"layer-0 degree: mean {mean(degrees):.1f}, max {max(degrees)}")
-    print(f"layer-0 reachable from node 0: {index.reachable_on_layer0()} of {n}\n")
+    print(f"layer-0 reachable from the entry point: {index.reachable_on_layer0()} of {n}\n")
 
     print(f"== ef sweep (M={m}, k={K}) ==")
     print("ef     recall@10   dists/query   vs exact    wall ms/query (varies)")

@@ -224,12 +224,15 @@ class HnswIndex:
         return list(self._links[node][layer])
 
     def reachable_on_layer0(self) -> int:
-        """Nodes reachable from node 0 following layer-0 links. Anything
-        short of len(self) means part of the graph is invisible to search."""
-        if self._size == 0:
+        """Nodes reachable from the entry point following layer-0 links.
+        Layer-0 links are not symmetric — shrink can drop the back-link and
+        leave a one-way edge — so the start node decides the answer, and the
+        entry point is where every search begins. Short of len(self) means
+        the beam cannot walk to part of the graph from there."""
+        if self._entry is None:
             return 0
-        seen = {0}
-        frontier = [0]
+        seen = {self._entry}
+        frontier = [self._entry]
         while frontier:
             node = frontier.pop()
             for neighbor in self._links[node][0]:

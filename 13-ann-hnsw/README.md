@@ -40,8 +40,8 @@ landing in the wrong basin cant escape. the papers heuristic keeps a candidate
 only if it is closer to the new node than to every neighbor already kept,
 which suppresses redundant same-direction links and preserves the rare edge
 that crosses a gap. measured below: on tight clusters the naive rule strands
-145 of 2000 nodes unreachable from the rest of layer 0 and recall drops to
-0.809, the heuristic keeps the graph whole at 0.997.
+145 of 2000 nodes unreachable from the entry point every search starts at,
+and recall drops to 0.809, the heuristic keeps the graph whole at 0.997.
 
 ## how to run
 
@@ -92,6 +92,11 @@ uniform            heuristic   0.861       2000 of 2000
 uniform            naive       0.846       1996 of 2000
 ```
 
+`layer-0 reachable` walks layer-0 links out from the entry point, which is
+where every search begins — those links are one-way, shrink drops the
+back-link when a node runs over its degree cap, so the node you start the
+walk from decides the answer.
+
 on uniform data the two rules are 0.015 apart, on tight clusters the gap is
 0.188 and the naive graph is literally disconnected. the heuristic is not a
 tuning detail, it is what makes hnsw survive clustered data, and real
@@ -127,6 +132,17 @@ distance computations, not 15x faster in this runtime.
 - squared L2 only. cosine is L2 on normalized vectors so this covers the
   common embedding case, but inner-product search (unnormalized) needs a
   different candidate ordering.
+
+## fixes
+
+- 2026-08-29 — `reachable_on_layer0` started its walk at node 0, which is just
+  the first vector indexed and plays no part in any search. layer-0 links are
+  one-way — shrink drops the back-link when a node hits its degree cap — so
+  the start node decides the answer: on a seeded naive graph node 0 reaches 20
+  of 300 where the entry point reaches 261. it walks from the entry point now,
+  the same start 21s `reachable_live_from_entry` already used. no published
+  number moved, both starts agree on this data — but 145 stranded was right by
+  luck, not by measuring what a query can get to
 
 ## open questions
 

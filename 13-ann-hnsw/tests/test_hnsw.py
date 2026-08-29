@@ -107,6 +107,38 @@ def test_layer0_fully_connected_with_heuristic() -> None:
     assert hnsw.reachable_on_layer0() == 300
 
 
+def layer0_closure(hnsw: HnswIndex, start: int) -> set[int]:
+    """Independent reference: nodes reachable from start over layer-0 links."""
+    seen = {start}
+    frontier = [start]
+    while frontier:
+        node = frontier.pop()
+        for neighbor in hnsw.neighbors(node, 0):
+            if neighbor not in seen:
+                seen.add(neighbor)
+                frontier.append(neighbor)
+    return seen
+
+
+def test_reachability_is_probed_from_the_search_entry_point() -> None:
+    # layer-0 links are not symmetric: shrink can drop the back-link and
+    # leave a one-way edge, so which node the walk starts from decides the
+    # answer. every search starts at the entry point, so that is the only
+    # start that measures what a query can get to. this seeded naive-built
+    # graph puts node 0 in a pocket that reaches almost nothing while the
+    # entry point still reaches most of the corpus
+    data = clustered_dataset(300, 10, 8, 20, seed=2, cluster_std=0.04)
+    hnsw = HnswIndex(dim=8, m=4, ef_construction=40, seed=2, heuristic=False)
+    for v in data.vectors:
+        hnsw.add(v)
+    from_entry = len(layer0_closure(hnsw, hnsw._entry))
+    from_node_0 = len(layer0_closure(hnsw, 0))
+    # pinned: the two starts disagree by an order of magnitude here, which is
+    # what makes this graph worth keeping as the fixture
+    assert (from_entry, from_node_0) == (261, 20)
+    assert hnsw.reachable_on_layer0() == from_entry
+
+
 def test_same_seed_same_graph_same_results() -> None:
     a, _, vectors = build_pair(n=200, dim=6, seed=17)
     b, _, _ = build_pair(n=200, dim=6, seed=17)
