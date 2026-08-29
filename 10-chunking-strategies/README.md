@@ -85,13 +85,22 @@ what the table says:
   reading the chunk might still answer from the surviving piece, and measuring
   that needs a model in the loop.
 - bigger chunks trade precision for recall and you pay for it in context.
-  fixed-160 more than doubles ctx w@5 vs fixed-80 (755.8 vs 388.2) to buy its
-  recall, sentence-160 does the same trade at 0 splits. per word of prompt,
-  sentence-80 is the efficient point on this corpus.
+  fixed-160 nearly doubles ctx w@5 vs fixed-80 (755.8 vs 388.2, 1.95x) to buy
+  its recall, and sentence-160 pays slightly more than double for the same
+  trade at 0 splits (685.3 vs 333.7, 2.05x). per word of prompt, sentence-80
+  is the efficient point on this corpus.
 - the keyword vs paraphrase gap survives every chunking choice: sentence-80
   scores mrr@10 0.879 on keyword queries and 0.517 on paraphrase. chunking
   fixes boundary damage; it cannot make BM25 understand synonyms. that failure
   mode belongs to 03s dense retrieval story, not to chunking.
+
+## fixes
+
+- 2026-08-29 — the context bullet said fixed-160 "more than doubles" ctx w@5
+  vs fixed-80, but the two numbers in the same sentence are 755.8 vs 388.2 —
+  1.95x, not over 2x. the pair that does more than double is sentence-160 over
+  sentence-80 (2.05x), which the bullet called "the same trade". both multiples
+  are stated now and pinned by a test. no measured number moved.
 
 ## why python
 

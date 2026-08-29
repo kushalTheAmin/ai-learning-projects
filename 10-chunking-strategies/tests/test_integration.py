@@ -5,6 +5,7 @@ rates for the headline configurations. If the data or the chunkers
 change behavior, these fail loudly rather than letting the README drift.
 """
 
+import re
 from pathlib import Path
 
 from chunking.chunkers import fixed_chunks, sentence_chunks
@@ -103,3 +104,35 @@ def test_ranked_ids_are_real_chunks():
             doc_id, _, index = chunk_id.partition("#")
             assert doc_id in valid_docs
             assert index.isdigit()
+
+
+def test_readme_context_multiples_match_the_run():
+    # doubling the budget does not cost the same multiple for both
+    # strategies: fixed 80 -> 160 is 1.95x context, sentence 80 -> 160 is
+    # 2.05x. the README quotes both as "(bigger vs smaller, Nx)" and the
+    # prose leans on them, so pin the quoted multiples to the run rather
+    # than letting a rounded-up "more than doubles" stand for either.
+    docs, queries = load()
+    f80 = evaluate_config("f80", docs, queries, lambda d, t: fixed_chunks(d, t, size=80))
+    f160 = evaluate_config("f160", docs, queries, lambda d, t: fixed_chunks(d, t, size=160))
+    s80 = evaluate_config("s80", docs, queries, lambda d, t: sentence_chunks(d, t, budget=80))
+    s160 = evaluate_config("s160", docs, queries, lambda d, t: sentence_chunks(d, t, budget=160))
+    fixed_ratio = f160.mean_context_words / f80.mean_context_words
+    sentence_ratio = s160.mean_context_words / s80.mean_context_words
+    assert 1.9 < fixed_ratio < 2.0
+    assert sentence_ratio > 2.0
+
+    readme = (Path(__file__).parent.parent / "README.md").read_text(encoding="utf-8")
+    quoted = set(re.findall(r"\((\d+\.\d) vs (\d+\.\d), (\d+\.\d\d)x\)", readme))
+    assert quoted == {
+        (
+            f"{f160.mean_context_words:.1f}",
+            f"{f80.mean_context_words:.1f}",
+            f"{fixed_ratio:.2f}",
+        ),
+        (
+            f"{s160.mean_context_words:.1f}",
+            f"{s80.mean_context_words:.1f}",
+            f"{sentence_ratio:.2f}",
+        ),
+    }
