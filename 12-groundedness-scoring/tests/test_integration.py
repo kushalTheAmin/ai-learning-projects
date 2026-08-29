@@ -75,6 +75,15 @@ class TestFullPipeline:
                 if claim.category == "number_swap":
                     assert numeric_match(claim.text, bundle) < 1.0, claim.id
 
+    def test_c06_5_scores_half_its_numbers(self, contexts):
+        # the one number swap the gate misses. it asserts two figures,
+        # 38 (real) and 610 (invented), so exactly half check out. the
+        # "99" in "p99" names the percentile, it is not a third figure
+        context = next(c for c in contexts if c.id == "ctx-06")
+        claim = next(c for c in context.claims if c.id == "c06-5")
+        bundle = ContextBundle(context.text)
+        assert numeric_match(claim.text, bundle) == pytest.approx(0.5)
+
     def test_bag_identical_antonym_flips_look_verbatim_to_cosine(
         self, scored_by_method
     ):

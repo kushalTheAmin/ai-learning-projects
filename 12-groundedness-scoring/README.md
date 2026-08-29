@@ -61,8 +61,8 @@ from `python main.py` over the committed dataset:
 method              AUC  mean sup mean unsup    thr   prec  recall    FPR      J
 overlap           0.521     0.685      0.675  1.000  0.640   0.914  0.720  0.194
 sentence_cosine   0.432     0.668      0.762  1.000  0.647   0.943  0.720  0.223
-numeric_gated     0.553     0.668      0.604  0.328  1.000   0.229  0.000  0.229
-negation_aware    0.615     0.570      0.439  0.328  0.789   0.429  0.160  0.269
+numeric_gated     0.560     0.668      0.599  0.328  1.000   0.229  0.000  0.229
+negation_aware    0.622     0.570      0.435  0.328  0.789   0.429  0.160  0.269
 ```
 
 the AUC column is the story. overlap at 0.521 is a coin flip, and sentence
@@ -116,7 +116,7 @@ reading it:
 ## tradeoffs and where it breaks
 
 - lexical grounding is cheap, deterministic and explainable, and this project
-  shows its ceiling: AUC 0.615 with both consistency checks stacked. the gap
+  shows its ceiling: AUC 0.622 with both consistency checks stacked. the gap
   to a useful detector is exactly the part that needs meaning, not surface:
   entity swaps (0/7 at the tuned threshold), bag-identical reorderings (0.50
   recall at best), and paraphrase vs fabrication (the gated methods flag only
@@ -140,6 +140,17 @@ python was the right language here: the pieces this project stands on (02's
 tf-idf and tokenizer, 10's sentence splitter) are python, and importing them
 keeps one implementation of each mechanism per language instead of a second
 opinion in typescript.
+
+## fixes
+
+- 2026-08-29 — the number extractor read digits out of the middle of a token,
+  so "p99" handed the numeric gate a 99 that isnt a quantity anyone asserted —
+  and since the context says "p99" too, that phantom number always checked out.
+  c06-5 swaps 210 ms for 610 ms and scored 2 of 3 numbers matched instead of
+  the 1 of 2 it actually has. a numeric literal has to start at a token
+  boundary now. c06-5 0.667 → 0.500, numeric_gated AUC 0.553 → 0.560,
+  negation_aware 0.615 → 0.622, and the mean unsupported columns move with
+  them. no category row and no operating point changed
 
 ## open questions
 

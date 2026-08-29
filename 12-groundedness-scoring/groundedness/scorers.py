@@ -25,7 +25,9 @@ NEGATION_CUES = frozenset(
     {"not", "no", "never", "cannot", "without", "nor", "none"}
 )
 
-_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+# a numeric literal has to start at a token boundary: the digits in p99,
+# ES256 or v1.2.3 belong to the name, not to a quantity the text asserts
+_NUMBER_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+)?")
 _THOUSANDS_COMMA_RE = re.compile(r"(?<=\d),(?=\d)")
 
 
@@ -38,6 +40,9 @@ def extract_numbers(text: str) -> set[float]:
 
     Digits only: spelled-out numbers ("two week") are invisible here.
     Thousands separators are joined first so 10,000 reads as one number.
+    Digits glued to the rest of a token are not quantities: "p99" names a
+    percentile and "ES256" names an algorithm, so neither contributes a
+    number to check.
     """
     joined = _THOUSANDS_COMMA_RE.sub("", text)
     return {float(match) for match in _NUMBER_RE.findall(joined)}

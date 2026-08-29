@@ -37,7 +37,15 @@ class TestContentTokens:
 
 class TestExtractNumbers:
     def test_integers_and_decimals(self):
-        assert extract_numbers("38 ms and p99 is 99.5%") == {38.0, 99.0, 99.5}
+        assert extract_numbers("38 ms and p99 is 99.5%") == {38.0, 99.5}
+
+    def test_digits_inside_an_identifier_are_not_numbers(self):
+        # p99, ES256, s3 name a thing; the digits are not a quantity the
+        # text asserts, and counting them dilutes the numeric evidence
+        assert extract_numbers("the p99 is 610 ms") == {610.0}
+        assert extract_numbers("ES256 signs the token") == set()
+        assert extract_numbers("stored in s3 for 30 days") == {30.0}
+        assert extract_numbers("see v1.2.3 for the change") == set()
 
     def test_thousands_separator_joins(self):
         assert extract_numbers("batches of 10,000 rows") == {10000.0}
