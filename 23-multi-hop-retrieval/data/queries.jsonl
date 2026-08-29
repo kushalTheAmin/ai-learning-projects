@@ -1,0 +1,32 @@
+{"id": "t01", "kind": "two-hop", "question": "which postgres cluster stores the data behind invoice generation", "hop1_id": "resp-ledgerd", "answer_id": "infra-ledgerd", "bridge": ["ledgerd"]}
+{"id": "t02", "kind": "two-hop", "question": "which team is on call for billing statements", "hop1_id": "resp-ledgerd", "answer_id": "infra-ledgerd", "bridge": ["ledgerd"]}
+{"id": "t03", "kind": "two-hop", "question": "what region runs the code that sends the password reset email", "hop1_id": "resp-mailhawk", "answer_id": "infra-mailhawk", "bridge": ["mailhawk"]}
+{"id": "t04", "kind": "two-hop", "question": "which relay fleet handles the account notification email", "hop1_id": "resp-mailhawk", "answer_id": "infra-mailhawk", "bridge": ["mailhawk"]}
+{"id": "t05", "kind": "two-hop", "question": "what database holds the insurance quote pricing records", "hop1_id": "resp-quotewright", "answer_id": "infra-quotewright", "bridge": ["quotewright"]}
+{"id": "t06", "kind": "two-hop", "question": "who gets paged first when insurance quote pricing breaks", "hop1_id": "resp-quotewright", "answer_id": "infra-quotewright", "bridge": ["quotewright"]}
+{"id": "t07", "kind": "two-hop", "question": "which cassandra ring holds the state behind shipping labels", "hop1_id": "resp-shipmate", "answer_id": "infra-shipmate", "bridge": ["shipmate"]}
+{"id": "t08", "kind": "two-hop", "question": "what region hosts the order fulfillment pipeline", "hop1_id": "resp-shipmate", "answer_id": "infra-shipmate", "bridge": ["shipmate"]}
+{"id": "t09", "kind": "two-hop", "question": "which redis cluster keeps login sessions hot", "hop1_id": "resp-gatekeep", "answer_id": "infra-gatekeep", "bridge": ["gatekeep"]}
+{"id": "t10", "kind": "two-hop", "question": "which team is on call for oauth token issuing", "hop1_id": "resp-gatekeep", "answer_id": "infra-gatekeep", "bridge": ["gatekeep"]}
+{"id": "t11", "kind": "two-hop", "question": "which clickhouse warehouse stores the daily revenue rollups", "hop1_id": "resp-tallyman", "answer_id": "infra-tallyman", "bridge": ["tallyman"]}
+{"id": "t12", "kind": "two-hop", "question": "what region runs the finance reporting jobs", "hop1_id": "resp-tallyman", "answer_id": "infra-tallyman", "bridge": ["tallyman"]}
+{"id": "t13", "kind": "two-hop", "question": "which read replica serves the package tracking page", "hop1_id": "resp-parcelview", "answer_id": "infra-parcelview", "bridge": ["parcelview"]}
+{"id": "t14", "kind": "two-hop", "question": "which team carries the pager for package tracking", "hop1_id": "resp-parcelview", "answer_id": "infra-parcelview", "bridge": ["parcelview"]}
+{"id": "t15", "kind": "two-hop", "question": "which kafka log carries the sms delivery alerts", "hop1_id": "resp-chirpline", "answer_id": "infra-chirpline", "bridge": ["chirpline"]}
+{"id": "t16", "kind": "two-hop", "question": "what region hosts the sms alerting path", "hop1_id": "resp-chirpline", "answer_id": "infra-chirpline", "bridge": ["chirpline"]}
+{"id": "t17", "kind": "two-hop", "question": "which blob store keeps the rendered image thumbnails", "hop1_id": "resp-frameforge", "answer_id": "infra-frameforge", "bridge": ["frameforge"]}
+{"id": "t18", "kind": "two-hop", "question": "who is on call for image thumbnail rendering", "hop1_id": "resp-frameforge", "answer_id": "infra-frameforge", "bridge": ["frameforge"]}
+{"id": "t19", "kind": "two-hop", "question": "which warehouse backs the usage analytics dashboards", "hop1_id": "resp-duneview", "answer_id": "infra-duneview", "bridge": ["duneview"]}
+{"id": "t20", "kind": "two-hop", "question": "what region serves the usage analytics dashboards", "hop1_id": "resp-duneview", "answer_id": "infra-duneview", "bridge": ["duneview"]}
+{"id": "t21", "kind": "two-hop", "question": "which team is on call for the shipment tracking page", "hop1_id": "resp-parcelview", "answer_id": "infra-parcelview", "bridge": ["parcelview"]}
+{"id": "t22", "kind": "two-hop", "question": "what datastore backs the delivery alerting path", "hop1_id": "resp-chirpline", "answer_id": "infra-chirpline", "bridge": ["chirpline"]}
+{"id": "t23", "kind": "two-hop", "question": "which team owns the on call for the daily revenue rollups", "hop1_id": "resp-tallyman", "answer_id": "infra-tallyman", "bridge": ["tallyman"]}
+{"id": "t24", "kind": "two-hop", "question": "what database sits behind the quote page", "hop1_id": "resp-quotewright", "answer_id": "infra-quotewright", "bridge": ["quotewright"]}
+{"id": "s01", "kind": "single-hop", "question": "which team holds the on call rotation for ledgerd", "answer_id": "infra-ledgerd"}
+{"id": "s02", "kind": "single-hop", "question": "what region runs mailhawk", "answer_id": "infra-mailhawk"}
+{"id": "s03", "kind": "single-hop", "question": "which mysql cluster does quotewright keep its records in", "answer_id": "infra-quotewright"}
+{"id": "s04", "kind": "single-hop", "question": "is a stuck order in fulfillment a shipmate problem", "answer_id": "resp-shipmate"}
+{"id": "s05", "kind": "single-hop", "question": "which redis cluster does gatekeep keep hot state in", "answer_id": "infra-gatekeep"}
+{"id": "s06", "kind": "single-hop", "question": "what region hosts chirpline", "answer_id": "infra-chirpline"}
+{"id": "s07", "kind": "single-hop", "question": "which blob store does frameforge write finished output to", "answer_id": "infra-frameforge"}
+{"id": "s08", "kind": "single-hop", "question": "which clickhouse warehouse does duneview query directly", "answer_id": "infra-duneview"}
