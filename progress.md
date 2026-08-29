@@ -77,6 +77,44 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-29] 11 — the volatile-header experiment divided both of its
+  rows by the *stable* workload's no-caching cost, so the volatile row priced
+  one traffic shape against a different one's baseline. the per-request
+  `session N request M` line is 300 extra tokens the denominator never saw, so
+  the published ratio came out 1.252x where the honest same-workload ratio is
+  exactly 1.250x — the 1.25x write multiplier and nothing else, which is the
+  whole point of the experiment: zero reads, zero uncached tokens, every token
+  paying the write premium. the 0.002 is small but the shape is not: it is a
+  numerator and a denominator from different traffic, and this was the only
+  experiment of the five doing it (1, 4 and 5 all baseline against their own
+  events, 3 against its own). `runVolatileHeader` builds each variant's events
+  and baseline together now. two tests bind it: the volatile ratio must be
+  `1.25` to 10 places with `readTokens` and `uncachedTokens` both 0, and each
+  row's ratio must equal its cost over its own no-caching replay. readme and
+  root readme both updated, 1.252x → 1.250x; no other number moved and the
+  other four experiments are byte-identical. found and fixed 2026-08-29
+- [medium] 11, 18 — both projects print a column called `hit rate` and compute
+  it differently: 11 is token-weighted (`readTokens / prospective`, so the
+  89.6% in experiment 1 is a fraction of input tokens served from cache) and
+  18-semantic-caching is request-weighted (`hits / requests`). each is the
+  right metric for its own question and 11 prints the request count alongside
+  it as `hits 59/60`, so neither number is wrong — but the same label means
+  two things in two folders, which is exactly the reading error the label is
+  supposed to prevent. left open rather than renamed in the fix commit: it
+  touches 18's output and 18 has not been reviewed yet. found 2026-08-29
+- [low] 11 — experiment 5's readme sentence says "at 26 blocks per turn the
+  tail breakpoint cant see back far enough: hit rate collapses from 77.2% to
+  15.5%". 77.2% is the *spaced-15* row at 26 blocks, not the 10-block row the
+  sentence has just been describing — that one is 79.1%. read as a
+  strategy-vs-strategy comparison at 26 blocks it is correct, read as the
+  before/after of widening the turn it names a number that is not in that row.
+  the two candidates are 1.9 points apart so nothing turns on it. found
+  2026-08-29
+- [low] 11 — `runStrategyComparison` divides by `rows[0].totals.inputCost`
+  with no guard, so an event list whose baseline costs nothing yields NaN
+  savings rather than an error. same shape as the 01 and 10 findings above and
+  likewise unreachable from the entry point, which pins its own 6x10 workload.
+  found 2026-08-29
 - [fixed 2026-08-29] 10 — the context bullet claimed "fixed-160 more than
   doubles ctx w@5 vs fixed-80" and printed the refuting numbers in the same
   breath: 755.8 vs 388.2 is 1.9467x, under the 2x the prose asserted. the pair
@@ -433,6 +471,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 11-prompt-caching | 2026-08-29 |
 | 10-chunking-strategies | 2026-08-29 |
 | 09-concurrency | 2026-08-28 |
 | 08-agent-tool-loop | 2026-08-28 |
@@ -585,6 +624,32 @@ numbers the sentence already prints. this one was 1.95x, and the pair that did
 clear 2x was sitting in the same sentence being called "the same trade", so
 the check that catches it is arithmetic on numbers already published, not a
 rerun. it is the cheapest review pass in the repo and nothing else had run it.
+
+11 came back clean on the cache model and dirty on one denominator. the
+simulated prefix cache matches the published semantics term for term: reads
+bill 0.1x, 5m writes 1.25x and 1h writes 2x, a hit is the longest previously
+cached prefix reachable from any breakpoint's lookback, writes bill only the
+delta past that hit, prefixes under 1024 tokens silently dont cache while a
+longer breakpoint in the same request still does, reads refresh the timer with
+the entry's own ttl rather than the reading request's, and the 20-block
+lookback boundary is pinned at 19-behind-hits / 20-behind-misses. keys are
+length-prefixed per block so `["ab","c"]` and `["a","bc"]` cannot collide, and
+unicode blocks round-trip. every prospective token is conserved across
+strategies (uncached + read + write is the same total for none, static-only
+and incremental), which is the invariant the whole cost table rests on. output
+is byte-identical across reruns and under PYTHONHASHSEED, and all 24 readme
+numbers match `npm start`, verified from a fresh clone. experiments 1, 3, 4
+and 5 each baseline against their own events; experiment 2 did not, and that
+was the defect, fixed above. three smaller findings came out of the same read
+and are listed open, one of them a cross-project label clash with 18.
+
+worth recording as a habit: when one row in a table of ratios is built
+differently from its neighbours, that asymmetry is the finding. the four other
+experiments here computed a baseline from the same events they were pricing;
+the fifth reached for a baseline computed elsewhere in the function, and the
+0.002 it cost was too small to notice by reading the number. the check that
+catches it is structural, not arithmetic — for every ratio, name the
+denominator's population out loud and see whether it is the numerator's.
 
 ## MECHANISMS
 
