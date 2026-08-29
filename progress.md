@@ -60,6 +60,44 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-29] 10 — the context bullet claimed "fixed-160 more than
+  doubles ctx w@5 vs fixed-80" and printed the refuting numbers in the same
+  breath: 755.8 vs 388.2 is 1.9467x, under the 2x the prose asserted. the pair
+  that does more than double is sentence-160 over sentence-80 (685.3 vs 333.7,
+  2.0537x), which the same sentence waved off as "the same trade" — so the
+  multiple was not just rounded up, it was attached to the wrong pair. the
+  computation was never wrong; only the sentence was. both multiples are stated
+  explicitly now and `test_readme_context_multiples_match_the_run` parses the
+  `(bigger vs smaller, Nx)` triples back out of the readme and checks them
+  against the run, so the prose cannot round them together again. no measured
+  number moved and `main.py` output is byte-identical. found and fixed
+  2026-08-29
+- [medium] 10 — `evaluate_config` on an empty query list dies inside 02's
+  `mean` with "cannot take the mean of an empty list", reached through
+  `split_rate`; the function already guards the other empty input ("chunker
+  produced no chunks") so the asymmetry is the defect, not the crash. same
+  shape as the 08 and 09 findings above and, like them, unreachable from the
+  entry point: `_read_jsonl` rejects an empty queries file and `main.py` pins
+  its own 40. left open rather than fixed because the twins in 08 and 09 are
+  typescript, so it is not the identical change. found 2026-08-29
+- [low] 10 — `ctx w@5` sums `word_count` per chunk over the top 5, so the two
+  overlap rows count every duplicated word once per chunk that carries it.
+  deduping the top-5 character spans puts ov-20 at 357.3 words rather than
+  388.8 and ov-40 at 312.4 rather than 395.4. the column is labelled "the words
+  you would stuff into a prompt if you passed the top 5 chunks along", which is
+  literally what naive concatenation costs, so it is honest as defined — but
+  deduped, ov-40 is a *cheaper* context bill than sentence-80 (312.4 vs 333.7)
+  rather than a dearer one, and the readme uses this column for its efficiency
+  argument. no published conclusion turns on it: overlap's stated cost is index
+  size, and sentence-80 still wins hit@5 0.850 vs 0.800. found 2026-08-29
+- [low] 10 — "per word of prompt, sentence-80 is the efficient point on this
+  corpus" is the one reading the table does not support. per 100 context words
+  sentence-40 returns hit@5 0.467 against sentence-80's 0.255 and mrr@10 0.386
+  against 0.209, and it beats every fixed config at a fifth of fixed-160's
+  context. sentence-80 is the knee in *marginal* return (40 → 80 buys 0.093
+  hit@5 per 100 extra words, 80 → 160 only 0.021), which is probably what was
+  meant, so this is an ambiguous sentence rather than a false one — logged
+  rather than rewritten. found 2026-08-29
 - [fixed 2026-08-28] 09 — the batch-size sweep's latency column was labelled
   `item p50` / `item p95` but measured a call's duration, timed from the
   moment a client worker picked the batch up. all 240 items are handed to the
@@ -378,6 +416,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 10-chunking-strategies | 2026-08-29 |
 | 09-concurrency | 2026-08-28 |
 | 08-agent-tool-loop | 2026-08-28 |
 | 07-near-duplicates | 2026-08-28 |
@@ -496,6 +535,39 @@ draws is a paired comparison in name only. the tell was cheap — an extra model
 call priced under the floor of one model call — and it is worth looking for
 wherever two runs get subtracted: does the difference have a value the
 mechanism could not produce.
+
+10 came back clean on every mechanism and dirty on one sentence. the chunkers
+hold their invariants under 4000 random configurations: spans map back to the
+source, no word is lost or duplicated at any (size, overlap), no window is
+contained in another, and span-arithmetic coverage agrees with substring
+containment on every generated answer — so `best_coverage == 1.0` iff the
+answer is not split, which is the hinge the whole eval turns on. the sentence
+splitter survives 20000 fuzzed documents on all three of its documented
+invariants (spans map back, spans never overlap, only whitespace between
+consecutive spans) plus a fourth it does not claim but 12 depends on: no
+non-whitespace text is ever dropped. it is load-bearing beyond this project —
+12-groundedness-scoring imports `split_sentences` rather than rewriting it, so
+a boundary bug here would move 12's numbers too. every one of the 40 gold
+answers is exactly one splitter sentence, which is what makes "sentence
+packing can never split an answer" true by construction rather than by luck.
+metrics are 02's, imported: reciprocal rank 1-indexed and cut at 10, hit@k
+slicing k, ties broken on chunk id so reruns are byte-identical across
+PYTHONHASHSEED. no query or gold text reaches the chunker or the index —
+`chunk_corpus` and `BM25Index` see documents only. the ranked list is exactly
+10 long for all 40 queries in all 8 configs, so `ctx w@5` always sums 5 chunks
+and the cross-config context comparison is like for like. all 10 table rows and
+all 11 prose numbers match `main.py` today, verified from a fresh clone.
+
+the defect was in the prose: a stated multiple the sentence's own numbers
+refute, and attached to the wrong pair of the two it names. fixed above.
+three smaller findings came out of the same read and are listed open.
+
+worth recording as a habit: a magnitude word is a claim and gets checked like
+one. "more than doubles", "an order of magnitude", "halves" — divide the two
+numbers the sentence already prints. this one was 1.95x, and the pair that did
+clear 2x was sitting in the same sentence being called "the same trade", so
+the check that catches it is arithmetic on numbers already published, not a
+rerun. it is the cheapest review pass in the repo and nothing else had run it.
 
 ## MECHANISMS
 
