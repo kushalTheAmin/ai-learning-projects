@@ -35,6 +35,16 @@ that, from scratch, and measures each one.
   input it finishes the current token when unambiguous (close the string,
   `tru` → `true`, trim `12.` to `12`), drops what it can't finish (a key
   with no value yet), and closes the open containers.
+- **`src/resumableJson.ts`**: the same partial-JSON semantics without the
+  rescan. `parsePartialJson` starts from character zero on every call, so a
+  snapshot per fragment costs O(n²) over the stream. this parser carries its
+  state between `push` calls instead: the container stack holds references
+  into the value tree it is building, string tokens decode as their
+  characters arrive, and the accumulated text is never kept at all. two read
+  paths with different prices: `view()` returns the live tree in O(1) beyond
+  finishing the dangling token, `snapshot()` returns a deep copy you can
+  keep, at O(tree). `src/resumableBench.ts` generates seeded documents and
+  replays them through both parsers to price the difference.
 - **`src/queue.ts`** — bounded async queue with producer-side backpressure:
   `await push()` doesn't resolve while the buffer is full, so the producer
   runs at the consumer's pace. Records its own high-water mark and stall
@@ -46,8 +56,8 @@ that, from scratch, and measures each one.
 
 ```
 npm ci
-npm test        # 57 tests
-npm start       # the four measurements below
+npm test        # 77 tests
+npm start       # the five measurements below
 npm run typecheck
 ```
 
@@ -110,6 +120,40 @@ does.
 the same wire produce byte-identical event sequences, plus a byte-by-byte
 degenerate case and a mixed CRLF/CR/LF wire fuzzed separately in the tests.
 
+**5. Resumable scan vs full rescan.** The open question from the first
+version of this project: partial snapshots recomputed from the accumulated
+text are O(n²) over the stream, so at what size does that matter. Answer
+from the sweep below: there is no crossover to wait for, the resumable
+scanner wins at every size measured, and the gap grows quadratically. Same
+workload both sides, one value materialized after every fragment, seeded
+fragments of 1 to 24 chars, correctness cross-checked by asserting all modes
+end on identical results. Equivalence first: 300/300 seeded chunkings of the
+fixture arguments match the rescan baseline at every fragment boundary.
+
+| doc chars | fragments | rescan+reparse | resumable view | speedup | snapshot per fragment |
+|---|---|---|---|---|---|
+| 266 | 23 | 0.09ms | 0.02ms | 3.7x | 0.08ms |
+| 1071 | 88 | 0.90ms | 0.17ms | 5.1x | 0.53ms |
+| 8273 | 662 | 40.58ms | 0.57ms | 71.1x | 12.79ms |
+| 65619 | 5264 | 2483.74ms | 3.85ms | 644.8x | 712.94ms |
+
+Wall times are medians (50/20/5/3 repeats by row) on the machine that ran
+it and move a few percent run to run; the fragment and character counts are
+exact and reproduce every run. The work counts say why the table looks like
+this: at 65619 doc chars the baseline feeds 172521764 chars through its
+scanner, 2629.1x the document, and then pays roughly the same again in
+`JSON.parse` of the repaired text. The resumable scanner reads 65619 chars,
+1.0x, no reparse. At 1048586 chars the resumable view finishes the whole
+replay in 70.2ms over 84070 fragments, about 0.8µs per fragment; the
+baseline projects to ~635.9s by the n² law (projected, not run, that is ten
+minutes of CPU for one megabyte of streamed JSON).
+
+The snapshot column is the honest asterisk: a deep copy per fragment is
+O(tree) again, so it grows quadratically too, 3.5x cheaper than the
+baseline at 64KB but the same shape. The win lives in `view()`, and `view()`
+comes with a contract: the value is the parser's live tree, valid until the
+next call, never to be mutated. Cheap reads or owned reads, pick per call.
+
 ## Design notes, and the honest parts
 
 - **A partial value is a snapshot, not a promise.** `"12` may become `125`,
@@ -137,6 +181,20 @@ degenerate case and a mixed CRLF/CR/LF wire fuzzed separately in the tests.
   couldn't catch that; it took a dedicated mixed-endings wire to put the CR
   paths under fuzz at all. Fuzzing only the bytes you happen to emit is a
   quiet way to test nothing.
+- **The resumable parser is pinned to the baseline, not to a spec.** Its
+  contract is "same answer as `parsePartialJson` for every prefix of a valid
+  JSON document", and the tests hold that prefix by prefix, under seeded
+  chunkings, and through split escape sequences and surrogate pairs. On
+  invalid input it diverges twice, on purpose: it never throws (the baseline
+  can let `JSON.parse` escape on a raw control character inside a completed
+  string), and once a fragment poisons the document it answers unparseable
+  forever without scanning another char.
+- **`view()` moves the cost to a contract.** The O(1) read hands out the
+  live tree, so a dangling token's completed value is spliced in and
+  reverted on the next call; hold that reference across a `push` and you
+  are reading a mutating object. `snapshot()` exists exactly so the caller
+  can pay O(tree) to opt out. An API that hid this by always copying would
+  quietly reinstate the quadratic bill the scanner just removed.
 - **Backpressure didn't cost throughput here, but that's the setup
   talking.** With a consumer-bound pipeline, pacing the producer is free.
   With a bursty consumer, a capacity of 8 would add latency the unbounded
@@ -160,10 +218,19 @@ degenerate case and a mixed CRLF/CR/LF wire fuzzed separately in the tests.
 - The queue's capacity is in chunks, not bytes — a byte-budgeted queue is
   what a real memory ceiling wants. What does the high-water story look
   like when chunk sizes vary by 1000x?
-- Partial-JSON snapshots are recomputed from the full accumulated text on
-  every fragment — O(n²) over the stream. A resumable scanner that carries
-  its state between fragments is the fix; at what document size does the
-  recompute actually matter?
 - The SSE parser buffers one line, but a malicious or broken stream can
   send an unbounded line with no terminator. Where's the cap, and what's
   the right failure mode when it's hit?
+- The snapshot column grows quadratically because a deep copy touches the
+  whole tree. A persistent-structure version (path copying, shared
+  unchanged children) would make an owned snapshot O(depth) per fragment;
+  what does that cost `push`, and where is the crossover against
+  `structuredClone`?
+- The resumable parser reads decoded strings, so 22's pipeline still pays
+  a `TextDecoder` pass between the SSE layer and this one. A scanner over
+  raw UTF-8 bytes would fuse those and could feed directly from the wire;
+  whether the fused version beats decoder + scanner is unmeasured.
+- `view()` per fragment is ~0.8µs, so the next bottleneck in a real client
+  is probably the consumer reacting to every fragment. A dirty-flag layer
+  (which paths changed since the last view) would let a UI re-render only
+  what moved; the bookkeeping cost per push is the open number.

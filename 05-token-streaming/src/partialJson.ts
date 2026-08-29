@@ -41,9 +41,9 @@ type Token =
   | { type: "number"; start: number }
   | { type: "literal"; start: number };
 
-const NUMBER_CHARS = /[0-9eE+\-.]/;
-const NUMBER_RE = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/;
-const LITERALS = ["true", "false", "null"];
+export const NUMBER_CHARS = /[0-9eE+\-.]/;
+export const NUMBER_RE = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/;
+export const LITERALS = ["true", "false", "null"];
 
 export function parsePartialJson(text: string): PartialResult {
   const scan = scanPrefix(text);

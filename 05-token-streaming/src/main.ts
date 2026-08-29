@@ -21,6 +21,9 @@ import { parseSseComplete } from "./sse.js";
 import { chunkOffsets } from "./chunker.js";
 import { AsyncQueue } from "./queue.js";
 import { SseParser } from "./sse.js";
+import { parsePartialJson } from "./partialJson.js";
+import { ResumableJsonParser } from "./resumableJson.js";
+import { makeToolCallJson, replayTimed } from "./resumableBench.js";
 
 const SEED = 20260826;
 
@@ -163,7 +166,84 @@ async function fuzzDemo(): Promise<void> {
   if (identical !== seeds) throw new Error("fuzz mismatch");
 }
 
+function resumableDemo(): void {
+  console.log("");
+  console.log("== 5. resumable partial-JSON scan vs full rescan ==");
+
+  // Equivalence: the resumable view must match the baseline at every
+  // fragment boundary, under adversarial chunking of the fixture arguments.
+  const argsJson = JSON.stringify(TOOL_ARGS);
+  const seeds = 300;
+  let identical = 0;
+  for (let seed = 1; seed <= seeds; seed++) {
+    const parser = new ResumableJsonParser();
+    let previous = 0;
+    let allMatch = true;
+    for (const boundary of chunkOffsets(argsJson.length, seed, 17)) {
+      parser.push(argsJson.slice(previous, boundary));
+      previous = boundary;
+      const resumable = JSON.stringify(parser.view());
+      const baseline = JSON.stringify(parsePartialJson(argsJson.slice(0, boundary)));
+      if (resumable !== baseline) allMatch = false;
+    }
+    if (allMatch) identical++;
+  }
+  console.log(
+    `equivalence: ${identical}/${seeds} seeded chunkings match the rescan baseline at every fragment boundary`,
+  );
+  if (identical !== seeds) throw new Error("resumable/baseline mismatch");
+
+  // Cost: one value materialized after every fragment, seeded fragments of
+  // 1..24 chars, median wall time over the repeat count per row.
+  const benchSeed = SEED;
+  const rows: { target: number; repeats: number }[] = [
+    { target: 256, repeats: 50 },
+    { target: 1024, repeats: 20 },
+    { target: 8192, repeats: 5 },
+    { target: 65536, repeats: 3 },
+  ];
+  console.log("cost of a value after every fragment (fragments of 1..24 chars, median of the listed repeats):");
+  console.log(
+    `  ${"doc chars".padStart(9)} ${"fragments".padStart(9)} ${"rescan+reparse".padStart(15)}` +
+      ` ${"resumable view".padStart(15)} ${"speedup".padStart(8)} ${"snapshot/frag".padStart(14)} ${"reps".padStart(5)}`,
+  );
+  let last65536BaselineMs = NaN;
+  for (const { target, repeats } of rows) {
+    const json = makeToolCallJson(target, benchSeed);
+    const baseline = replayTimed(json, benchSeed, 24, "baseline", repeats);
+    const view = replayTimed(json, benchSeed, 24, "view", repeats);
+    const snapshot = replayTimed(json, benchSeed, 24, "snapshot", repeats);
+    if (baseline.finalResult !== view.finalResult || baseline.finalResult !== snapshot.finalResult) {
+      throw new Error(`final results diverge at ${target} chars`);
+    }
+    if (target === 65536) last65536BaselineMs = baseline.ms;
+    console.log(
+      `  ${String(json.length).padStart(9)} ${String(view.fragments).padStart(9)}` +
+        ` ${`${fmt(baseline.ms, 2)}ms`.padStart(15)} ${`${fmt(view.ms, 2)}ms`.padStart(15)}` +
+        ` ${`${fmt(baseline.ms / view.ms)}x`.padStart(8)} ${`${fmt(snapshot.ms, 2)}ms`.padStart(14)}` +
+        ` ${String(repeats).padStart(5)}`,
+    );
+  }
+
+  const big = makeToolCallJson(65536, benchSeed);
+  const bigBaseline = replayTimed(big, benchSeed, 24, "baseline", 1);
+  console.log(
+    `chars fed to the scanner at ${big.length} doc chars: baseline ${bigBaseline.charsScanned}` +
+      ` (${fmt(bigBaseline.charsScanned / big.length)}x the document, before the same again in JSON.parse),` +
+      ` resumable ${big.length} (1.0x)`,
+  );
+
+  const huge = makeToolCallJson(1048576, benchSeed);
+  const hugeView = replayTimed(huge, benchSeed, 24, "view", 3);
+  const projected = (last65536BaselineMs * (huge.length / 65536) ** 2) / 1000;
+  console.log(
+    `resumable view at ${huge.length} doc chars: ${fmt(hugeView.ms)}ms over ${hugeView.fragments} fragments;` +
+      ` the baseline projects to ~${fmt(projected)}s by the n² law (projected, not run)`,
+  );
+}
+
 await streamingDemo();
 await partialJsonDemo();
 await backpressureDemo();
 await fuzzDemo();
+resumableDemo();
