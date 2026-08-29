@@ -25,7 +25,7 @@ node 20+. no network calls at runtime, everything is offline and deterministic (
 
 **1. breakpoint placement, 6 interleaved conversations x 10 turns, 30s mean gap.** no caching bills $0.3184 input. one breakpoint on the static tools+system prefix saves 44.2% ($0.1775, hit rate 49.4%), and the documented agent-loop combination, static breakpoint plus a moving one on the last block, saves 78.0% ($0.0700, hit rate 89.6%). the incremental run shows the healthy signature: uncached drops to 0, reads carry the conversation (142616 tokens), writes stay small (16608 tokens, each turn writing only its own delta).
 
-**2. the volatile header.** same workload, same incremental breakpoints, but the system prompt now starts with a per-request `session N request M` line. hits go from 59/60 to 0/60 and cost lands at 1.252x of not caching at all ($0.3988 vs $0.0700 with a stable header, more than a 5x swing from one line of prompt assembly). this is the classic silent invalidator: nothing errors, the bill just goes up, because every request pays the 1.25x write premium on a prefix nobody will ever read back.
+**2. the volatile header.** same conversations, same incremental breakpoints, but the system prompt now starts with a per-request `session N request M` line. hits go from 59/60 to 0/60 and cost lands at exactly 1.250x of not caching this traffic ($0.3988 vs $0.0700 with a stable header, more than a 5x swing from one line of prompt assembly). the header is extra tokens on every request, so it gets its own no-caching baseline — priced against it, the ratio is the 1.25x write multiplier and nothing else. this is the classic silent invalidator: nothing errors, the bill just goes up, because every request pays the 1.25x write premium on a prefix nobody will ever read back.
 
 **3. one-shot requests.** 40 unique prompts with caching left on bill exactly 1.250x of no caching ($0.1548 vs $0.1239): all 61931 prospective tokens are written, none are ever read. caching is not a default-on flag, it is a bet on repetition, and unique traffic loses the bet by construction.
 
@@ -44,6 +44,15 @@ node 20+. no network calls at runtime, everything is offline and deterministic (
 ## why typescript
 
 this is the day-job side of the portfolio: cache accounting is the kind of thing that ships inside a typescript api gateway or agent runtime, and the project imports the token estimator from 08 and the seeded rng from 05 rather than reimplementing either. strict mode, no `any`, exhaustive small tests on the billing arithmetic, since the whole value of a cost model is that the arithmetic binds.
+
+## fixes
+
+- 2026-08-29 — the volatile header experiment divided by the *stable*
+  workload's no-caching cost, so it priced one traffic shape against another
+  one's baseline — the header adds 300 tokens the denominator never saw. every
+  other experiment already baselines against its own events. each variant gets
+  its own baseline now and the volatile row lands on exactly the write
+  multiplier: 1.252x → 1.250x. nothing else moved
 
 ## open questions
 

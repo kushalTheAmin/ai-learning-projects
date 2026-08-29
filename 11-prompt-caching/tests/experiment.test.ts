@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { TTL_5M_MS } from "../src/pricing.js";
 import { incremental, none, staticOnly } from "../src/strategies.js";
 import {
+  DEFAULT_SEED,
   agentWorkload,
   replay,
   runLookback,
@@ -65,9 +66,28 @@ describe("volatile header", () => {
   });
 
   it("costs more than not caching at all: every token pays the write premium", () => {
-    expect(volatileRow.costRatioVsNone).toBeGreaterThanOrEqual(1.25);
-    expect(volatileRow.costRatioVsNone).toBeLessThan(1.3);
+    // zero reads and zero uncached tokens, so the ratio is the write
+    // multiplier itself and nothing else
+    expect(volatileRow.totals.readTokens).toBe(0);
+    expect(volatileRow.totals.uncachedTokens).toBe(0);
+    expect(volatileRow.costRatioVsNone).toBeCloseTo(1.25, 10);
     expect(stableRow.costRatioVsNone).toBeLessThan(0.3);
+  });
+
+  it("prices each variant against its own workload's no-caching baseline", () => {
+    // the volatile header adds tokens to every request, so the two variants
+    // are different traffic and cannot share a denominator
+    for (const [row, volatile_] of [
+      [stableRow, false],
+      [volatileRow, true],
+    ] as const) {
+      const events = agentWorkload(DEFAULT_SEED, 6, 10, 30_000, volatile_);
+      const ownBaseline = replay(events, none, TTL_5M_MS).inputCost;
+      expect(row.costRatioVsNone).toBeCloseTo(row.totals.inputCost / ownBaseline, 12);
+    }
+    const stableTokens = replay(agentWorkload(DEFAULT_SEED, 6, 10, 30_000, false), none, TTL_5M_MS);
+    const volatileTokens = replay(agentWorkload(DEFAULT_SEED, 6, 10, 30_000, true), none, TTL_5M_MS);
+    expect(volatileTokens.uncachedTokens).toBeGreaterThan(stableTokens.uncachedTokens);
   });
 });
 

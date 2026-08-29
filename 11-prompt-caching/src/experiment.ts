@@ -130,17 +130,18 @@ export interface VolatileRow {
 }
 
 export function runVolatileHeader(seed = DEFAULT_SEED): VolatileRow[] {
-  const stableEvents = agentWorkload(seed, 6, 10, 30_000, false);
-  const volatileEvents = agentWorkload(seed, 6, 10, 30_000, true);
-  const baseline = replay(stableEvents, none, TTL_5M_MS).inputCost;
-  const rows: VolatileRow[] = [
-    { variant: "stable header", totals: replay(stableEvents, incremental, TTL_5M_MS), costRatioVsNone: 0 },
-    { variant: "volatile header", totals: replay(volatileEvents, incremental, TTL_5M_MS), costRatioVsNone: 0 },
+  // The header adds tokens to every request, so the two variants are
+  // different traffic: each is priced against its own no-caching baseline.
+  const variants = [
+    { variant: "stable header", volatileHeader: false },
+    { variant: "volatile header", volatileHeader: true },
   ];
-  for (const row of rows) {
-    row.costRatioVsNone = row.totals.inputCost / baseline;
-  }
-  return rows;
+  return variants.map(({ variant, volatileHeader }) => {
+    const events = agentWorkload(seed, 6, 10, 30_000, volatileHeader);
+    const baseline = replay(events, none, TTL_5M_MS).inputCost;
+    const totals = replay(events, incremental, TTL_5M_MS);
+    return { variant, totals, costRatioVsNone: totals.inputCost / baseline };
+  });
 }
 
 // ---------------------------------------------------------------------------
