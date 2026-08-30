@@ -75,7 +75,7 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
 - **head-and-tail buys early facts with medium ones.** at 400 it holds 17.5% of long-lag probes where sliding holds 0.0%, because facts introduced in the pinned head stay forever. the price shows at the same budget: medium drops from 45.0% to 20.0%, the pinned head is budget the tail doesnt get
 - **summarizing with the wrong salience is worse than not summarizing.** luhn-25% at 800 lands at 71.3% overall against sliding-window's 74.6%, and its long-lag column reads 15.0% against 23.8%. the summary block spent budget on chatter, and the tail it displaced was holding real facts. more summary makes it worse: luhn at 50% share falls to 61.7%
 - **the failure is the salience definition, not summarization.** luhn keeps what the conversation talks about most, but a decision stated once is by definition the rarest thing in the transcript. flip the scorer to rarity and the same policy at the same budget goes to 85.8% overall and 57.5% long-lag, at the same cost. the share sweep slopes in opposite directions for the two scorers: more luhn summary loses facts, more rarity summary keeps them (92.5% long-lag at 50% share)
-- **buried facts pay a tax under every policy that looks at sentences.** rarity-25% holds 89.2% of standalone facts and 82.5% of buried ones, because a long chatty sentence dilutes the mean rarity of the nonce inside it. the window policies dont care, they keep or drop whole turns
+- **the standalone vs buried split doesnt hold up, and it isnt a sentence-scoring effect.** rarity-25% at 800 keeps 89.2% of standalone facts against 82.5% of buried ones, which reads like a tax on burying a nonce inside a long chatty sentence — until you check the neighbouring rows. luhn-25% at the same budget goes the other way (69.2% standalone, 73.3% buried), and sliding-window, which never looks at a sentence at all, has the widest split in the table (78.3% vs 70.8%). thats 120 probes a side and no gap anywhere in the sweep clears two standard errors — the biggest is rarity-25% at 400, 11.7 points at z=1.84. there is a mechanism that would explain a *window* gap if the effect were real — a buried intro turn is 73.9 tokens against a standalone one's 34.3, so it drops out of a token budget sooner — but this workload cant separate any of it from noise
 - **cost is flat across policies at a fixed budget.** every 800-budget row costs about $0.074 per conversation against $0.109 for full-history, a 32% saving here. the real spread is retention at equal cost, which is the entire argument for spending eviction effort well. the saving grows with conversation length: full-history's call size nearly triples from exchange 15 to 30 while the budgeted call is flat, so on 100-exchange conversations the gap is much larger than a third
 
 ## honest caveats
@@ -85,6 +85,15 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
 - retention is substring presence, not answer quality. a model can miss a fact thats in context and no policy here can fix that
 - the probe never restates the value. real conversations re-mention decisions, which refreshes them into any recency-based window and would flatter sliding-window relative to these numbers
 
+## fixes
+
+- 2026-08-30 — the buried-fact bullet claimed sentence-scoring policies tax
+  buried facts and window policies dont, but the same table refutes both halves:
+  luhn-25% at 800 holds buried better than standalone (73.3% vs 69.2%) and
+  sliding-window has the widest split of any row (78.3% vs 70.8%). rewritten
+  around what the sweep shows — no gap in it clears two standard errors at 120
+  probes a side — and pinned by a test. no measured number moved
+
 ## why typescript
 
 this is the day-job shape of the problem: a chat backend deciding what to send on every request, in the stack where those backends actually get written. it also composes with the ts projects already here, 08's token estimator and pricing are imported directly rather than reimplemented, and the summarizers only needed maps and regexes, nothing from the python ecosystem
@@ -93,6 +102,6 @@ this is the day-job shape of the problem: a chat backend deciding what to send o
 
 - an incremental running summary (summarize once, carry forward, never revisit) against this recompute-from-scratch upper bound: how much retention does the irreversibility actually cost?
 - assistant answers that restate facts would refresh them into a sliding window. how much of rarity-summarization's edge survives a workload where re-mention is common?
-- the buried-fact tax comes from mean-based scoring. does max-token-rarity, or scoring clause spans instead of sentences, close the 89.2% vs 82.5% gap without flooding the summary with long sentences?
+- every standalone vs buried gap here sits inside noise at 120 probes a side. does the effect exist at all — more conversations, or the same fact planted at a controlled sentence length — and if it does, is it mean-based scoring diluting the nonce or just the extra tokens a buried turn costs a window?
 - retention here is binary presence. wiring these contexts into a scripted answerer (08's pattern) would price what a *missing* fact costs in wrong answers, not just percentage points
 - the budgets sweep 400 to 3200 on 30-exchange conversations. the interesting production regime is the 200-exchange support thread, where even rarity-50% must eventually saturate its summary block. where does it bend?
