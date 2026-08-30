@@ -20,7 +20,7 @@ const BASE_SEED = 0xa9e17;
  * the calls they share and the difference is the marginal cost of the flaw
  * rather than the marginal cost plus two independent noise streams.
  */
-function seedFor(policyIndex: number, taskIndex: number): number {
+export function seedFor(policyIndex: number, taskIndex: number): number {
   return BASE_SEED + policyIndex * 10007 + taskIndex * 101;
 }
 
@@ -73,7 +73,7 @@ export interface ExperimentInputs {
   notes: NoteRecord[];
 }
 
-async function runOne(
+export async function runOne(
   task: TaskSpec,
   policy: LoopPolicy,
   inputs: ExperimentInputs,
@@ -91,7 +91,7 @@ async function runOne(
   return runTask(task, policy, registry, clock, rng);
 }
 
-function aggregate(policy: string, outcomes: TaskOutcome[]): PolicyAggregate {
+export function aggregate(policy: string, outcomes: TaskOutcome[]): PolicyAggregate {
   const durations = outcomes.map((o) => o.virtualMs).sort((a, b) => a - b);
   const failReasons: Record<string, number> = {};
   for (const o of outcomes) {

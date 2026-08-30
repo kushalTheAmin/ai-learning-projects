@@ -1,0 +1,214 @@
+[
+  {
+    "id": "value-drift-calc-op",
+    "prompt": "add 19 and 23",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "add", "a": 19, "b": 23 } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "calc", "args": { "op": "plus", "a": 19, "b": 23 } },
+        "flawDrift": [
+          { "name": "calc", "args": { "op": "sum", "a": 19, "b": 23 } },
+          { "name": "calc", "args": { "op": "total", "a": 19, "b": 23 } },
+          { "name": "calc", "args": { "op": "combine", "a": 19, "b": 23 } },
+          { "name": "calc", "args": { "op": "addition", "a": 19, "b": 23 } },
+          { "name": "calc", "args": { "op": "merge", "a": 19, "b": 23 } },
+          { "name": "calc", "args": { "op": "join", "a": 19, "b": 23 } }
+        ],
+        "correctsAfter": null
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "value-drift-city-number",
+    "prompt": "what is the population of Tokyo?",
+    "intents": [
+      {
+        "call": { "name": "lookup_city", "args": { "city": "Tokyo" } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "lookup_city", "args": { "city": 12 } },
+        "flawDrift": [
+          { "name": "lookup_city", "args": { "city": 13 } },
+          { "name": "lookup_city", "args": { "city": 14 } },
+          { "name": "lookup_city", "args": { "city": 15 } },
+          { "name": "lookup_city", "args": { "city": 16 } },
+          { "name": "lookup_city", "args": { "city": 17 } },
+          { "name": "lookup_city", "args": { "city": 18 } }
+        ],
+        "correctsAfter": null
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 37115035",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "value-drift-url",
+    "prompt": "fetch the metrics page",
+    "intents": [
+      {
+        "call": { "name": "fetch_page", "args": { "url": "https://example.com/metrics" } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "fetch_page", "args": { "url": "example.com/metrics" } },
+        "flawDrift": [
+          { "name": "fetch_page", "args": { "url": "the metrics page" } },
+          { "name": "fetch_page", "args": { "url": "example dot com" } },
+          { "name": "fetch_page", "args": { "url": "metrics" } },
+          { "name": "fetch_page", "args": { "url": "just fetch it" } },
+          { "name": "fetch_page", "args": { "url": "www example com metrics" } },
+          { "name": "fetch_page", "args": { "url": "page metrics example" } }
+        ],
+        "correctsAfter": null
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: fetched https://example.com/metrics status=200 attempts=1",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "extrakey-drift-search",
+    "prompt": "which notes mention retry?",
+    "intents": [
+      {
+        "call": { "name": "search_notes", "args": { "query": "retry" } },
+        "flawKind": "extra-field",
+        "flawedCall": { "name": "search_notes", "args": { "query": "retry", "max": 5 } },
+        "flawDrift": [
+          { "name": "search_notes", "args": { "query": "retry", "n": 5 } },
+          { "name": "search_notes", "args": { "query": "retry", "count": 5 } },
+          { "name": "search_notes", "args": { "query": "retry", "top": 5 } },
+          { "name": "search_notes", "args": { "query": "retry", "k": 5 } },
+          { "name": "search_notes", "args": { "query": "retry", "size": 5 } },
+          { "name": "search_notes", "args": { "query": "retry", "cap": 5 } }
+        ],
+        "correctsAfter": null
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: retry backoff notes, agent loop budgets, virtual clocks",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "shape-drift-alternate",
+    "prompt": "multiply 6 by 7",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "mul", "a": 6, "b": 7 } },
+        "flawKind": "missing-field",
+        "flawedCall": { "name": "calc", "args": { "op": "mul", "a": 6 } },
+        "flawDrift": [
+          { "name": "calc", "args": { "op": "mul", "a": "six", "b": 7 } },
+          { "name": "calc", "args": { "op": "mul", "a": 7 } },
+          { "name": "calc", "args": { "op": "mul", "a": "seven", "b": 7 } },
+          { "name": "calc", "args": { "op": "mul", "a": 8 } },
+          { "name": "calc", "args": { "op": "mul", "a": "eight", "b": 7 } },
+          { "name": "calc", "args": { "op": "mul", "a": 9 } }
+        ],
+        "correctsAfter": null
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "shape-drift-rotate3",
+    "prompt": "subtract 8 from 50",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "sub", "a": 50, "b": 8 } },
+        "flawKind": "missing-field",
+        "flawedCall": { "name": "calc", "args": { "op": "sub", "a": 50 } },
+        "flawDrift": [
+          { "name": "calc", "args": { "op": "sub", "a": "fifty", "b": 8 } },
+          { "name": "calc", "args": { "op": "minus", "a": 50, "b": 8 } },
+          { "name": "calc", "args": { "op": "sub", "a": 51 } },
+          { "name": "calc", "args": { "op": "sub", "a": "fiftyone", "b": 8 } },
+          { "name": "calc", "args": { "op": "subtract", "a": 50, "b": 8 } },
+          { "name": "calc", "args": { "op": "sub", "a": 52 } }
+        ],
+        "correctsAfter": null
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "slow-sig-corrector-calc",
+    "prompt": "divide 84 by 2",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "div", "a": 84, "b": 2 } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "calc", "args": { "op": "divide", "a": 84, "b": 2 } },
+        "flawDrift": [
+          { "name": "calc", "args": { "op": "over", "a": 84, "b": 2 } },
+          { "name": "calc", "args": { "op": "split", "a": 84, "b": 2 } }
+        ],
+        "correctsAfter": 3
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "slow-sig-corrector-city",
+    "prompt": "what is the population of Osaka?",
+    "intents": [
+      {
+        "call": { "name": "lookup_city", "args": { "city": "Osaka" } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "lookup_city", "args": { "city": 7 } },
+        "flawDrift": [
+          { "name": "lookup_city", "args": { "city": 8 } },
+          { "name": "lookup_city", "args": { "city": 9 } }
+        ],
+        "correctsAfter": 3
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 18967000",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "progressive-two-issues",
+    "prompt": "add 40 and 2",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "add", "a": 40, "b": 2 } },
+        "flawKind": "wrong-type",
+        "flawedCall": { "name": "calc", "args": { "op": "add", "a": "forty" } },
+        "flawDrift": [
+          { "name": "calc", "args": { "op": "add", "a": 40 } }
+        ],
+        "correctsAfter": 2
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  },
+  {
+    "id": "progressive-unknown-tool",
+    "prompt": "multiply 21 by 2",
+    "intents": [
+      {
+        "call": { "name": "calc", "args": { "op": "mul", "a": 21, "b": 2 } },
+        "flawKind": "unknown-tool",
+        "flawedCall": { "name": "calculator", "args": { "expression": "21*2" } },
+        "flawDrift": [
+          { "name": "calc", "args": { "op": "mul", "a": 21, "b": "two" } }
+        ],
+        "correctsAfter": 2
+      }
+    ],
+    "finalTemplate": "result: {last}",
+    "expectedAnswer": "result: 42",
+    "fetchTransientFailures": 0
+  }
+]

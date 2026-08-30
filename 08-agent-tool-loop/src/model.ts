@@ -20,6 +20,13 @@ export interface Intent {
   flawKind: FlawKind;
   /** The malformed call emitted while flawed; required when flawKind != "none". */
   flawedCall?: ToolCallTurn;
+  /**
+   * Malformed calls emitted on later feedback rounds while still flawed:
+   * round r > 0 emits flawDrift[r - 1], clamped to the last entry once the
+   * authored variants run out. Absent = the model repeats flawedCall
+   * verbatim, the original stubborn shape.
+   */
+  flawDrift?: ToolCallTurn[];
   /** Validation-feedback rounds before the correct call appears; null = never. */
   correctsAfter: number | null;
 }
@@ -60,7 +67,13 @@ export function scriptedModelTurn(task: TaskSpec, history: readonly Message[]): 
       throw new Error(`task ${task.id}: intent has flawKind ${intent.flawKind} but no flawedCall`);
     }
     const stillFlawed = intent.correctsAfter === null || feedbackSinceResult < intent.correctsAfter;
-    if (stillFlawed) return intent.flawedCall;
+    if (stillFlawed) {
+      if (intent.flawDrift !== undefined && intent.flawDrift.length > 0 && feedbackSinceResult > 0) {
+        const idx = Math.min(feedbackSinceResult - 1, intent.flawDrift.length - 1);
+        return intent.flawDrift[idx]!;
+      }
+      return intent.flawedCall;
+    }
   }
   return intent.call;
 }

@@ -19,6 +19,7 @@ const intentSchema = z
     call: toolCallSchema,
     flawKind: z.enum(["none", "wrong-type", "missing-field", "extra-field", "unknown-tool"]),
     flawedCall: toolCallSchema.optional(),
+    flawDrift: z.array(toolCallSchema).min(1).optional(),
     correctsAfter: z.number().int().min(0).nullable(),
   })
   .refine((i) => i.flawKind === "none" || i.flawedCall !== undefined, {
@@ -26,6 +27,9 @@ const intentSchema = z
   })
   .refine((i) => i.flawKind !== "none" || i.flawedCall === undefined, {
     message: "a clean intent must not carry a flawedCall",
+  })
+  .refine((i) => i.flawKind !== "none" || i.flawDrift === undefined, {
+    message: "a clean intent must not carry a flawDrift",
   });
 
 const taskSchema = z.strictObject({
@@ -61,6 +65,7 @@ export function loadTasks(path: string): TaskSpec[] {
           i.flawedCall === undefined
             ? undefined
             : { type: "tool_call", name: i.flawedCall.name, args: i.flawedCall.args },
+        flawDrift: i.flawDrift?.map((c) => ({ type: "tool_call", name: c.name, args: c.args })),
         correctsAfter: i.correctsAfter,
       }),
     ),

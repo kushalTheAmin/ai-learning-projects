@@ -5,20 +5,28 @@
 
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { runDriftStudy } from "./driftStudy.js";
 import { runExperiment } from "./experiment.js";
 import { loadCities, loadNotes, loadTasks } from "./tasks.js";
-import { renderReport } from "./report.js";
+import { renderDriftReport, renderReport } from "./report.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 async function main(): Promise<void> {
   const dataDir = join(here, "..", "data");
-  const report = await runExperiment({
-    tasks: loadTasks(join(dataDir, "tasks.json")),
-    cities: loadCities(join(dataDir, "cities.json")),
-    notes: loadNotes(join(dataDir, "notes.json")),
-  });
+  const tasks = loadTasks(join(dataDir, "tasks.json"));
+  const cities = loadCities(join(dataDir, "cities.json"));
+  const notes = loadNotes(join(dataDir, "notes.json"));
+  const report = await runExperiment({ tasks, cities, notes });
   console.log(renderReport(report));
+  console.log("");
+  const driftReport = await runDriftStudy({
+    tasks: loadTasks(join(dataDir, "driftTasks.json")),
+    originalTasks: tasks,
+    cities,
+    notes,
+  });
+  console.log(renderDriftReport(driftReport));
 }
 
 await main();

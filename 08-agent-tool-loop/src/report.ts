@@ -4,6 +4,7 @@
  * running the experiment twice.
  */
 
+import type { DriftReport } from "./driftStudy.js";
 import type { ExperimentReport } from "./experiment.js";
 import { PRICING } from "./messages.js";
 
@@ -66,5 +67,71 @@ export function renderReport(report: ExperimentReport): string {
   const savedTokens = s.feedbackTokens - s.guardedTokens;
   const savedPct = (100 * savedTokens) / s.feedbackTokens;
   lines.push(`  saved: ${savedTokens} tokens (${savedPct.toFixed(1)}%) on those tasks`);
+  return lines.join("\n");
+}
+
+export function renderDriftReport(report: DriftReport): string {
+  const taskCount = report.perPolicy[0]?.tasks ?? 0;
+  const policyNames = report.perPolicy.map((p) => p.policy);
+  const lines: string[] = [];
+  lines.push(`drift study: guard keys against a model that mutates its broken call`);
+  lines.push(`(${taskCount} drift tasks; exact key = canonical (name, args), signature key = zod issue paths+codes)`);
+  lines.push("");
+  lines.push(
+    `policy       ok     model  wasted  tokens-in  tokens-out  cost     failures`,
+  );
+  for (const p of report.perPolicy) {
+    const reasons = Object.entries(p.failReasons)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ");
+    lines.push(
+      `${p.policy.padEnd(11)}${pad(`${p.completed}/${p.tasks}`, 6)}` +
+        `${pad(p.modelCalls, 7)}${pad(p.wastedModelCalls, 8)}` +
+        `${pad(p.tokensIn, 11)}${pad(p.tokensOut, 12)}${pad(money(p.costUsd), 9)}` +
+        `  ${reasons === "" ? "none" : reasons}`,
+    );
+  }
+  lines.push("");
+  lines.push(`per category (ok / mean model calls):`);
+  const header = `category             tasks` + policyNames.map((n) => pad(n, 16)).join("");
+  lines.push(header);
+  for (const row of report.perCategory) {
+    const cells = policyNames
+      .map((n) => pad(`${row.completed[n]}/${row.tasks} @${row.meanModelCalls[n]!.toFixed(1)}`, 16))
+      .join("");
+    lines.push(`${row.category.padEnd(21)}${pad(row.tasks, 5)}${cells}`);
+  }
+  lines.push("");
+  lines.push(`stubborn drift burn (${report.stubbornTasks} tasks that never correct, vs feedback):`);
+  for (const row of report.stubbornDrift) {
+    lines.push(
+      `  ${row.policy.padEnd(11)} ${pad(row.modelCalls, 3)} model calls  ${pad(row.tokens, 6)} tokens  ` +
+        `${money(row.costUsd)}  saved ${row.savedTokensPct.toFixed(1)}%`,
+    );
+  }
+  lines.push("");
+  const killed = report.killedCorrectors;
+  for (const name of Object.keys(killed)) {
+    const ids = killed[name]!;
+    lines.push(
+      `correctors killed by ${name}: ${ids.length === 0 ? "none" : ids.join(", ")}`,
+    );
+  }
+  lines.push("");
+  lines.push(`signature-guard limit sweep over the drift suite:`);
+  lines.push(`limit  ok     correctors-killed  stubborn-model-calls  stubborn-tokens  total-tokens`);
+  for (const row of report.sweep) {
+    lines.push(
+      `${pad(row.limit, 5)}${pad(`${row.completed}/${taskCount}`, 7)}${pad(row.correctorsKilled, 19)}` +
+        `${pad(row.stubbornModelCalls, 22)}${pad(row.stubbornTokens, 17)}${pad(row.totalTokens, 14)}`,
+    );
+  }
+  lines.push("");
+  const o = report.originalSuite;
+  lines.push(
+    `original ${o.tasks}-task suite, same seeds: guarded ${o.guardedCompleted}/${o.tasks}, ` +
+      `guarded-sig ${o.sigCompleted}/${o.tasks}, ` +
+      `${o.divergingTaskIds.length === 0 ? "no task diverges in outcome, calls, or tokens" : `diverging: ${o.divergingTaskIds.join(", ")}`}`,
+  );
   return lines.join("\n");
 }

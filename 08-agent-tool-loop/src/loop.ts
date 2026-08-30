@@ -1,21 +1,18 @@
 /**
  * The agent loop. One task in, one outcome out, everything bounded: a hard
  * model-call budget, a per-intent cap on validation feedback, and an
- * optional loop guard that kills a task once the same invalid call has been
- * emitted three times. The guard only counts invalid emissions; a model
- * legitimately calling the same tool with the same args twice is normal
- * agent behavior and must not trip it.
+ * optional loop guard that kills a task once "the same" invalid call has
+ * been emitted guardLimit times. What counts as the same is the policy's
+ * guardKey: exact (name, canonical args) identity, or the zod issue
+ * signature (paths and codes, not values). The guard only counts invalid
+ * emissions; a model legitimately calling the same tool with the same args
+ * twice is normal agent behavior and must not trip it.
  */
 
 import { VirtualClock } from "../../06-rate-limiting/src/clock.js";
 import type { Rng } from "../../05-token-streaming/src/rng.js";
-import {
-  canonical,
-  costUsd,
-  historyTokens,
-  messageTokens,
-  type Message,
-} from "./messages.js";
+import { costUsd, historyTokens, messageTokens, type Message } from "./messages.js";
+import { invalidArgsGuardKey, unknownToolGuardKey, type GuardKeyKind } from "./guards.js";
 import { scriptedModelTurn, type TaskSpec } from "./model.js";
 import { availableToolNames, formatIssues, type ToolSpec } from "./tools.js";
 
@@ -27,8 +24,12 @@ export interface LoopPolicy {
   validationFeedback: boolean;
   /** Validation-feedback rounds allowed per intent before giving up. */
   maxFeedbackPerIntent: number;
-  /** Abort once the same invalid call is emitted a third time. */
+  /** Abort once the guard key of an invalid call repeats guardLimit times. */
   loopGuard: boolean;
+  /** How invalid calls are grouped for the guard count. */
+  guardKey: GuardKeyKind;
+  /** Emissions of one guard key that trigger the abort. */
+  guardLimit: number;
 }
 
 export type FailReason =
@@ -56,7 +57,7 @@ export interface TaskOutcome {
 
 export const MODEL_LATENCY_BASE_MS = 600;
 const MODEL_LATENCY_JITTER_MS = 400;
-const IDENTICAL_INVALID_LIMIT = 3;
+export const DEFAULT_GUARD_LIMIT = 3;
 
 export async function runTask(
   task: TaskSpec,
@@ -107,8 +108,10 @@ export async function runTask(
 
     const tool = registry.get(turn.name);
     let problem: string;
+    let guardKey: string;
     if (tool === undefined) {
       problem = `unknown tool "${turn.name}"; available tools: ${availableToolNames(registry)}`;
+      guardKey = unknownToolGuardKey(policy.guardKey, turn);
     } else {
       const parsed = tool.schema.safeParse(turn.args);
       if (parsed.success) {
@@ -120,15 +123,15 @@ export async function runTask(
         continue;
       }
       problem = `invalid arguments for "${turn.name}": ${formatIssues(parsed.error)}`;
+      guardKey = invalidArgsGuardKey(policy.guardKey, turn, parsed.error);
     }
 
     wastedModelCalls++;
 
     if (policy.loopGuard) {
-      const key = canonical({ name: turn.name, args: turn.args });
-      const count = (invalidEmissions.get(key) ?? 0) + 1;
-      invalidEmissions.set(key, count);
-      if (count >= IDENTICAL_INVALID_LIMIT) {
+      const count = (invalidEmissions.get(guardKey) ?? 0) + 1;
+      invalidEmissions.set(guardKey, count);
+      if (count >= policy.guardLimit) {
         return finish(false, { failReason: "loop-detected" });
       }
     }
@@ -151,6 +154,8 @@ export const POLICIES: LoopPolicy[] = [
     validationFeedback: false,
     maxFeedbackPerIntent: 0,
     loopGuard: false,
+    guardKey: "exact",
+    guardLimit: DEFAULT_GUARD_LIMIT,
   },
   {
     name: "feedback",
@@ -158,6 +163,8 @@ export const POLICIES: LoopPolicy[] = [
     validationFeedback: true,
     maxFeedbackPerIntent: 6,
     loopGuard: false,
+    guardKey: "exact",
+    guardLimit: DEFAULT_GUARD_LIMIT,
   },
   {
     name: "guarded",
@@ -165,5 +172,20 @@ export const POLICIES: LoopPolicy[] = [
     validationFeedback: true,
     maxFeedbackPerIntent: 6,
     loopGuard: true,
+    guardKey: "exact",
+    guardLimit: DEFAULT_GUARD_LIMIT,
   },
 ];
+
+/** The signature-keyed variant of the guarded policy, at a given trip limit. */
+export function signatureGuardPolicy(limit: number = DEFAULT_GUARD_LIMIT): LoopPolicy {
+  return {
+    name: limit === DEFAULT_GUARD_LIMIT ? "guarded-sig" : `guarded-sig-${limit}`,
+    maxModelCalls: 20,
+    validationFeedback: true,
+    maxFeedbackPerIntent: 6,
+    loopGuard: true,
+    guardKey: "signature",
+    guardLimit: limit,
+  };
+}
