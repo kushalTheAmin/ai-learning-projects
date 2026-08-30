@@ -175,3 +175,36 @@ describe("standalone vs buried retention", () => {
     expect(bullet).toContain(`${mean("buried")} tokens against a standalone one's ${mean("standalone")}`);
   });
 });
+
+describe("full-history call growth from exchange 15 to 30", () => {
+  // Both readmes used to call this growth a near-tripling. The two numbers the
+  // run prints for it say 1.81x, and no other published pair triples over that
+  // span either (1 -> 15 is 15.5x, full-history over sliding-window at 30 is
+  // 2.4x), so it was a wrong magnitude word rather than a mislabelled pair.
+  // The multiple is derived — main.ts prints the two sizes and never the ratio
+  // — so nothing but these tests would catch it going stale.
+  const full = runCell({ name: "full-history" }, "full-history", Number.MAX_SAFE_INTEGER, PUBLISHED, [0, 14, 29]);
+  const at14 = full.callTokensAtExchange.get(14)!;
+  const at29 = full.callTokensAtExchange.get(29)!;
+
+  test("the call nearly doubles over that span, nowhere near triples", () => {
+    expect(at29 / at14).toBeGreaterThan(1.5);
+    expect(at29 / at14).toBeLessThan(2);
+  });
+
+  test("the project README quotes the pair and the multiple it works out to", () => {
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+    const bullet = readme.split("\n").find((l) => l.includes("cost is flat across policies"));
+    expect(bullet, "README has no cost-is-flat bullet").toBeDefined();
+    expect(bullet).toContain(`${at14.toFixed(1)} to ${at29.toFixed(1)}, ${(at29 / at14).toFixed(2)}x`);
+    expect(bullet).not.toMatch(/tripl/);
+  });
+
+  test("the root README index row states the same magnitude", () => {
+    const root = readFileSync(new URL("../../README.md", import.meta.url), "utf-8");
+    const row = root.split("\n").find((l) => l.includes("(14-context-window/)"));
+    expect(row, "root README has no index row for 14").toBeDefined();
+    expect(row).toContain("nearly doubles");
+    expect(row).not.toMatch(/tripl/);
+  });
+});

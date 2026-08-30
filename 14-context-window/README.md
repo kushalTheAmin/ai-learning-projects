@@ -76,7 +76,7 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
 - **summarizing with the wrong salience is worse than not summarizing.** luhn-25% at 800 lands at 71.3% overall against sliding-window's 74.6%, and its long-lag column reads 15.0% against 23.8%. the summary block spent budget on chatter, and the tail it displaced was holding real facts. more summary makes it worse: luhn at 50% share falls to 61.7%
 - **the failure is the salience definition, not summarization.** luhn keeps what the conversation talks about most, but a decision stated once is by definition the rarest thing in the transcript. flip the scorer to rarity and the same policy at the same budget goes to 85.8% overall and 57.5% long-lag, at the same cost. the share sweep slopes in opposite directions for the two scorers: more luhn summary loses facts, more rarity summary keeps them (92.5% long-lag at 50% share)
 - **the standalone vs buried split doesnt hold up, and it isnt a sentence-scoring effect.** rarity-25% at 800 keeps 89.2% of standalone facts against 82.5% of buried ones, which reads like a tax on burying a nonce inside a long chatty sentence — until you check the neighbouring rows. luhn-25% at the same budget goes the other way (69.2% standalone, 73.3% buried), and sliding-window, which never looks at a sentence at all, has the widest split in the table (78.3% vs 70.8%). thats 120 probes a side and no gap anywhere in the sweep clears two standard errors — the biggest is rarity-25% at 400, 11.7 points at z=1.84. there is a mechanism that would explain a *window* gap if the effect were real — a buried intro turn is 73.9 tokens against a standalone one's 34.3, so it drops out of a token budget sooner — but this workload cant separate any of it from noise
-- **cost is flat across policies at a fixed budget.** every 800-budget row costs about $0.074 per conversation against $0.109 for full-history, a 32% saving here. the real spread is retention at equal cost, which is the entire argument for spending eviction effort well. the saving grows with conversation length: full-history's call size nearly triples from exchange 15 to 30 while the budgeted call is flat, so on 100-exchange conversations the gap is much larger than a third
+- **cost is flat across policies at a fixed budget.** every 800-budget row costs about $0.074 per conversation against $0.109 for full-history, a 32% saving here. the real spread is retention at equal cost, which is the entire argument for spending eviction effort well. the saving grows with conversation length: full-history's call size nearly doubles from exchange 15 to 30 (1039.4 to 1876.7, 1.81x) while the budgeted call is flat, so on 100-exchange conversations the gap is much larger than a third
 
 ## honest caveats
 
@@ -86,6 +86,12 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
 - the probe never restates the value. real conversations re-mention decisions, which refreshes them into any recency-based window and would flatter sliding-window relative to these numbers
 
 ## fixes
+
+- 2026-08-30 — the cost bullet said full-history's call "nearly triples from
+  exchange 15 to 30", but the two numbers printed three lines above it are
+  1039.4 and 1876.7 — 1.81x, it nearly doubles. now says doubles and quotes the
+  pair and the multiple, in both this readme and the root index row. the
+  argument is unchanged, only the magnitude word
 
 - 2026-08-30 — the buried-fact bullet claimed sentence-scoring policies tax
   buried facts and window policies dont, but the same table refutes both halves:
