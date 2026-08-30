@@ -22,8 +22,10 @@ the eval side is the part interviews actually probe — retrieval quality is mea
 - `retrieval_eval/evaluate.py` — runs a system over the query set, aggregates, and does per-query head to head
 - `retrieval_eval/bootstrap.py` — paired bootstrap resampling: confidence intervals on mrr and on the gap between systems
 - `retrieval_eval/inverted.py` — the same bm25 served from an inverted index, pinned bit-identical to the flat scan
+- `retrieval_eval/pruned.py`: maxscore and wand dynamic pruning over that index, exact top-k for a fraction of the postings
 - `retrieval_eval/synth.py` — seeded synthetic corpora with zipf term frequencies, for the scaling study
 - `scaling.py` — full scan vs inverted index, measured: wall clock, docs scanned, postings touched
+- `pruning.py`: how much of the postings bill the score bounds skip, per stratum and per k
 - `data/corpus.jsonl` — 40 short docs on dev topics (git, docker, python, http, sql, shell), including two deliberately long kitchen-sink docs that exist to trip up naive scoring
 - `data/queries.jsonl` — 38 queries, each labeled with its relevant doc ids. some use exact doc vocabulary, some paraphrase, and a few share almost no words with their answer on purpose
 
@@ -37,6 +39,7 @@ pip install -r requirements.txt
 python -m pytest
 python main.py
 python scaling.py
+python pruning.py
 ```
 
 python 3.11+. the only dependency is pytest — the retrieval code itself is stdlib
@@ -145,6 +148,74 @@ what the numbers say
 
 one number worth being honest about: the postings hold the same (doc, tf) pairs the flat index keeps in per-doc counters, just re-keyed by term. this is an access-pattern change, not a compression story, and the memory line (1,350,045 postings at 32k docs) is the same information either way
 
+## dynamic pruning: skipping postings without changing the answer
+
+the section above ends on "posting lists alone dont beat zipf": the inverted index still scores every posting of every query term, and on common-heavy traffic thats 68765 postings per query. wand and maxscore are the classic fixes. both precompute, per term, the largest score that term can contribute to any document (exact, not estimated: the max of the bm25 gain over the terms own postings). while searching, the k-th best score so far is a threshold, and any document whose terms bounds cant reach that threshold is skipped without being scored. `retrieval_eval/pruned.py` implements both over the unchanged inverted index, and `pruning.py` measures them on the same 32k-doc zipf corpus and query strata as the scaling study
+
+the two algorithms spend the bound differently. **maxscore** splits query terms into essential and non-essential: once the low-bound terms together cant lift a doc past the threshold, docs found only in their lists stop being candidates, and those lists are only probed by binary search to finish scoring docs the essential lists surfaced. **wand** keeps a cursor per term sorted by current doc id and finds a pivot, the first doc whose prefix of bounds reaches the threshold; everything before the pivot is jumped over entirely
+
+same caveats as the scaling study: synthetic zipf terms, generated queries, one machine. the work counts are seeded and exactly reproducible, the wall clocks wobble run to run. and the same contract comes first, because pruning that changes results is just a worse ranking function:
+
+```
+== same top-k, pinned against the flat scan ==
+golden corpus, top-10 identical: maxscore 38/38, wand 38/38 queries
+golden corpus, full depth identical: maxscore 38/38, wand 38/38 queries
+synthetic 2000-doc corpus, top-10 identical: maxscore 150/150, wand 150/150 queries (all strata)
+```
+
+exact float equality again, ties included. the tests force the case where every candidate ties the threshold exactly and the winner has to come from doc-id order, which is precisely where a sloppy `<=` in the pruning comparison silently drops the right answer
+
+what the bounds look like on zipf postings:
+
+```
+== why common terms prune well at top-10 ==
+rank-1 term: df 31,972, score upper bound 0.0021
+rank-20 term: df 8,744, score upper bound 2.5039
+rank-1000 term: df 135, score upper bound 7.0511
+```
+
+thats the whole trick in three lines. idf has already decided that the rank-1 term, present in 99.9% of docs, can contribute at most 0.0021 to any score, so the moment the top-10 threshold clears a tiny bar, its 31,972 postings stop being worth reading one by one. the postings a query is billed for and the postings that can change its answer are different lists
+
+```
+== postings scored per query at 32,000 docs, top-10, 100 queries each ==
+stratum         taat post/q  maxscore  probes  % of bill    wand  probes  % of bill
+-----------------------------------------------------------------------------------
+typical               46950      4907    3614      10.5%    4928    4446      10.5%
+common-heavy          68765     21794   20882      31.7%   20306   22994      29.5%
+rare-only                77        68      20      88.7%      68       3      88.5%
+```
+
+- **the answer to the open question: at top-10, the bounds skip 68-70% of the common-heavy bill** (68765 postings term-at-a-time, 21794 scored by maxscore, 20306 by wand) **and just under 90% of the typical bill** (46950 down to ~4900). probes are the binary-search jumps that replace the reading. they land on one posting each, so even charging a probe as a touched posting the skip stays above 60% and 80%
+- **rare-only queries have nothing to skip.** the bill is 77 postings, the bounds save nothing worth having (88.7% still scored), and the pruning bookkeeping is pure overhead. dynamic pruning is a head-term technology; the tail was already cheap
+- **maxscore and wand land within a few percent of each other on postings scored.** the difference is where the work goes: on common-heavy, wand spends more probes (22994 vs 20882) because its cursors leapfrog per pivot, while maxscore reads its essential lists linearly and probes only the non-essential ones
+
+the wall clock is the honest asterisk:
+
+```
+wall clock, ms per query (same runs)
+stratum            taat  maxscore     wand
+------------------------------------------
+typical          27.249    12.848   21.420
+common-heavy     40.477    57.185   93.004
+rare-only         0.113     0.336    0.269
+```
+
+on typical queries maxscore converts its 10.5% postings bill into a real 2.1x wall-clock win. on common-heavy, both pruners are *slower* than the exhaustive scan they beat 3x on work counts. the reason is constant factors, not the algorithm: term-at-a-time is one dict lookup and one add per posting in a tight loop, while document-at-a-time pays python-level cursor sorting, attribute access, and bisect calls per candidate, and at 30% postings scored that overhead eats the saving. same lesson as the ann project (13): in pure python the operation count is the portable number and the wall clock is a property of the interpreter. a production engine gets the counts *and* the clock because its per-posting costs are branch-predictable native code, and it wouldnt sort cursors with a comparison sort per pivot either
+
+where the bound stops paying:
+
+```
+== where the bound stops paying: k sweep, common-heavy, 32,000 docs ==
+    k  taat post/q  maxscore  % of bill    ms/q    wand  % of bill    ms/q
+--------------------------------------------------------------------------
+    1        68765     17071      24.8%  45.836   16327      23.7%  84.508
+   10        68765     21794      31.7%  54.775   20306      29.5%  91.479
+  100        68765     28656      41.7%  69.340   26853      39.1%  97.112
+ 1000        68765     40818      59.4% 100.350   40528      58.9% 119.959
+```
+
+the threshold is the k-th best score seen so far, so bigger k means a weaker threshold for longer: at k=1 the pruners read a quarter of the bill, at k=1000 they read 60% of it and the gap is still closing. dynamic pruning is a top-k technology in the strictest sense: "give me everything relevant" gets no help, and anything that lowers the threshold (a heap that must fill before pruning starts, a rescoring stage that wants deep candidate pools) is paid for directly in postings read
+
 ## tradeoffs and limits
 
 - the golden corpus is 40 docs and the original scorer loops over all of them per query term — fine here, wrong at scale, and now measured instead of asserted: the section above puts the flat scan at 65.229ms/query by 32k docs while the inverted twin returns the bit-identical ranking for a fraction of the work
@@ -158,7 +229,10 @@ one number worth being honest about: the postings hold the same (doc, tf) pairs 
 - how many queries would it take before the bm25 vs tf-idf interval excludes zero, assuming the effect is real? the per-query win rate is measurable, so a power analysis could answer this with simulation instead of hand-waving
 - 03s alpha sweep picked 0.2 over 0.5 on 40 queries and called it tea leaves — this exact machinery would say whether any of those alpha differences are distinguishable at all
 - significance is not importance: with enough queries a +0.001 mrr gap becomes "real" — what mrr delta actually changes anything a user sees? that number has to come from the product, not the bootstrap
-- wand and max-score prune postings that cannot reach the top k and stay exact; how much of the common-heavy bill do they skip at top-10 on this exact zipf corpus, and where does the bound stop paying?
+- the whole-list upper bound of a common term is set by its single best posting. block-max wand keeps a max per posting block instead, so the pivot can skip within a list, not just between lists. how much deeper does that cut the 30% common-heavy floor at top-10?
+- the common-heavy wall-clock inversion is a constant-factor story: the same document-at-a-time counts in native code (or with block-encoded postings and vectorized scoring) should follow the counts; the crossover between "counts win" and "clock wins" is unmeasured here
+- pruning only starts once the top-k heap fills; a warm-start threshold (from a cached previous run of the same query, or a cheap first-pass estimate) would prune from posting one. at k=10 the k=1 column bounds what that could buy (31.7% → 24.8%), and whether a stale threshold ever drops a right answer is the interesting failure mode
+- the bounds here are exact because the index is static: every added doc can raise a terms bound and every deletion can strand it too high, so mutation either re-prices bounds per update or lets them go stale-but-sound; the cost of each choice is unmeasured (same shape as the rebuild-vs-patch question below)
 - the posting lists here are python lists of tuples, so delta-encoded varint-compressed postings are the real memory story, and the decode cost per query is the tradeoff this study didnt price
 - a typical query builds a score accumulator over 84% of the corpus, so per-query memory scales with df too; accumulator capping (keep only the best partial scores) trades recall for memory and the damage is measurable here
 - adding one doc to the inverted index is an append per term, but it moves df and avg doc length, which silently re-prices every idf. at what update rate does rebuild-vs-patch flip, and is that why real engines ship immutable segments with background merges?
