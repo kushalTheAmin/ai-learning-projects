@@ -85,6 +85,156 @@ describe("SimulatedApi", () => {
     }
   });
 
+  it("fails instantly with 503 during an outage without draining admission tokens", async () => {
+    const clock = new VirtualClock();
+    const api = new SimulatedApi(
+      clock,
+      createRng(1),
+      makeOpts({ burst: 2, outage: { startMs: 0, endMs: 1000, advertiseRetryAfter: false } }),
+    );
+    const work = (async () => {
+      const during: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const start = clock.now();
+        const res = await api.request();
+        expect(res.status).toBe(503);
+        during.push(clock.now() - start);
+      }
+      await clock.sleep(1000);
+      // The 5 outage rejections consumed no tokens, so the full burst remains.
+      const afterA = await api.request();
+      const afterB = await api.request();
+      return { during, afterA, afterB };
+    })();
+    const { during, afterA, afterB } = await clock.runUntil(work);
+    expect(during).toEqual([0, 0, 0, 0, 0]);
+    expect(afterA.status).toBe(200);
+    expect(afterB.status).toBe(200);
+    expect(api.count503Outage).toBe(5);
+    expect(api.count503).toBe(0);
+  });
+
+  it("advertises the exact time until recovery on outage 503s", async () => {
+    const clock = new VirtualClock();
+    const api = new SimulatedApi(
+      clock,
+      createRng(1),
+      makeOpts({ outage: { startMs: 0, endMs: 800, advertiseRetryAfter: true } }),
+    );
+    const work = (async () => {
+      const atZero = await api.request();
+      await clock.sleep(300);
+      const at300 = await api.request();
+      return { atZero, at300 };
+    })();
+    const { atZero, at300 } = await clock.runUntil(work);
+    expect(atZero).toEqual({ status: 503, retryAfterMs: 800 });
+    expect(at300).toEqual({ status: 503, retryAfterMs: 500 });
+  });
+
+  it("never recovers when the outage end is Infinity", async () => {
+    const clock = new VirtualClock();
+    const api = new SimulatedApi(
+      clock,
+      createRng(1),
+      makeOpts({
+        outage: { startMs: 0, endMs: Number.POSITIVE_INFINITY, advertiseRetryAfter: false },
+      }),
+    );
+    const work = (async () => {
+      await clock.sleep(1_000_000_000);
+      return api.request();
+    })();
+    const res = await clock.runUntil(work);
+    expect(res.status).toBe(503);
+  });
+
+  it("rejects an advertised recovery time on a service that never recovers", () => {
+    const clock = new VirtualClock();
+    expect(
+      () =>
+        new SimulatedApi(
+          clock,
+          createRng(1),
+          makeOpts({
+            outage: { startMs: 0, endMs: Number.POSITIVE_INFINITY, advertiseRetryAfter: true },
+          }),
+        ),
+    ).toThrow(/never recovers/);
+  });
+
+  it("rejects a malformed outage window", () => {
+    const clock = new VirtualClock();
+    for (const outage of [
+      { startMs: -1, endMs: 100, advertiseRetryAfter: false },
+      { startMs: 500, endMs: 100, advertiseRetryAfter: false },
+    ]) {
+      expect(() => new SimulatedApi(clock, createRng(1), makeOpts({ outage }))).toThrow(
+        /outage window/,
+      );
+    }
+  });
+
+  it("adds bounded server-side jitter to 429 and outage hints", async () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const clock = new VirtualClock();
+      const api = new SimulatedApi(
+        clock,
+        createRng(1),
+        makeOpts({
+          burst: 1,
+          hintJitterMs: 200,
+          outage: { startMs: 500, endMs: 1000, advertiseRetryAfter: true },
+        }),
+        createRng(seed),
+      );
+      const work = (async () => {
+        await api.request(); // drains the burst
+        const rejected = await api.request();
+        await clock.sleep(500);
+        const down = await api.request();
+        return { rejected, down };
+      })();
+      const { rejected, down } = await clock.runUntil(work);
+      expect(rejected.status).toBe(429);
+      if (rejected.status === 429) {
+        // rejected at t=10 with 0.1 tokens refilled, so the exact hint is
+        // 90ms; jitter only ever adds
+        expect(rejected.retryAfterMs).toBeGreaterThanOrEqual(90);
+        expect(rejected.retryAfterMs).toBeLessThanOrEqual(290);
+      }
+      expect(down.status).toBe(503);
+      if (down.status === 503) {
+        // 490ms remain at t=510 (the first request slept 10ms of latency)
+        expect(down.retryAfterMs).toBeGreaterThanOrEqual(490);
+        expect(down.retryAfterMs).toBeLessThanOrEqual(690);
+      }
+    }
+  });
+
+  it("requires a hint rng when hint jitter is enabled and rejects a negative jitter", () => {
+    const clock = new VirtualClock();
+    expect(() => new SimulatedApi(clock, createRng(1), makeOpts({ hintJitterMs: 100 }))).toThrow(
+      /hint rng/,
+    );
+    expect(
+      () => new SimulatedApi(clock, createRng(1), makeOpts({ hintJitterMs: -5 }), createRng(2)),
+    ).toThrow(/hintJitterMs/);
+  });
+
+  it("keeps hints exact when jitter is zero", async () => {
+    const clock = new VirtualClock();
+    const api = new SimulatedApi(clock, createRng(1), makeOpts({ burst: 1, hintJitterMs: 0 }));
+    const work = (async () => {
+      const first = api.request();
+      const second = await api.request();
+      await first;
+      return second;
+    })();
+    const rejected = await clock.runUntil(work);
+    expect(rejected).toEqual({ status: 429, retryAfterMs: 100 });
+  });
+
   it("counts peak arrivals per window and rejects a non-positive window", async () => {
     const clock = new VirtualClock();
     const api = new SimulatedApi(clock, createRng(1), makeOpts({ burst: 10 }));

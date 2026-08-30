@@ -13,7 +13,7 @@ export interface RetryOptions {
   policy: BackoffPolicy | { kind: "none" };
   /** Retries after the first attempt; 0 means a single attempt. */
   maxRetries: number;
-  /** When true, a 429 with Retry-After waits at least that long. */
+  /** When true, any failure carrying Retry-After waits at least that long. */
   respectRetryAfter: boolean;
 }
 
@@ -47,7 +47,7 @@ export async function requestWithRetry(
     }
     let delayMs = nextDelayMs(opts.policy, attempt, prevDelayMs, rng);
     prevDelayMs = delayMs;
-    if (opts.respectRetryAfter && res.status === 429 && res.retryAfterMs !== undefined) {
+    if (opts.respectRetryAfter && res.retryAfterMs !== undefined) {
       delayMs = Math.max(delayMs, res.retryAfterMs);
     }
     await clock.sleep(delayMs);

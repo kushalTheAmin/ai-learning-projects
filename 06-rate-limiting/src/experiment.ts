@@ -28,6 +28,8 @@ export interface ScenarioOptions {
   latencyMsMin: number;
   latencyMsMax: number;
   advertiseRetryAfter: boolean;
+  /** Server-side jitter added to every Retry-After hint; 0/undefined = exact hints. */
+  hintJitterMs?: number;
   seed: number;
   peakWindowMs: number;
 }
@@ -69,14 +71,24 @@ export async function runScenario(
   }
   const clock = new VirtualClock();
   const serverRng = createRng(opts.seed);
-  const api = new SimulatedApi(clock, serverRng, {
-    ratePerSec: opts.serverRatePerSec,
-    burst: opts.serverBurst,
-    faultRate: opts.faultRate,
-    latencyMsMin: opts.latencyMsMin,
-    latencyMsMax: opts.latencyMsMax,
-    advertiseRetryAfter: opts.advertiseRetryAfter,
-  });
+  const hintJitterMs = opts.hintJitterMs ?? 0;
+  // The hint rng is separate so turning jitter on cannot shift the seeded
+  // latency/fault stream and silently change the baseline numbers.
+  const hintRng = hintJitterMs > 0 ? createRng(opts.seed + 999_983) : undefined;
+  const api = new SimulatedApi(
+    clock,
+    serverRng,
+    {
+      ratePerSec: opts.serverRatePerSec,
+      burst: opts.serverBurst,
+      faultRate: opts.faultRate,
+      latencyMsMin: opts.latencyMsMin,
+      latencyMsMax: opts.latencyMsMax,
+      advertiseRetryAfter: opts.advertiseRetryAfter,
+      hintJitterMs: hintJitterMs > 0 ? hintJitterMs : undefined,
+    },
+    hintRng,
+  );
   const limiter = spec.clientPacing
     ? new PacingLimiter(spec.clientPacing.ratePerSec, spec.clientPacing.burst, clock)
     : undefined;

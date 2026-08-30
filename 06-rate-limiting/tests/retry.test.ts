@@ -94,6 +94,32 @@ describe("requestWithRetry", () => {
     expect(outcome.endMs - outcome.startMs).toBe(700);
   });
 
+  it("waits at least Retry-After on a 503 when respecting it", async () => {
+    const clock = new VirtualClock();
+    const { send } = scripted([{ status: 503, retryAfterMs: 900 }]);
+    const opts: RetryOptions = {
+      policy: { kind: "fixed", delayMs: 100 },
+      maxRetries: 8,
+      respectRetryAfter: true,
+    };
+    const outcome = await clock.runUntil(requestWithRetry(send, clock, createRng(1), opts));
+    expect(outcome.ok).toBe(true);
+    expect(outcome.endMs - outcome.startMs).toBe(900);
+  });
+
+  it("keeps the policy delay when it exceeds the 503 hint", async () => {
+    const clock = new VirtualClock();
+    const { send } = scripted([{ status: 503, retryAfterMs: 50 }]);
+    const opts: RetryOptions = {
+      policy: { kind: "fixed", delayMs: 400 },
+      maxRetries: 8,
+      respectRetryAfter: true,
+    };
+    const outcome = await clock.runUntil(requestWithRetry(send, clock, createRng(1), opts));
+    expect(outcome.ok).toBe(true);
+    expect(outcome.endMs - outcome.startMs).toBe(400);
+  });
+
   it("ignores Retry-After when not respecting it", async () => {
     const clock = new VirtualClock();
     const { send } = scripted([{ status: 429, retryAfterMs: 700 }]);

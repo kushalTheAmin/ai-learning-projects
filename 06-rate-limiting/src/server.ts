@@ -14,7 +14,19 @@ import { randInt, type Rng } from "../../05-token-streaming/src/rng.js";
 export type ApiResponse =
   | { status: 200 }
   | { status: 429; retryAfterMs?: number }
-  | { status: 503 };
+  | { status: 503; retryAfterMs?: number };
+
+export interface OutageOptions {
+  /**
+   * Hard-down window [startMs, endMs): every request inside it fails with an
+   * instant 503, before admission control, so outage rejections never drain
+   * the rate budget. endMs of Infinity models a service that never recovers.
+   */
+  startMs: number;
+  endMs: number;
+  /** Whether outage 503s advertise the time until endMs as Retry-After. */
+  advertiseRetryAfter: boolean;
+}
 
 export interface ServerOptions {
   ratePerSec: number;
@@ -25,6 +37,15 @@ export interface ServerOptions {
   latencyMsMax: number;
   /** Whether 429 responses carry a Retry-After hint. */
   advertiseRetryAfter: boolean;
+  /**
+   * Server-side hint jitter: a uniform integer in [0, hintJitterMs] added to
+   * every advertised Retry-After (429 and outage 503 alike). Never subtracts,
+   * so a compliant client never arrives before the hinted-at capacity exists.
+   * Requires a dedicated hint rng so enabling it leaves the latency/fault
+   * stream untouched.
+   */
+  hintJitterMs?: number;
+  outage?: OutageOptions;
 }
 
 export class SimulatedApi {
@@ -35,11 +56,14 @@ export class SimulatedApi {
   count429 = 0;
   count429OnFirstAttempt = 0;
   count503 = 0;
+  /** Outage rejections, counted apart from transient 503s. */
+  count503Outage = 0;
 
   constructor(
     private readonly clock: VirtualClock,
     private readonly rng: Rng,
     private readonly opts: ServerOptions,
+    private readonly hintRng?: Rng,
   ) {
     if (opts.faultRate < 0 || opts.faultRate > 1) {
       throw new Error(`faultRate must be in [0, 1], got ${opts.faultRate}`);
@@ -48,6 +72,22 @@ export class SimulatedApi {
       throw new Error(
         `latency range must satisfy 0 <= min <= max, got [${opts.latencyMsMin}, ${opts.latencyMsMax}]`,
       );
+    }
+    const jitter = opts.hintJitterMs ?? 0;
+    if (!Number.isFinite(jitter) || jitter < 0) {
+      throw new Error(`hintJitterMs must be a finite non-negative number, got ${jitter}`);
+    }
+    if (jitter > 0 && !hintRng) {
+      throw new Error("hintJitterMs > 0 requires a dedicated hint rng");
+    }
+    if (opts.outage) {
+      const { startMs, endMs, advertiseRetryAfter } = opts.outage;
+      if (!Number.isFinite(startMs) || startMs < 0 || endMs < startMs) {
+        throw new Error(`outage window must satisfy 0 <= startMs <= endMs, got [${startMs}, ${endMs})`);
+      }
+      if (advertiseRetryAfter && !Number.isFinite(endMs)) {
+        throw new Error("a service that never recovers cannot advertise a recovery time");
+      }
     }
     this.bucket = new TokenBucket(opts.ratePerSec, opts.burst, clock);
   }
@@ -59,11 +99,21 @@ export class SimulatedApi {
   async request(isRetry = false): Promise<ApiResponse> {
     this.arrivalsMs.push(this.clock.now());
     if (isRetry) this.retryArrivalsMs.push(this.clock.now());
+    const outage = this.opts.outage;
+    if (outage && this.clock.now() >= outage.startMs && this.clock.now() < outage.endMs) {
+      // Hard-down failure: instant, pre-admission, so a dying dependency's
+      // rejections cost it nothing but also tell the client nothing about rate.
+      this.count503Outage++;
+      if (outage.advertiseRetryAfter) {
+        return { status: 503, retryAfterMs: this.jitteredHint(Math.ceil(outage.endMs - this.clock.now())) };
+      }
+      return { status: 503 };
+    }
     if (!this.bucket.tryTake()) {
       this.count429++;
       if (!isRetry) this.count429OnFirstAttempt++;
       if (this.opts.advertiseRetryAfter) {
-        return { status: 429, retryAfterMs: this.bucket.msUntilNextToken() };
+        return { status: 429, retryAfterMs: this.jitteredHint(this.bucket.msUntilNextToken()) };
       }
       return { status: 429 };
     }
@@ -74,6 +124,12 @@ export class SimulatedApi {
     }
     this.count200++;
     return { status: 200 };
+  }
+
+  private jitteredHint(exactMs: number): number {
+    const jitter = this.opts.hintJitterMs ?? 0;
+    if (jitter === 0) return exactMs;
+    return exactMs + randInt(this.hintRng!, 0, jitter);
   }
 
   /** Largest number of arrivals landing inside any single window. */
