@@ -94,18 +94,41 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
-- [high] 14 — "full-history's call size nearly triples from exchange 15 to 30"
-  is refuted by the two numbers printed three lines above it: 1039.4 to 1876.7
-  is 1.806x. it nearly doubles. no pair of published numbers in the project
-  triples over that span — 1 to 15 is 15.5x and full-history against
-  sliding-window at exchange 30 is 2.4x, so it is not a mislabelled pair
-  either, just a wrong magnitude word. the same claim is on the front page:
-  the root readme's index row for 14 says "full history nearly triples by turn
-  30", which is the only place a reader who never opens the project sees it.
-  the argument the sentence is making survives — full-history grows without
-  bound, the budgeted call is flat — so no conclusion moves, only the
-  multiple. same shape as the 10 finding fixed 2026-08-29, and the fix needs
-  both readmes. found 2026-08-30
+- [fixed 2026-08-30] 14 — "full-history's call size nearly triples from
+  exchange 15 to 30" is refuted by the two numbers printed three lines above
+  it: 1039.4 to 1876.7 is 1.806x. it nearly doubles. no pair of published
+  numbers in the project triples over that span — 1 to 15 is 15.5x and
+  full-history against sliding-window at exchange 30 is 2.4x, so it is not a
+  mislabelled pair either, just a wrong magnitude word. the same claim was on
+  the front page: the root readme's index row for 14 said "full history nearly
+  triples by turn 30", the only place a reader who never opens the project
+  sees it. the argument the sentence is making survives — full-history grows
+  without bound, the budgeted call is flat — so no conclusion moved, only the
+  multiple. same shape as the 10 finding fixed 2026-08-29. both readmes now
+  say doubles, and the project one quotes the pair and the ratio
+  ("1039.4 to 1876.7, 1.81x") so the multiple is a published number rather
+  than an unchecked adjective — `main.ts` prints the two sizes and never the
+  ratio, so nothing else would have caught it. three tests pin it: the run's
+  own at-29/at-14 ratio is asserted under 2, the project readme's bullet must
+  quote the pair and ratio the run produces, and the root index row must state
+  the same magnitude; the last two fail against the old text and the first
+  fails if the workload ever moves. no measured number moved, 81/81 green.
+  found and fixed 2026-08-30
+- [high] 14 — progress.md still carries the claim the 2026-08-30 buried-fact
+  fix retracted, in two places: the COMPLETED row for 14 says "buried facts
+  pay a mean-dilution tax under sentence scoring (82.5% vs 89.2% standalone)"
+  and the OPEN THREADS entry says "the buried-fact tax (82.5% vs 89.2%) comes
+  from mean-based sentence scoring". both readmes were rewritten that run and
+  no longer say either — the sweep has luhn going the other way and
+  sliding-window, which never scores a sentence, holding the widest split, and
+  no row reaching z=2. so the fix updated the published surfaces and left the
+  ledger asserting the refuted mechanism as fact. progress.md is committed and
+  public, and it is what the next run reads to decide what is true, which is
+  the part that makes this worth more than bookkeeping. not folded into this
+  run's fix — different claim, different file, and one fix per run. the repair
+  is to restate both lines the way the readme now does (the gap sits inside
+  noise at 120 probes a side) and to check the rest of the ledger for other
+  claims the readmes have since retracted. found 2026-08-30
 - [fixed 2026-08-30] 14 — the buried-fact bullet claimed "buried facts pay a
   tax under every policy that looks at sentences" and that "the window
   policies dont care, they keep or drop whole turns". the table under it
