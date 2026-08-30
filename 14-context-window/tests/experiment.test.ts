@@ -174,6 +174,45 @@ describe("standalone vs buried retention", () => {
     expect(bullet).toContain(`${gapPoints.toFixed(1)} points at z=${classGapZ(widest).toFixed(2)}`);
     expect(bullet).toContain(`${mean("buried")} tokens against a standalone one's ${mean("standalone")}`);
   });
+
+  // progress.md is the repo's ledger and the thing the next pass reads to
+  // decide what is already known, so it has to retract alongside the README.
+  // Both of its live surfaces used to assert the mechanism the sweep refutes:
+  // the COMPLETED row called it "a mean-dilution tax under sentence scoring"
+  // and the open thread asked which scorer would close it, which assumes it.
+  test("the ledger's completed row for 14 reports the split without a mechanism", () => {
+    const rarity = runCell(
+      { name: "summarize-evicted", summaryShare: 0.25, summarizer: "rarity" },
+      "summ-rarity-25%",
+      800,
+      PUBLISHED,
+    );
+    const s = `${(100 * rate(rarity.byClass.standalone)).toFixed(1)}%`;
+    const b = `${(100 * rate(rarity.byClass.buried)).toFixed(1)}%`;
+    const ledger = readFileSync(new URL("../../progress.md", import.meta.url), "utf-8");
+    const row = ledger
+      .split("\n")
+      .find((l) => l.startsWith("| 14-context-window |") && l.includes("| typescript |"));
+    expect(row, "progress.md has no COMPLETED row for 14").toBeDefined();
+    expect(row).not.toMatch(/tax|dilution/);
+    expect(row).toContain(`${s} standalone vs ${b} buried`);
+  });
+
+  test("the ledger's open thread for 14 asks whether the split exists at all", () => {
+    // 120 a side is what makes every gap in the sweep noise, and it comes off
+    // the workload: 20 conversations x 12 facts, half of each class.
+    const perClass = PUBLISHED.reduce(
+      (n, c) => n + c.facts.filter((f) => f.cls === "standalone").length,
+      0,
+    );
+    const ledger = readFileSync(new URL("../../progress.md", import.meta.url), "utf-8");
+    const threads = ledger
+      .split("\n")
+      .filter((l) => l.startsWith("- 14:") && /standalone|buried/.test(l));
+    expect(threads).toHaveLength(1);
+    expect(threads[0]).not.toMatch(/tax|comes from/);
+    expect(threads[0]).toContain(`${perClass} probes a side`);
+  });
 });
 
 describe("full-history call growth from exchange 15 to 30", () => {

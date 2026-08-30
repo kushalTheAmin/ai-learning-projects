@@ -87,6 +87,13 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
 
 ## fixes
 
+- 2026-08-30 — the buried-fact retraction above only reached the readmes —
+  progress.md still carried the retracted mechanism in two live places, the
+  completed row calling it "a mean-dilution tax under sentence scoring" and the
+  open thread asking which scorer would close it. both restated the way this
+  readme reads now, and two tests pin the ledger to the run the same way they
+  already pin the readme
+
 - 2026-08-30 — the cost bullet said full-history's call "nearly triples from
   exchange 15 to 30", but the two numbers printed three lines above it are
   1039.4 and 1876.7 — 1.81x, it nearly doubles. now says doubles and quotes the
