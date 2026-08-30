@@ -71,6 +71,10 @@ a by-hand task on the github branches page.
 Re-attempted 2026-08-29 (05-resumable run): still 403 at the remote.
 Unchanged: nothing on those branches is unlanded, deletion stays a by-hand
 task on the github branches page.
+Re-attempted 2026-08-30 (06-outage run): still denied, sideband disconnect
+on ref deletion. Unchanged: all nine stale claude/* branches are merged or
+superseded by main, deletion stays a by-hand task on the github branches
+page.
 
 ## FINDINGS
 
