@@ -236,8 +236,149 @@ fixed-100ms hammers 440 attempts/s for 2.40s; exp-no-jitter drips 160/s for
 (full jitter) of waiting before hearing "no", after which the next request
 starts the same climb from 100ms again. request 3 wastes exactly what
 request 1 did. the retry loop has no memory across requests, and thats the
-argument for the thing this project deliberately doesnt have yet: a circuit
-breaker.
+argument for a circuit breaker, which the breaker extension below builds
+and prices.
+
+## the breaker extension: trip, cool down, probe
+
+the dead-service study priced the missing circuit breaker, so this extension
+builds one and measures both sides of the trade. the breaker is the classic
+three-state machine: closed counts consecutive counted failures, at the
+threshold k it opens and rejects callers without touching the wire, and
+after a cooldown it admits exactly one half-open probe whose success closes
+it and whose failure restarts the cooldown. it sits between the retry loop
+and the wire in one of two modes. fail-fast ends the request the moment the
+gate rejects, which is what production breakers do. wait sleeps until the
+probe window and tries again, spending no budget on the wait itself.
+
+scope is part of the design: per-client gives each client its own memory
+across its sequential requests, shared gives every client one view of the
+dependency, like one process with many workers. and the breaker takes a
+predicate for what counts as a failure; whether a 429 counts turns out to be
+the whole story in study 3. run everything below with `npm run start:breaker`.
+
+### study 1: the dead service, now with a breaker
+
+same scenario as the outage extension's study 3 (40 clients x 3 sequential
+requests, every attempt an instant 503, no hints), full-jitter retries. the
+no-breaker row is that study's exp-full-jitter row rerun through this
+harness, and it reproduces exactly: 1080 attempts, 49.19s makespan.
+
+| strategy | wire att | att/req | rejected | trips | probes | makespan | give-up p50 req1 | later reqs |
+|---|---|---|---|---|---|---|---|---|
+| no-breaker | 1080 | 9.0 | 0 | 0 | 0 | 49.19s | 11.49s | 11.33s |
+| k=3 fail-fast | 120 | 1.0 | 120 | 40 | 0 | 0.65s | 0.33s | 0.00s |
+| k=5 fail-fast | 200 | 1.7 | 120 | 40 | 0 | 2.53s | 1.40s | 0.00s |
+| k=5 wait | 1080 | 9.0 | 657 | 40 | 880 | 71.86s | 13.86s | 22.83s |
+| k=5 shared | 40 | 0.3 | 120 | 1 | 0 | 0.10s | 0.04s | 0.00s |
+
+**fail-fast is what collapses the bill.** k=5 spends 200 wire attempts
+against the no-breaker 1080, 81.5% of the traffic gone, and the split
+columns show where the saving lives: request 1 pays 5 attempts to discover
+the outage (1.40s p50 of hang), requests 2 and 3 inherit the open breaker
+and hear "no" in 0.00s instead of 11.33s. thats the open thread's claim
+measured: the bill collapses to roughly the trip threshold per client.
+
+**wait mode does not shrink the bill.** 1080 attempts, same as no breaker,
+because the budget is counted in attempts and every probe window mints
+another probe until the budget is gone. worse, probes fire at
+max(backoff, cooldown), so callers hang longer: 22.83s p50 on later
+requests vs 11.33s plain. against a dead service, waiting politely is
+still waiting for nothing.
+
+**the shared breaker's floor is the concurrency width, not k.** all 40
+clients are already in flight when it trips, so 40 attempts land before the
+gate closes; a breaker cannot recall requests it already admitted. after
+that one trip everything is rejected without touching the wire, and the
+whole run is over in 0.10s.
+
+### study 2: the survivable outage
+
+40 clients x 1 request at t=0, hard-down over [0, outage) then healthy,
+equal-jitter retries, the schedule that survived every outage up to 10s in
+the outage extension. hints advertised but not respected, so the breaker is
+the only thing changing between rows.
+
+| success by outage | 1s | 2s | 5s | 10s | 20s | 30s |
+|---|---|---|---|---|---|---|
+| no-breaker | 100.0% | 100.0% | 100.0% | 100.0% | 5.0% | 0.0% |
+| k=5 fail-fast 2s | 77.5% | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| k=5 wait 2s | 100.0% | 100.0% | 100.0% | 100.0% | 22.5% | 0.0% |
+| k=5 wait 5s | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 0.0% |
+
+detail at the 5s outage:
+
+| strategy | success | wire att | wasted | probes | makespan | give-up p50 |
+|---|---|---|---|---|---|---|
+| no-breaker | 100.0% | 311 | 271 | 0 | 11.06s | - |
+| k=5 fail-fast 2s | 0.0% | 200 | 200 | 0 | 2.81s | 2.25s |
+| k=5 wait 2s | 100.0% | 281 | 241 | 81 | 9.66s | - |
+| k=5 wait 5s | 100.0% | 251 | 200 | 40 | 8.75s | - |
+
+**fail-fast turns a survivable outage into a lost one.** at 5s the plain
+schedule lands 100.0% and the fail-fast breaker 0.0%, giving up at 2.25s
+p50 with recovery 2.8s away. even the 1s outage keeps only 77.5%: whoever
+burns 5 attempts before recovery is done for. the dead-service saving and
+this cliff are the same behavior pointed at different futures, and the
+breaker cannot know which future its in.
+
+**wait mode dodges the cliff and still wastes less.** it keeps every outage
+the plain schedule survives, on fewer wire attempts (281 and 251 vs 311 at
+5s), because a tripped breaker sends one probe per window instead of a
+herd of backoffs.
+
+**the cooldown is a delay floor, and the floor is what survival is made
+of.** probes fire at max(backoff, cooldown), so a longer cooldown stretches
+the same 9-attempt budget over a longer horizon: at the 20s outage the
+plain schedule keeps 5.0%, wait-2s 22.5%, wait-5s 100.0%. this is the
+outage extension's equal-jitter-vs-full-jitter finding again from the other
+side: what outlives an outage is not how many attempts you have but how
+late your schedule can still be trying. nobody outlives 30s. the budget
+still ends.
+
+### study 3: false trips on the healthy herd
+
+the main table's herd with the main table's best guessing strategy,
+full-jitter+retry-after. the server is fine; nearly every failure is a 429
+the herd caused itself, plus 2% transient 503s. the no-breaker row
+reproduces the main table row exactly: 99.5%, 591 attempts, 9.47s.
+
+| strategy | success | wire att | 429s | trips | fast-fail | makespan |
+|---|---|---|---|---|---|---|
+| no-breaker | 99.5% | 591 | 390 | 0 | 0 | 9.47s |
+| k=3 counts 429 | 15.5% | 157 | 125 | 38 | 169 | 0.74s |
+| k=5 counts 429 | 29.0% | 299 | 240 | 33 | 142 | 2.34s |
+| k=5 503s only | 99.5% | 591 | 390 | 0 | 0 | 9.47s |
+| k=5 shared 429 | 10.0% | 40 | 20 | 1 | 180 | 0.10s |
+
+**counting 429s makes herd congestion look like a dead dependency.** at
+t=0, 20 of 40 clients draw a 429 on their first attempt, and under
+contention streaks of them come fast: k=3 trips 38 times and fails 169
+requests fast on a server that is up the whole time, 15.5% success. k=5 is
+gentler only in degree, 33 trips, 29.0%. a 429 is the server saying "youre
+too fast", and the breaker hears "im dead".
+
+**counting only 503s, the breaker is free.** 0 trips and the run matches
+the no-breaker baseline to the attempt, 591 vs 591, because 2% transient
+faults cannot produce 5 consecutive counted failures. the false-trip cost
+the open thread asked about is not a tax you pay everywhere; it is a
+classification bug you can just not write. rejection is backpressure,
+failure is damage, and the breaker should only count the second.
+
+**scope multiplies the blast radius.** the shared 429-counting breaker sees
+the herd's rejections as one failure streak, trips once, and takes the
+whole run to 10.0% success in 0.10s. per-client false trips cost one
+client's requests; shared false trips cost everyone's. sharing the breaker
+is only as safe as the failure predicate feeding it.
+
+### what the extension says as one sentence
+
+a circuit breaker is a bet that the present failure is permanent, so it
+pays exactly where thats true (the dead service, 81.5% of the traffic
+saved) and charges exactly where its false (the 5s outage, 100% to 0%;
+the healthy herd, 99.5% to 15.5% when 429s count), which is why the
+failure predicate and the cooldown, not the threshold, are the knobs that
+matter.
 
 ## why typescript
 
@@ -260,6 +401,10 @@ loop under test is shaped like the retry loop youd actually ship.
 - `src/experiment.ts` one strategy vs one fresh server, metrics out
 - `src/outage.ts` outage scenarios: waste, recovery spike, drain, give-up latency
 - `src/outage-main.ts` the three outage studies above
+- `src/breaker.ts` circuit breaker: consecutive-failure trip, cooldown, half-open probe
+- `src/breaker-retry.ts` the retry loop behind a breaker gate, fail-fast and wait modes
+- `src/breaker-study.ts` breaker scenarios: per-client or shared scope, failure predicate
+- `src/breaker-main.ts` the three breaker studies above
 - `src/percentile.ts` linearly interpolated percentile (port of 02's, same behavior)
 
 The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
@@ -268,9 +413,10 @@ The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
 
 ```
 npm ci
-npm test              # 69 tests
-npm start             # the main table
-npm run start:outage  # the outage studies
+npm test               # 100 tests
+npm start              # the main table
+npm run start:outage   # the outage studies
+npm run start:breaker  # the breaker studies
 npm run typecheck
 ```
 
@@ -301,10 +447,23 @@ npm run typecheck
 - the virtual clock fires timers one at a time with a full continuation flush
   between. at what simulated scale does that become the bottleneck, and what
   does batching same-instant timers buy?
-- study 3 is the argument for a circuit breaker: trip after k consecutive
-  failures, probe half-open, and the 1080-attempt bill collapses to roughly
-  the trip threshold. the price is false trips during a survivable spike
-  like the main table's herd, and both sides are measurable right here
+- the breaker extension counts consecutive failures; the standard production
+  alternative is an error rate over a rolling window, which a burst of
+  parallel workers cannot trip with one bad streak. rerunning these three
+  studies with a rolling-window breaker would say what the window buys and
+  what it delays
+- half-open here admits exactly one probe and closes on one success. real
+  breakers ramp: a probe quota, close on a success rate. against study 2's
+  recovery herd, the quota is a knob between re-tripping on the recovery
+  spike and starving the herd through a needle-width gate
+- wait mode showed the cooldown acting as a delay floor (the 20s outage
+  column: 5% plain, 100% with 5s cooldowns), which is the floor-sweep
+  question above wearing a breaker costume. sweeping the floor directly at
+  fixed budget, no breaker involved, would separate floor from breaker
+- fail-fast bounds hang time the way the deadline-budget idea below would;
+  a wall-clock deadline with no breaker on the same outage grid would
+  separate "stop early" from "remember across requests", the two things a
+  breaker bundles
 - study 2 recovers to full capacity in one instant; real recoveries ramp.
   whether the server should advertise a reduced rate for the first seconds
   or the clients should spread themselves (study 1's hint jitter, but on
