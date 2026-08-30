@@ -65,9 +65,21 @@ they are duals: what each scheme shares is what breaks it.
 
 python because the vectors, the indexes, and the recall metric all live in the python side of this repo (13, 02), and vectorized numpy is the honest way to do this arithmetic. typescript would fight both the ecosystem and the imports.
 
+## fixes
+
+- 2026-08-30 — the open question weighing int8 against hnsw's ef knob quoted
+  13's sweep as "ef 80 to 320 buys 0.5 points for 6x the distance budget", and
+  13's table says ef 80 to 320 is 0.1 points for 4.7x — the 0.5 and the 6x
+  belong to the ef 20 to 320 pair, so the endpoint was the wrong one. now names
+  ef 20 and quotes both pairs it derives from (0.995 to 1.000, 188 to 1221 per
+  query) so the arithmetic is checkable, and two tests read 13's published
+  table and pin the sentence to it — nothing here computes those numbers, so
+  nothing else would have caught either side drifting. no measured number in
+  this project moved
+
 ## open questions
 
-- int8 asym costs 1.5 recall points here, and 13 showed hnsw ef 80 to 320 buys 0.5 points for 6x the distance budget. per byte of RAM, which knob is cheaper at a fixed recall target on one shared sweep
+- int8 asym costs 1.5 recall points here, and 13 showed hnsw ef 20 to 320 buys 0.5 points (0.995 to 1.000) for 6.5x the distance budget (188 to 1221 per query). per byte of RAM, which knob is cheaper at a fixed recall target on one shared sweep
 - the quantile clip fraction is a hyperparameter with a cliff on each side, too small keeps the rogue stretch and too large clips real data. an adaptive rule from the observed per-dim histogram is the production question
 - product quantization is the standard next step past scalar, subvector codebooks trained by k-means. its extra recall per bit on these exact datasets is unmeasured here
 - hnsw built on floats then searched on codes (or the reverse) would split the constant +0.015 gap into build damage vs search damage

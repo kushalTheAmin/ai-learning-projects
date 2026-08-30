@@ -94,6 +94,53 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-30] 15 — the open question weighing int8's recall cost against
+  hnsw's ef knob quoted 13 as "ef 80 to 320 buys 0.5 points for 6x the distance
+  budget". 13's published sweep has ef 80 at recall 0.999 / 260 dists per query
+  and ef 320 at 1.000 / 1221, so that pair is 0.1 points for 4.7x. the quoted
+  magnitudes are both right for a different pair — ef 20 (0.995, 188) to 320 is
+  exactly 0.5 points and 6.5x — so the endpoint was mislabelled, not the
+  arithmetic. same shape as the 14 near-tripling finding, and the argument the
+  sentence makes (ef is an expensive knob per point of recall) survives either
+  reading, so no conclusion moved. what makes it worth more than a typo is that
+  nothing in 15 computes these numbers: they are read off a sibling readme by
+  hand, so neither project's tests would ever have noticed the drift. the
+  sentence now names ef 20 and publishes both pairs it derives from (0.995 to
+  1.000, 188 to 1221 per query) so the two derived figures are checkable
+  numbers rather than adjectives. two tests parse 13's ef sweep out of its
+  readme and pin this sentence to it: whichever endpoints the sentence names,
+  the points gap and the budget multiple must be what 13's table says for that
+  pair, and both pairs must be quoted. both fail against the old text and both
+  fail if 13's table ever moves. swept the rest of the repo for the same shape
+  — 25's reference to 23, 22's to 05 and 11, and 11's to 04 are all qualitative
+  and quote no sibling number, so 15 was the only one. no measured number
+  moved, root index row untouched, 67/67 green. found and fixed 2026-08-30
+- [medium] 15 — `grid_encode` ends with `.astype(np.uint8)` on codes clipped to
+  `levels - 1`, so any grid with more than 256 levels silently wraps instead of
+  raising: at `levels=1024` on gaussian data the codes top out at 255 and the
+  reconstruction rmse is 7.29 against int8's 0.018 on the same matrix, four
+  hundred times worse and no error anywhere. `fit_grid` accepts any `levels >=
+  2` with no upper bound and `DimGrid.levels` is a plain int, so the only thing
+  holding this correct is that `main.py` passes 256 and 16. either cap `levels`
+  at 256 in `fit_grid` or pick the code dtype from `levels`. nothing published
+  is wrong — int8 and int4 are the only widths the project runs. found
+  2026-08-30
+- [low] 15 — `float_rerank` does `float_vectors[ids]` with numpy fancy
+  indexing, so a negative candidate id wraps to the other end of the collection
+  and comes back as a result under its negative id: on a 3-row matrix,
+  candidates `[-1, 0]` returns `(-1, 1.0)` for row 2. a positive id past the
+  end raises `IndexError` from numpy, so only the negative side is silent. not
+  reachable from either index in the repo, both of which hand out ids from 0.
+  found 2026-08-30
+- [low] 15 — the quantile fit collapses a sparse dimension. a dimension that is
+  zero for all but a handful of rows has coinciding `[q, 1-q]` quantiles, so
+  `step` is 0 and every value in it reconstructs to `lo` — the dimension is
+  dropped from the distance entirely. `grid_encode`'s `step == 0` branch is
+  right for a genuinely constant dimension and wrong here, and the two are
+  indistinguishable downstream. the readme already names the clip fraction as a
+  hyperparameter with a cliff on each side; this is the far end of that cliff
+  and it fails silently rather than clipping. not reachable on the published
+  gaussian datasets, where no dimension is sparse. found 2026-08-30
 - [fixed 2026-08-30] 14 — "full-history's call size nearly triples from
   exchange 15 to 30" is refuted by the two numbers printed three lines above
   it: 1039.4 to 1876.7 is 1.806x. it nearly doubles. no pair of published
@@ -699,6 +746,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 15-embedding-quantization | 2026-08-30 |
 | 14-context-window | 2026-08-30 |
 | 13-ann-hnsw | 2026-08-29 |
 | 12-groundedness-scoring | 2026-08-29 |
@@ -995,6 +1043,40 @@ integration file pins its own seed 500 / 5 conversations, not the 20260828 /
 that binding for the numbers it touches, including four derived figures the
 entry point never prints. the rest of the readme's numbers are still unpinned;
 10 and 12 have the pattern worth copying.
+
+15 came back clean on everything it computes and dirty on the one number it
+doesn't. both quantizers match an independent reference term for term:
+symmetric per-vector is max|x|/127 with codes rounded and clipped to
+[-127, 127], and the per-dimension affine grid is lo + code * (hi - lo) /
+(levels - 1), both bit-identical to an independent reference written
+straight from the published formula, at 16 and 256 levels. nibble packing
+round-trips exactly on odd and even dims. hygiene holds — the grid is fitted on
+the collection only, queries never touch the fit, and every truth set is
+recomputed on whatever data the experiment actually indexes, including the two
+corrupted variants. output is byte-identical across reruns and across
+PYTHONHASHSEED, and every readme number matches `main.py` character for
+character from a fresh clone, the derived ones included (3.56x/3.99x/7.96x are
+the byte table's own ratios, 33x coarser is 0.2051/0.0062, ~6 levels is
+1.78/0.315). the additivity claim under hnsw checks out arithmetically at every
+ef: ann error plus quantization error predicts the int8 curve to within 0.002.
+edge cases hold better than most of the repo — empty and non-finite inputs
+raise, a single vector and an all-constant collection reconstruct exactly, and
+the empty-query path raises through 02's `mean` instead of returning NaN, which
+is the guard the open 01/09/10/11/12/13/14 findings are all about.
+
+the defect was the one figure in the readme that no code in the project
+produces: an open question comparing int8's recall cost against 13's ef knob,
+read off 13's published sweep by hand and attached to the wrong endpoint. worth
+recording as a habit, because it is a new shape for this repo — the previous
+claim findings were all a sentence disagreeing with a table printed a few lines
+above it, catchable by reading one screen. this one is only catchable by
+opening another project's readme. so the check that finds it is: every number
+in a readme is either printed by that project's entry point or copied from
+somewhere, and the copied ones have no owner unless a test gives them one. the
+sweep for others came back nearly empty — 11, 22 and 25 all reference sibling
+projects qualitatively and quote no sibling number — but "nearly empty" is the
+answer for today's repo, not a property of it, so cross-project quotes are
+worth re-sweeping whenever a project's headline numbers move.
 
 ## MECHANISMS
 
