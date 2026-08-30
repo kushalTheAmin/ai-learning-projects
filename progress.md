@@ -77,6 +77,68 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [high] 14 — "full-history's call size nearly triples from exchange 15 to 30"
+  is refuted by the two numbers printed three lines above it: 1039.4 to 1876.7
+  is 1.806x. it nearly doubles. no pair of published numbers in the project
+  triples over that span — 1 to 15 is 15.5x and full-history against
+  sliding-window at exchange 30 is 2.4x, so it is not a mislabelled pair
+  either, just a wrong magnitude word. the same claim is on the front page:
+  the root readme's index row for 14 says "full history nearly triples by turn
+  30", which is the only place a reader who never opens the project sees it.
+  the argument the sentence is making survives — full-history grows without
+  bound, the budgeted call is flat — so no conclusion moves, only the
+  multiple. same shape as the 10 finding fixed 2026-08-29, and the fix needs
+  both readmes. found 2026-08-30
+- [fixed 2026-08-30] 14 — the buried-fact bullet claimed "buried facts pay a
+  tax under every policy that looks at sentences" and that "the window
+  policies dont care, they keep or drop whole turns". the table under it
+  refutes both halves. luhn-25% at 800 is a sentence-scoring policy and holds
+  buried facts *better* than standalone (73.3% vs 69.2%, a -4.2 point gap),
+  and sliding-window, which never looks at a sentence, has the widest split of
+  any row in the sweep (78.3% vs 70.8%, +7.5) — wider than the 89.2/82.5 pair
+  the bullet quotes as the tax itself. and none of the eight gaps clears
+  sampling noise at 120 probes a side: the largest is rarity-25% at 400, 11.7
+  points at z=1.84, and the quoted rarity-25%-at-800 pair is z=1.48. so the
+  sentence read a mechanism out of noise and then attributed it to the wrong
+  half of the table. the lag buckets are exactly balanced across the two
+  classes (40 short / 40 medium / 40 long each), so the gaps are not a lag
+  confound — but buried intro turns are 73.9 tokens against standalone's 34.3,
+  which is a real mechanism for a *window* gap if the effect ever turns out to
+  exist. bullet rewritten around what the sweep shows, and the open question
+  that rested on the old premise ("the buried-fact tax comes from mean-based
+  scoring") now asks whether the effect exists at all. three tests pin it: the
+  signs disagree across policies at 800, no row in the sweep reaches z=2, and
+  the readme quotes the numbers the run produces — including the four derived
+  figures (11.7, z=1.84, 73.9, 34.3) that `main.ts` never prints and nothing
+  else would have caught going stale. no measured number moved, root readme
+  quotes none of this. found and fixed 2026-08-30
+- [medium] 14 — `runCell` on an empty conversation list returns NaN for
+  `meanInputTokensPerCall` (0/0) and `costPerConversation` (divide by
+  `conversations.length`), and `callTokensAtExchange` divides by the same
+  zero. unreachable from `main.ts`, which pins 20 conversations, and `rate`
+  already guards its own `total === 0`. same shape as the 01, 09, 10, 11, 12
+  and 13 findings below — six projects now, worth one pass rather than six.
+  found 2026-08-30
+- [low] 14 — the rarity scorer can never summarize a single sentence. with
+  N=1 every content word has sf=1, so every term scores ln(1/1)=0, the mean is
+  0, and `summarize` drops it on the `score > 0` filter — an evicted block
+  that collapses to one sentence yields an empty summary and the reserved
+  budget is spent on nothing. not reachable in the published sweep, where the
+  smallest evicted block is many turns, but it is a floor the scorer has and
+  the docstring ("a sentence of once-seen words scores ln(N)") doesn't
+  mention. found 2026-08-30
+- [low] 14 — `summarize` picks the same sentence twice when the evicted turns
+  repeat one verbatim: the filler bank is 10 templates over 18 topics, so
+  collisions happen, and identical sentences score identically and rank
+  adjacent. small — 15 of 2939 picked sentences at rarity-25%/800 (250
+  tokens), 3 of 3080 at luhn — but it is summary budget spent on text already
+  in the block. found 2026-08-30
+- [low] 14 — `sentences` treats only `.`/`!`/`?` as terminators, so an
+  ideographic full stop doesn't split ("東京 は 大きい。next one." is one
+  sentence). the docstring says the split is deliberately simpler than 10's
+  because the corpus is generated, which is true here, but the readme also
+  offers the summarizer as the transferable part. same family as the open
+  02/04 unicode tokenizer finding below. found 2026-08-30
 - [fixed 2026-08-29] 13 — `reachable_on_layer0` ran its walk out from node 0,
   which is only the first vector that happened to be indexed and has no part
   in any search. layer-0 links are not symmetric — `_shrink` drops the
@@ -587,6 +649,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 14-context-window | 2026-08-30 |
 | 13-ann-hnsw | 2026-08-29 |
 | 12-groundedness-scoring | 2026-08-29 |
 | 11-prompt-caching | 2026-08-29 |
@@ -836,6 +899,52 @@ question the sentence quoting it asks. the tell was already in the repo: 21
 had written the same probe from the entry point, and two folders computing
 one diagnostic differently is the finding whichever one turns out to be
 right.
+
+14 came back clean on every mechanism and dirty on two claims in the same
+section. luhn is the 1958 algorithm term for term: significance is raw
+frequency over the whole text with stopwords dropped, a cluster is a maximal
+run whose significant words are never more than maxGap insignificant ones
+apart, the score is count^2 over the span from first to last significant word,
+and the span counts every word in between including stopwords, which is what
+Luhn's own definition says. rarity is textbook idf, mean of ln(N/sf) over the
+sentence's unique content words. selection is score descending with ties to
+the earlier sentence, emitted in original order, so it is order-stable.
+budgets hold: across the two window policies and the six summarize variants at
+all four budgets, no assembled context exceeds its budget in any of the 19200
+calls that sweep makes, and the
+reported token count is the same sum of `estimateTokens` over parts that the
+fitting decisions used, so the number and the rule cannot drift apart. hygiene
+holds — nothing from a probe reaches the summarizer, the value appears exactly
+once per conversation and `validateConversation` asserts it on every generate,
+and the probe turn names the key and never the value. the lag buckets and the
+fact classes are exactly balanced (40 each way), which is what makes the
+by-class columns comparable at all. output is byte-identical across reruns,
+and every table line in the readme matches `npm start` character for character
+from a fresh clone.
+
+both defects were in "what the numbers mean". the fixed one read a
+sentence-scoring mechanism out of a gap its own table contradicts twice; the
+open one is a magnitude word that the numbers three lines above it refute, and
+it is on the front page as well as in the project.
+
+worth recording as a habit: the by-class columns were the finding, and the
+check that catches it is reading the *whole* column, not the row the sentence
+quotes. the bullet cited one pair, 89.2 against 82.5, and it is real — but the
+same column has a luhn row with the opposite sign and a sliding-window row
+with a bigger gap, and both were printed on screen the whole time. a claim of
+the form "policies like A do X, policies like B dont" is a claim about every
+row, so it gets checked against every row. the second half is arithmetic the
+project already had the parts for: 120 probes a side makes a 6.7 point gap
+z=1.48, and nothing in this repo had computed a standard error on a retention
+percentage before. a percentage with no n beside it is a number you cannot
+argue with yet.
+
+14 also had no test tying `main.ts`'s published run to its readme — the
+integration file pins its own seed 500 / 5 conversations, not the 20260828 /
+20 the readme quotes — so every published number was unpinned. the fix adds
+that binding for the numbers it touches, including four derived figures the
+entry point never prints. the rest of the readme's numbers are still unpinned;
+10 and 12 have the pattern worth copying.
 
 ## MECHANISMS
 
