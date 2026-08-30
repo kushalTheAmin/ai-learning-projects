@@ -77,6 +77,73 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-29] 13 — `reachable_on_layer0` ran its walk out from node 0,
+  which is only the first vector that happened to be indexed and has no part
+  in any search. layer-0 links are not symmetric — `_shrink` drops the
+  back-link when a node runs over its degree cap — so the node the walk starts
+  from decides the answer, and node 0 is the wrong one: on a seeded naive
+  graph (300 vectors, dim 8, M=4, seed 2) node 0 reaches 20 of 300 where the
+  entry point reaches 261, and on another (400, dim 16, seed 1) it is 43
+  against 348. off by an order of magnitude in both directions. the number the
+  readme publishes off this probe — "strands 145 of 2000 nodes" — is the
+  ablation's whole case for the selection heuristic being load-bearing, and it
+  was right by luck: node 0 and the entry point agree on all five published
+  configurations (3000/3000, 2000/2000, 1855/2000, 2000/2000, 1996/2000), so
+  no published number moved. 21-vector-store-persistence had already written
+  the same diagnostic correctly as `reachable_live_from_entry`, so this was
+  also the same metric computed two ways in two folders. walks from
+  `self._entry` now, and the empty guard keys on `self._entry is None` rather
+  than `_size == 0`. `test_reachability_is_probed_from_the_search_entry_point`
+  pins the seed-2 graph where the two starts disagree 261 vs 20. 15 and 21
+  both import this index and both suites stay green; neither calls this
+  method, so nothing to port. found and fixed 2026-08-29
+- [medium] 13, 21 — "reachable from the entry point" is a lower bound on what
+  search can see, not the set itself, and both projects' docstrings read it as
+  the set. the layer-0 beam does not start at the entry: it starts wherever
+  the greedy descent through the upper layers lands, and upper-layer links are
+  chosen independently of layer-0 links, so a node outside the entry's layer-0
+  closure can still be reached. closing the descent's whole landing set gives
+  1926 of 2000 on the naive tight-clusters row against the 1855 published — 74
+  nodes provably unreachable by any query rather than 145. the sound version
+  of the claim is that complement; the published one is a different, smaller
+  set that happens to be easy to compute. not folded into the fix above
+  because it is a second claim and it lives in 21 as well. found 2026-08-29
+- [medium] 13 — duplicate-heavy corpora strand almost everything and `search`
+  quietly returns short. 50 identical vectors at M=4: all distances tie, the
+  tie-break is by id, so every later node links to the same nine lowest ids
+  and shrink prunes the back-links — 41 of 50 nodes end up unreachable and
+  `search(q, k=10, ef=50)` returns 9 results with 50 vectors indexed, no error
+  and no signal. this is hnsw's known crowding pathology rather than a coding
+  error, which is why it is not the fix, but `test_duplicates_are_all_
+  retrievable` uses 5 duplicates among 30, passes, and reads as a guarantee
+  the index does not have. "tradeoffs and where it breaks" doesn't mention it.
+  found 2026-08-29
+- [low] 13 — "the naive graph is literally disconnected" is the one word the
+  measurement doesn't support. layer 0 is a single weakly connected component
+  of 2000 in every ablation arm; the 145 stranded nodes still link out to the
+  core, the core just has no way back. directed unreachability, which is the
+  thing that matters for search, but not a split graph. found 2026-08-29
+- [low] 13 — the wall-clock section builds a fresh `ExactIndex` and starts the
+  timer before the first search, so the lazy `np.vstack` of all 3000 rows is
+  charged to the exact baseline inside the per-query loop: 2.07ms once, 0.014
+  ms/query over 150 queries, ~3.5%. the hnsw side is timed on an index already
+  built and warm. the readme's own two numbers are 0.339 and 0.328, 3.3%
+  apart, so the artifact is the size of the gap it reports — but the section's
+  claim is "near a tie" and that survives it, and the numbers are labelled as
+  moving a few percent run to run. found 2026-08-29
+- [low] 13 — `main.py` prints a `dists/query` column in the ablation that the
+  readme table drops, and it is the cost side of the heuristic's case: the
+  heuristic spends 128 per query against naive's 116 on tight clusters and 382
+  against 363 on uniform, ~10% more. the conclusion is untouched — 0.188 of
+  recall for 10% more distances is not a close call — but the readme argues
+  the heuristic is load-bearing without ever showing what it costs. found
+  2026-08-29
+- [medium] 13 — `main.py` and the introspection helpers die on an empty index:
+  `degrees(0)` returns `[]` and `max([])` raises, `ground_truth` on an empty
+  query set reaches `mean([])`, and the `vs exact` column divides by a
+  `dists/query` that is 0 when nothing was searched. all unreachable from the
+  entry point, which pins its own 3000 vectors and 150 queries. same shape as
+  the 01, 09, 10, 11 and 12 findings below. found 2026-08-29
 - [fixed 2026-08-29] 12 — `extract_numbers` ran `\d+(?:\.\d+)?` over the raw
   text with no token boundary, so it pulled digits out of the middle of
   identifiers: "p99" yielded 99, "ES256" yielded 256. those are not quantities
@@ -520,6 +587,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 13-ann-hnsw | 2026-08-29 |
 | 12-groundedness-scoring | 2026-08-29 |
 | 11-prompt-caching | 2026-08-29 |
 | 10-chunking-strategies | 2026-08-29 |
@@ -732,6 +800,42 @@ p99 case was written into `test_integers_and_decimals` and its wrong answer
 pinned as expected, so the suite defended the bug. an example chosen because
 it is tricky needs its expected value derived from the definition, not from
 what the code happened to print.
+
+13 came back clean on the algorithm and dirty on a diagnostic. the index is
+malkov & yashunin term for term: levels are `floor(-ln(u) / ln(M))` and the
+observed distribution matches the theory to a node or two (2812 at level 0
+against a predicted 2812.5, 174 against 175.8, 13 against 11.0), the descent
+takes one greedy ef=1 step per layer and the layer-0 beam is the paper's
+best-first search, the new node selects M neighbors on every layer while
+shrink caps at 2M on layer 0 and M above, and selection algorithm 4 is exact
+including keep-pruned-connections — keep a candidate only if it is closer to
+the new node than to every neighbor already kept, ties keeping. the cost unit
+is honest: `_dists` is the only place a distance is computed and it always
+increments the counter, so the build number carries the heuristic's own
+comparisons and search is reset per sweep row rather than inheriting build.
+hygiene holds — queries are fresh draws from the same mixture, nothing from
+them touches the graph, and the exact top-10 that defines recall is computed
+by a separate index; recall is 02's `recall_at_k`, imported, 1-indexed and
+slicing k. every measured number is byte-identical across reruns and under
+PYTHONHASHSEED, only the wall-clock columns move and they say so in the
+header. every published number, table and prose, matches `python main.py`
+from a fresh clone, root readme included.
+the defect was in `reachable_on_layer0`, the probe behind the ablation's
+"strands 145 of 2000" — it walked from node 0, not from where a search
+starts. fixed above. six smaller findings came out of the same read, two of
+them shared with 21.
+
+worth recording as a habit: a diagnostic needs its starting point checked the
+way a metric needs its population named. this one was measuring reachability
+in a directed graph from an arbitrary node, and it agreed with the right
+answer on all five published configurations, so nothing in the output looked
+wrong — on neighbouring seeds the same code is off by 10x in either
+direction. the check that catches it is not arithmetic on the published
+number, it is asking what question the code answers and whether that is the
+question the sentence quoting it asks. the tell was already in the repo: 21
+had written the same probe from the entry point, and two folders computing
+one diagnostic differently is the finding whichever one turns out to be
+right.
 
 ## MECHANISMS
 
