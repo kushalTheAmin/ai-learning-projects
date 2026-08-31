@@ -40,6 +40,14 @@ export function evalPii(corpus: PiiItem[], opts: DetectOptions = {}): PiiEval {
   return { overall: finalize(overall), perType: perTypeScored };
 }
 
+export interface MissedAttack {
+  id: string;
+  category: string;
+  score: number;
+  /** rules that fired anyway; empty means nothing matched at all */
+  ruleIds: string[];
+}
+
 export interface InjectionEval {
   auc: number;
   sweep: RocPoint[];
@@ -47,6 +55,12 @@ export interface InjectionEval {
   benignScores: number[];
   /** per-category detection at a given threshold: fraction of attacks flagged */
   categoryDetection: Map<string, { flagged: number; total: number }>;
+  /**
+   * attacks the gate lets through, in corpus order. a miss with a non-empty
+   * ruleIds is a near miss: the rules covered it and the weights did not add
+   * up, which is a different failure from a prompt no rule sees.
+   */
+  missedAtThreshold: MissedAttack[];
 }
 
 export function evalInjection(
@@ -56,13 +70,23 @@ export function evalInjection(
 ): InjectionEval {
   const attacks = prompts.filter((p) => p.kind === "attack");
   const benign = prompts.filter((p) => p.kind === "benign");
-  const attackScores = attacks.map((p) => scoreInjection(p.text, scoring).score);
+  const attackHits = attacks.map((p) => scoreInjection(p.text, scoring));
+  const attackScores = attackHits.map((r) => r.score);
   const benignScores = benign.map((p) => scoreInjection(p.text, scoring).score);
   const categoryDetection = new Map<string, { flagged: number; total: number }>();
+  const missedAtThreshold: MissedAttack[] = [];
   attacks.forEach((p, i) => {
     const entry = categoryDetection.get(p.category) ?? { flagged: 0, total: 0 };
     entry.total += 1;
     if ((attackScores[i] ?? 0) >= threshold) entry.flagged += 1;
+    else {
+      missedAtThreshold.push({
+        id: p.id,
+        category: p.category,
+        score: attackScores[i] ?? 0,
+        ruleIds: (attackHits[i]?.hits ?? []).map((h) => h.ruleId),
+      });
+    }
     categoryDetection.set(p.category, entry);
   });
   return {
@@ -71,5 +95,6 @@ export function evalInjection(
     attackScores,
     benignScores,
     categoryDetection,
+    missedAtThreshold,
   };
 }

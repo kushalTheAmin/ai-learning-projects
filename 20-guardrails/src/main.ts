@@ -90,6 +90,11 @@ function main(): void {
         `${h.flagged}/${h.total}=${pct(h.flagged / h.total).padStart(6)}`,
     );
   }
+  console.log(`\nattacks under threshold ${THRESHOLD} (hardened):`);
+  for (const m of hardened.missedAtThreshold) {
+    const why = m.ruleIds.length === 0 ? "no rule fired" : m.ruleIds.join(", ");
+    console.log(`  ${m.id}  ${m.category.padEnd(15)} score ${m.score}  (${why})`);
+  }
 
   section("3. LAYERED PIPELINE END TO END (input gate + canary + redaction)");
   const configs: PipelineConfig[] = [
