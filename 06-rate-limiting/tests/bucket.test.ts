@@ -46,6 +46,25 @@ describe("TokenBucket", () => {
     expect(bucket.availableTokens()).toBe(2);
   });
 
+  it("accrues owed tokens at the old rate before a rate change takes effect", () => {
+    const clock = new FakeClock();
+    const bucket = new TokenBucket(1, 10, clock); // 1 token/s
+    for (let i = 0; i < 10; i++) expect(bucket.tryTake()).toBe(true);
+    clock.advance(2000); // 2 tokens owed at the old rate
+    bucket.setRate(10);
+    expect(bucket.availableTokens()).toBeCloseTo(2);
+    clock.advance(500); // 5 more at the new rate
+    expect(bucket.availableTokens()).toBeCloseTo(7);
+  });
+
+  it("rejects a non-positive rate change", () => {
+    const clock = new FakeClock();
+    const bucket = new TokenBucket(10, 1, clock);
+    expect(() => bucket.setRate(0)).toThrow(/ratePerSec/);
+    expect(() => bucket.setRate(-5)).toThrow(/ratePerSec/);
+    expect(bucket.currentRatePerSec()).toBe(10);
+  });
+
   it("reports the exact wait for the next token", () => {
     const clock = new FakeClock();
     const bucket = new TokenBucket(10, 1, clock);

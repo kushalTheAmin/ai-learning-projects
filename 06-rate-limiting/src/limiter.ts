@@ -24,4 +24,9 @@ export class PacingLimiter {
       await this.clock.sleep(Math.max(1, this.bucket.msUntilNextToken()));
     }
   }
+
+  /** Change the pacing rate from this instant on. */
+  setRate(ratePerSec: number): void {
+    this.bucket.setRate(ratePerSec);
+  }
 }

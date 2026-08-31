@@ -16,6 +16,28 @@ function makeOpts(overrides: Partial<ServerOptions> = {}): ServerOptions {
 }
 
 describe("SimulatedApi", () => {
+  it("applies a mid-run rate change to later admissions and timestamps 429s", async () => {
+    const clock = new VirtualClock();
+    // burst 2, 1 token/s: drain the burst, then tighten to 0.1 token/s.
+    const api = new SimulatedApi(clock, createRng(1), makeOpts({ ratePerSec: 1, burst: 2, latencyMsMin: 0, latencyMsMax: 0 }));
+    const work = (async () => {
+      await api.request();
+      await api.request();
+      const rejected = await api.request(); // burst spent, instant 429
+      api.setRate(0.1);
+      await clock.sleep(1000); // would have earned a token at the old rate
+      const stillRejected = await api.request();
+      await clock.sleep(9000); // 10s total at 0.1/s = 1 token
+      const admitted = await api.request();
+      return [rejected, stillRejected, admitted];
+    })();
+    const [rejected, stillRejected, admitted] = await clock.runUntil(work);
+    expect(rejected!.status).toBe(429);
+    expect(stillRejected!.status).toBe(429);
+    expect(admitted!.status).toBe(200);
+    expect(api.rejection429Ms).toEqual([0, 1000]);
+  });
+
   it("validates fault rate and latency range", () => {
     const clock = new VirtualClock();
     const rng = createRng(1);

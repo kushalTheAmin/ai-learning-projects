@@ -380,6 +380,97 @@ the healthy herd, 99.5% to 15.5% when 429s count), which is why the
 failure predicate and the cooldown, not the threshold, are the knobs that
 matter.
 
+## the pacing extension: the knee, then throwing the number away
+
+the base study paced at exactly the server rate and blamed the leftover 429s
+on the 503-retry bypass. two threads were open: where is the throughput/429
+knee as the pacing rate sweeps past the budget, and what do you do when the
+budget isnt a number you know. part 1 sweeps fixed pacing from 80% to 120%
+of a known 20 req/s budget under steady closed-loop load. part 2 deletes the
+knowledge: the server tightens from 20 req/s to 8 req/s mid-run, and an aimd
+controller (additive increase, multiplicative decrease, the tcp congestion
+shape applied to request pacing) has to find both numbers by probing. its
+measured against fixed pacers at each phase's correct rate and against an
+oracle that follows the server's schedule exactly.
+
+new machinery: the token bucket takes `setRate` (owed tokens accrue at the
+old rate first, so a rate change never rewrites the past), the server takes
+a rate schedule fired at exact virtual instants, and `src/adaptive.ts` is
+the aimd pacer. rate grows by +2 req/s per second of clock time, any 429
+cuts it x0.6, and a 1s hold-off makes the burst of 429s from one overshoot
+count as one congestion event instead of five cuts. first attempts go
+through the pacer, retries re-enter unpaced (the base study's contract),
+and every 429, paced or not, feeds the controller.
+
+### part 1: the sweep (`npm run start:pacing`, seed 42)
+
+```
+pacing      % of srv   success   attempts   att/ok    429s   makespan    ok/s
+-----------------------------------------------------------------------------
+unpaced            -     98.0%       2186     2.79    1391     43.58s   17.99
+paced-16       80.0%    100.0%        807     1.01       0     48.77s   16.40
+paced-18       90.0%    100.0%        810     1.01       0     43.38s   18.44
+paced-19       95.0%    100.0%        817     1.02       3     41.10s   19.47
+paced-20      100.0%     98.9%        899     1.14      96     41.05s   19.27
+paced-21      105.0%     98.4%       1936     2.46    1142     40.90s   19.24
+paced-22      110.0%     98.1%       1958     2.49    1166     43.37s   18.10
+paced-24      120.0%     98.4%       1995     2.53    1198     39.48s   19.94
+```
+
+below the budget the client rate is the throughput: paced-16 delivers 16.40
+ok/s with 0 rejections, pure client-bound. above it, throughput flatlines
+while waste climbs, paced-21 at 1142 429s and 2.46 att/ok against 1.02 at
+95%. the knee is sharp and it isnt free to stand on: pacing at exactly 100%
+leaves zero headroom for the 503-retry bypass, so a 2.0% transient fault
+rate cascades into 96 429s and 98.9% success while paced-19 takes 3 429s at
+100.0% success. the operating point this table argues for is 95%, not 100%.
+
+### part 2: the budget drops mid-run
+
+20 clients x 50 requests, server 20 req/s until t=30s then 8 req/s. aimd
+starts at 4 req/s knowing nothing. ideal makespan 77.5s.
+
+```
+strategy     success   attempts   att/ok   429 ph1   429 ph2   ok/s ph1   ok/s ph2   makespan
+---------------------------------------------------------------------------------------------
+unpaced        96.2%       3280     3.41      1281      1023      20.23       7.56     76.94s
+fixed-20       97.4%       2091     2.15        71      1034      20.33       7.52     78.39s
+fixed-8       100.0%       1010     1.01         0         0       8.63       8.01    122.55s
+oracle         98.9%       1088     1.10        71        17      20.33       7.97     77.54s
+aimd           99.9%       1189     1.19         4       177      18.30       8.04     85.99s
+```
+
+the aimd rate trace, sampled every 5s (34 cuts taken over the run):
+
+```
+t=0s 4.0  t=5s 14.0  t=10s 24.0  t=15s 13.8  t=20s 23.8  t=25s 23.4  t=30s 23.6  t=35s 5.7  t=40s 9.4  t=45s 7.8  t=50s 6.0  t=55s 7.9  t=60s 9.8  t=65s 7.7  t=70s 10.2  t=75s 8.0  t=80s 10.0  t=85s 7.8
+```
+
+reading it:
+
+- every fixed rate is wrong in one phase. fixed-20 is clean until the drop
+  (71 phase-1 429s) then pays 1034 429s and fails 2.6% of its requests to
+  retry burnout. fixed-8 never gets rejected and never fails, but leaves
+  11.37 req/s of phase-1 capacity unused and takes 122.55s, half again the
+  ideal
+- aimd knows neither rate and pays a 10.9% makespan tax over the oracle
+  (85.99s vs 77.54s). the probing bill is 181 429s against unpaced's 2304.
+  the tax lives almost entirely in phase 1 (18.30 vs 20.33 ok/s, the ramp
+  from 4 req/s plus the sawtooth troughs), not phase 2 (8.04 vs 7.97): once
+  converged, probing costs nearly nothing, and the trace shows convergence
+  to the new 8 req/s budget within one 5s sample of the drop
+- the surprise: the informed client is not the safe one. the oracle paces
+  at exactly 100% of the advertised rate and inherits part 1's zero-headroom
+  fragility, failing 1.1% of requests where aimd fails 0.1%. the sawtooth's
+  troughs are accidental headroom that lets 503 retries land without
+  cascading. knowing the rate and standing exactly on it is worse for
+  success rate than not knowing it and oscillating underneath it
+
+one sentence: the knee at 100% is sharp on the throughput side and fragile
+on the success side, so a fixed pacer should stand at 95%, and when the
+budget is unknown or moving, aimd buys convergence within seconds for a
+~11% makespan tax and a 429 bill an order of magnitude under unpaced
+
 ## why typescript
 
 Retry loops, rate limiters, and backoff policies are client SDK territory, and
@@ -405,6 +496,9 @@ loop under test is shaped like the retry loop youd actually ship.
 - `src/breaker-retry.ts` the retry loop behind a breaker gate, fail-fast and wait modes
 - `src/breaker-study.ts` breaker scenarios: per-client or shared scope, failure predicate
 - `src/breaker-main.ts` the three breaker studies above
+- `src/adaptive.ts` aimd pacer: additive increase over time, multiplicative cut on 429, hold-off dedupe
+- `src/pacing-study.ts` pacing scenarios: rate schedules, phase-split metrics, aimd rate trace
+- `src/pacing-main.ts` the sweep and the mid-run drop studies above
 - `src/percentile.ts` linearly interpolated percentile (port of 02's, same behavior)
 
 The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
@@ -413,10 +507,11 @@ The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
 
 ```
 npm ci
-npm test               # 100 tests
+npm test               # 118 tests
 npm start              # the main table
 npm run start:outage   # the outage studies
 npm run start:breaker  # the breaker studies
+npm run start:pacing   # the rate sweep and the aimd studies
 npm run typecheck
 ```
 
@@ -438,9 +533,25 @@ npm run typecheck
 - full jitter and decorrelated fail 2 and 7 of 200 requests where equal jitter
   fails 0. is the delay floor the real variable? a floor sweep (0%, 25%, 50%
   of exp) at fixed retry budget would isolate it
-- pacing is measured at exactly the server rate. a rate sweep (80% to 120% of
-  server rate) would find the throughput/429 knee, and adaptive pacing (aimd
-  on 429s) is the real-world answer when the server rate is unknown
+- aimds additive increase is clocked on time, not on sends. tcp grows per
+  ack; this pacer would balloon to max over an idle stretch and pay the whole
+  rediscovery on the next burst. gating growth on traffic actually flowing is
+  the fix and its cost is unmeasured
+- the 429 is one bit of feedback. real apis also send Retry-After and
+  ratelimit-remaining headers; a controller that reads the remaining budget
+  could skip most of the sawtooth, and how much of the 10.9% oracle gap that
+  recovers is measurable right here
+- increase +2 and cut x0.6 were picked once, not swept. the increase/decrease
+  plane has a stability against throughput frontier and this point's position
+  on it is unknown
+- the oracle failing 1.1% says the informed optimum is below 100% of the
+  advertised rate. a headroom sweep (oracle at 90/95/100%) on the drop
+  scenario would price the safety margin directly, part 1's knee measured
+  from the safe side
+- cuts fire on 429s from retries of requests sent before the last cut, stale
+  feedback tcp avoids by cutting once per window of its own sends. per-epoch
+  attribution (only cut on 429s of attempts launched since the last cut) is
+  unmeasured
 - 503 retries bypass the pacing bucket by design and cause every leftover 429.
   routing retries through the pacer, and measuring the makespan cost of that
   fairness, is a one-line change with a real trade-off attached

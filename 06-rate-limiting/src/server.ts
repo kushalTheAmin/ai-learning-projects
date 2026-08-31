@@ -55,6 +55,8 @@ export class SimulatedApi {
   count200 = 0;
   count429 = 0;
   count429OnFirstAttempt = 0;
+  /** Timestamp of every 429, so studies can split rejections by time window. */
+  readonly rejection429Ms: number[] = [];
   count503 = 0;
   /** Outage rejections, counted apart from transient 503s. */
   count503Outage = 0;
@@ -96,6 +98,14 @@ export class SimulatedApi {
     return this.arrivalsMs.length;
   }
 
+  /**
+   * Change the admission rate from this instant on (capacity tightening or
+   * recovering mid-run). Tokens already owed accrue at the old rate first.
+   */
+  setRate(ratePerSec: number): void {
+    this.bucket.setRate(ratePerSec);
+  }
+
   async request(isRetry = false): Promise<ApiResponse> {
     this.arrivalsMs.push(this.clock.now());
     if (isRetry) this.retryArrivalsMs.push(this.clock.now());
@@ -111,6 +121,7 @@ export class SimulatedApi {
     }
     if (!this.bucket.tryTake()) {
       this.count429++;
+      this.rejection429Ms.push(this.clock.now());
       if (!isRetry) this.count429OnFirstAttempt++;
       if (this.opts.advertiseRetryAfter) {
         return { status: 429, retryAfterMs: this.jitteredHint(this.bucket.msUntilNextToken()) };

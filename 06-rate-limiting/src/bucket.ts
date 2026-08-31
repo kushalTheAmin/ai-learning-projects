@@ -14,7 +14,7 @@ export class TokenBucket {
   private lastRefillMs: number;
 
   constructor(
-    private readonly ratePerSec: number,
+    private ratePerSec: number,
     private readonly burst: number,
     private readonly clock: Clock,
   ) {
@@ -47,6 +47,22 @@ export class TokenBucket {
   availableTokens(): number {
     this.refill();
     return this.tokens;
+  }
+
+  currentRatePerSec(): number {
+    return this.ratePerSec;
+  }
+
+  /**
+   * Change the refill rate from this instant on. Tokens already owed accrue
+   * at the old rate first, so a rate change never rewrites the past.
+   */
+  setRate(newRatePerSec: number): void {
+    if (!Number.isFinite(newRatePerSec) || newRatePerSec <= 0) {
+      throw new Error(`ratePerSec must be positive, got ${newRatePerSec}`);
+    }
+    this.refill();
+    this.ratePerSec = newRatePerSec;
   }
 
   private refill(): void {
