@@ -7,7 +7,14 @@
 import { INTENTS, validateDataset } from "./dataset.js";
 import { FEATURIZERS } from "./features.js";
 import { buildPairs, classStats, inversionRate, operatingTable, similarities } from "./pairs.js";
-import { noCacheCost, runReplay, type ReplayResult } from "./replay.js";
+import {
+  noCacheCost,
+  runReplay,
+  seedSpread,
+  SPREAD_CONFIGS,
+  SPREAD_SEEDS,
+  type ReplayResult,
+} from "./replay.js";
 import { DEFAULT_TRAFFIC, generateTraffic } from "./traffic.js";
 
 const THRESHOLDS = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95] as const;
@@ -91,6 +98,25 @@ function main(): void {
     for (const threshold of THRESHOLDS) {
       printReplayRow(runReplay(traffic, featurizer, threshold, featurizer.name));
     }
+  }
+
+  console.log(
+    `\n== the same operating points across ${SPREAD_SEEDS.length} seeds ` +
+      `(${SPREAD_SEEDS[0]}..${SPREAD_SEEDS[SPREAD_SEEDS.length - 1]}) ==`,
+  );
+  console.log("config       wrong-min  wrong-med  wrong-max  wrong-mean  zero-seeds       saved%");
+  for (const spread of seedSpread(DEFAULT_TRAFFIC, SPREAD_SEEDS, SPREAD_CONFIGS)) {
+    console.log(
+      [
+        `${spread.label} ${spread.threshold.toFixed(2)}`.padEnd(12),
+        pad(String(spread.wrongMin), 9),
+        pad(spread.wrongMedian.toFixed(1), 10),
+        pad(String(spread.wrongMax), 10),
+        pad(spread.wrongMean.toFixed(2), 11),
+        pad(`${spread.zeroWrongSeeds}/${SPREAD_SEEDS.length}`, 11),
+        pad(`${pct(spread.savedMin)}-${pct(spread.savedMax)}`, 12),
+      ].join("  "),
+    );
   }
 
   console.log("\n== typo traffic at threshold 0.75 ==");

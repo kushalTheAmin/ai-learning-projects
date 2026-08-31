@@ -16,7 +16,7 @@ so a lexical semantic cache is not a semantic cache. it is a fuzzy-exact cache: 
 
 2000 seeded requests, 20 intents, zipf 1.1. calling the model every time costs $1.7102. an exact-match cache on normalized text (lowercase, strip punctuation) already hits 47.0% and cuts that to $0.9053, at zero risk, because repeats of the same phrasing with the same wrapping are common under zipf traffic.
 
-the semantic layer on word features at threshold 0.80 hits 81.3%, spends $0.3177, saves 81.4%, and serves zero wrong answers on this replay. dropping the threshold to 0.50 pushes savings to 94.4% but serves 93 wrong answers, 46.5 per thousand requests. the whole band between is the dial: at 0.75 its 86.4% saved with 1 wrong answer per thousand. whether the marginal 13% of cost is worth 46 wrong answers per thousand is not a similarity question, its a product question, and the table is what lets you ask it with numbers.
+the semantic layer on word features at threshold 0.80 hits 81.3%, spends $0.3177, saves 81.4%, and serves zero wrong answers on this one traffic draw — one seeds zero, and the next section prices what that is worth. dropping the threshold to 0.50 pushes savings to 94.4% but serves 93 wrong answers, 46.5 per thousand requests. the whole band between is the dial: at 0.75 its 86.4% saved with 1 wrong answer per thousand. whether the marginal 13% of cost is worth 46 wrong answers per thousand is not a similarity question, its a product question, and the table is what lets you ask it with numbers.
 
 two things in the sweep were not obvious to me before running it:
 
@@ -24,6 +24,17 @@ two things in the sweep were not obvious to me before running it:
 - the two featurizers fail differently, as built. char trigrams see through typos word features cant (233 of 287 typoed requests served semantically vs 157 at 0.75) but score "enable two factor authentication" vs "disable two factor authentication" at 0.892, so they serve 34 wrong answers at 0.75 where word features serve 2. morphology robustness and antonym blindness are the same property pointed in two directions.
 
 wrong serves here are counted, not priced, because their cost is not a token count: serving the 2fa-disable answer to someone enabling 2fa costs trust, not dollars. the replay prints both currencies and refuses to collapse them.
+
+## one seeds zero
+
+every number in that table is one traffic draw, seed 20260828. that is fine for the cost columns and not fine for the wrong-answer column, which is the entire risk side of the trade. rerunning the same operating points on 20 seeds, 20260828 through 20260847:
+
+- word at 0.80 serves no wrong answer on 12 of the 20 seeds, and up to 9 on the worst. mean 1.15, median 0. so the zero above is the median, not the value — 8 seeds in 20 serve at least one wrong answer at the threshold this readme was calling safe
+- word at 0.75 spans 0 to 25, median 2. the "1 wrong per thousand" above is near the bottom of that
+- char at 0.75 spans 3 to 57, median 12.5, and the default seeds 34 sits high in it — the char-vs-word comparison below is drawn from a bad seed for char
+- savings barely move at all: word at 0.80 saves 79.1% to 82.4% across the whole set
+
+cost is measurable off one replay, wrong answers are not. what does survive the resample is direction: char serves more wrong answers than word at 0.75 on 20 of 20 seeds. the counts dont. read "zero wrong answers at 0.80" as a safety property and youre reading a single draw.
 
 ## running it
 
@@ -34,7 +45,7 @@ npm test
 npm start
 ```
 
-node 20+, no network, no api key. `npm start` prints the pair-class tables, the operating points, the replay sweep, and the typo comparison; every number above is copied from that output. tests run the same replay, so the readme claims are pinned: word at 0.80 serving zero wrong answers, the inversion rate above 0.9, paraphrase recall at zero, char beating word on typos.
+node 20+, no network, no api key. `npm start` prints the pair-class tables, the operating points, the replay sweep, the 20-seed spread and the typo comparison; every number above is copied from that output. tests run the same replays, so the readme claims are pinned: the inversion rate above 0.9, paraphrase recall at zero, char beating word on typos, and the whole seed spread — including that word at 0.80 is zero-wrong on 12 seeds of 20 and not the rest. the seed sweep is 60 replays on top of the main one, so `npm start` takes about 20s and the suite about 13s.
 
 ## why typescript
 
@@ -46,6 +57,10 @@ response caching lives in the serving path, which is typescript territory in my 
 - no eviction and no ttl. answers that go stale ("whats the latest version") poison a semantic cache worse than an exact one, because staleness spreads to every nearby phrasing.
 - the store trusts its own first answer for an intent forever. a wrong or low-quality first answer gets amplified across every future near-hit.
 - lexical features cap the ceiling: paraphrase recall is 0% at every usable threshold, so the cache never earns the "semantic" in its name here.
+
+## fixes
+
+- 2026-08-31 — the readme sold threshold 0.80 as the operating point that serves zero wrong answers, and that zero is one seeds zero. the same config over 20 seeds is zero-wrong on 12 of them and serves up to 9 on the worst, mean 1.15. `npm start` now prints a seed-spread table for the three operating points the readme decides off, and the readme carries the ranges instead of the single draw. no measured number moved — the 0.80 row of the original sweep is still 0 wrong, 81.4% saved; what changed is that it is no longer the only number about wrong serves in here.
 
 ## open questions
 

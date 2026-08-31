@@ -10,8 +10,8 @@
 import { costUsd, estimateTokens } from "../../08-agent-tool-loop/src/messages.js";
 import { SemanticCache } from "./cache.js";
 import { answerFor, SYSTEM_PROMPT } from "./dataset.js";
-import type { Featurizer } from "./features.js";
-import type { TrafficRequest } from "./traffic.js";
+import { FEATURIZERS, type Featurizer } from "./features.js";
+import { DEFAULT_TRAFFIC, generateTraffic, type TrafficConfig, type TrafficRequest } from "./traffic.js";
 
 export interface ReplayResult {
   label: string;
@@ -88,4 +88,106 @@ export function runReplay(
   result.wrongPer1k = traffic.length === 0 ? 0 : (result.semanticWrong / traffic.length) * 1000;
   result.savedVsNoCache = baseline === 0 ? 0 : 1 - result.costUsd / baseline;
   return result;
+}
+
+/** One (featurizer, threshold) operating point, run across many seeds. */
+export interface SpreadConfig {
+  featurizer: Featurizer;
+  threshold: number;
+}
+
+export interface SeedSpread {
+  label: string;
+  threshold: number;
+  /** Wrong serves on each seed, in SPREAD_SEEDS order. */
+  perSeedWrong: number[];
+  wrongMin: number;
+  wrongMedian: number;
+  wrongMax: number;
+  wrongMean: number;
+  /** How many seeds served no wrong answer at all. */
+  zeroWrongSeeds: number;
+  savedMin: number;
+  savedMax: number;
+}
+
+function featurizerNamed(name: string): Featurizer {
+  const found = FEATURIZERS.find((candidate) => candidate.name === name);
+  if (found === undefined) throw new Error(`unknown featurizer: ${name}`);
+  return found;
+}
+
+/** The seeds the spread is measured on: the published one plus 19 neighbours. */
+export const SPREAD_SEEDS: readonly number[] = Array.from(
+  { length: 20 },
+  (_, i) => DEFAULT_TRAFFIC.seed + i,
+);
+
+/** The operating points the readme quotes decisions off. */
+export const SPREAD_CONFIGS: readonly SpreadConfig[] = [
+  { featurizer: featurizerNamed("word"), threshold: 0.8 },
+  { featurizer: featurizerNamed("word"), threshold: 0.75 },
+  { featurizer: featurizerNamed("char"), threshold: 0.75 },
+];
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const upper = sorted[mid];
+  if (upper === undefined) return 0;
+  if (sorted.length % 2 === 1) return upper;
+  const lower = sorted[mid - 1];
+  return lower === undefined ? upper : (lower + upper) / 2;
+}
+
+/**
+ * The same operating points over fresh traffic draws. One replay prices the
+ * cost side well — savings barely move seed to seed — and says almost
+ * nothing about the wrong-answer side, which is what this measures.
+ */
+export function seedSpread(
+  base: TrafficConfig,
+  seeds: readonly number[],
+  configs: readonly SpreadConfig[],
+): SeedSpread[] {
+  const spreads: SeedSpread[] = configs.map((config) => ({
+    label: config.featurizer.name,
+    threshold: config.threshold,
+    perSeedWrong: [],
+    wrongMin: 0,
+    wrongMedian: 0,
+    wrongMax: 0,
+    wrongMean: 0,
+    zeroWrongSeeds: 0,
+    savedMin: 0,
+    savedMax: 0,
+  }));
+  const savedByConfig: number[][] = configs.map(() => []);
+  for (const seed of seeds) {
+    const traffic = generateTraffic({ ...base, seed });
+    for (let i = 0; i < configs.length; i++) {
+      const config = configs[i];
+      const spread = spreads[i];
+      const saved = savedByConfig[i];
+      if (config === undefined || spread === undefined || saved === undefined) continue;
+      const result = runReplay(traffic, config.featurizer, config.threshold, config.featurizer.name);
+      spread.perSeedWrong.push(result.semanticWrong);
+      saved.push(result.savedVsNoCache);
+    }
+  }
+  for (let i = 0; i < spreads.length; i++) {
+    const spread = spreads[i];
+    const saved = savedByConfig[i];
+    if (spread === undefined || saved === undefined) continue;
+    const wrongs = spread.perSeedWrong;
+    if (wrongs.length === 0) continue;
+    spread.wrongMin = Math.min(...wrongs);
+    spread.wrongMax = Math.max(...wrongs);
+    spread.wrongMedian = median(wrongs);
+    spread.wrongMean = wrongs.reduce((sum, value) => sum + value, 0) / wrongs.length;
+    spread.zeroWrongSeeds = wrongs.filter((value) => value === 0).length;
+    spread.savedMin = Math.min(...saved);
+    spread.savedMax = Math.max(...saved);
+  }
+  return spreads;
 }
