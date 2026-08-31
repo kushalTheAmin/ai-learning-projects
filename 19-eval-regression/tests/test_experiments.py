@@ -27,7 +27,10 @@ class TestGateRates:
         rates = measure_gate_rates(items, SURE, LOST, 4, 50, "t2")
         assert rates.fail_rates["ci"] == 1.0
         assert rates.fail_rates["slice"] == 1.0
+        assert rates.fail_rates["slice-bonf"] == 1.0
+        assert rates.fail_rates["slice-bh"] == 1.0
         assert rates.fail_rates["ci+slice"] == 1.0
+        assert rates.fail_rates["ci+slice-bh"] == 1.0
         assert rates.mean_delta < -0.9
 
     def test_identical_model_mean_delta_near_zero(self):

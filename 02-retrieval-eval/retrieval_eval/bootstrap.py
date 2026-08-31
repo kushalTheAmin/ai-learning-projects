@@ -35,6 +35,7 @@ class PairedComparison:
     diff: float  # mean(a) - mean(b) on the real sample
     ci: ConfidenceInterval  # bootstrap interval for that difference
     p_le_zero: float  # fraction of resamples where mean(a) - mean(b) <= 0
+    p_ge_zero: float  # fraction of resamples where mean(a) - mean(b) >= 0
 
 
 def percentile(sorted_values: list[float], q: float) -> float:
@@ -97,8 +98,10 @@ def paired_bootstrap(
 
     values_a[i] and values_b[i] must belong to the same query. p_le_zero is
     the fraction of resamples where the difference comes out <= 0 — how
-    often "a beats b" fails to survive resampling. It is a direction check,
-    not a hypothesis-test p-value.
+    often "a beats b" fails to survive resampling — and p_ge_zero is the
+    mirror for "b beats a". Both count resamples landing exactly on zero,
+    so they can sum past 1. They are direction checks, not hypothesis-test
+    p-values.
     """
     if len(values_a) != len(values_b):
         raise ValueError(
@@ -115,4 +118,7 @@ def paired_bootstrap(
         confidence=confidence,
     )
     p_le_zero = sum(1 for s in stats if s <= 0.0) / len(stats)
-    return PairedComparison(diff=ci.point, ci=ci, p_le_zero=p_le_zero)
+    p_ge_zero = sum(1 for s in stats if s >= 0.0) / len(stats)
+    return PairedComparison(
+        diff=ci.point, ci=ci, p_le_zero=p_le_zero, p_ge_zero=p_ge_zero
+    )

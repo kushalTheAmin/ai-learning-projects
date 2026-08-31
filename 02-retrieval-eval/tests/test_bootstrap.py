@@ -101,7 +101,9 @@ def test_identical_systems_compare_as_exactly_equal():
     result = paired_bootstrap(RR_LIKE, list(RR_LIKE), n_resamples=500)
     assert result.diff == 0.0
     assert result.ci.lo == result.ci.hi == 0.0
+    # every resample lands exactly on zero, which counts on both sides
     assert result.p_le_zero == 1.0
+    assert result.p_ge_zero == 1.0
 
 
 def test_constant_offset_yields_degenerate_interval():
@@ -113,6 +115,7 @@ def test_constant_offset_yields_degenerate_interval():
     assert result.diff == 0.25
     assert result.ci.lo == result.ci.hi == 0.25
     assert result.p_le_zero == 0.0
+    assert result.p_ge_zero == 1.0
 
 
 def test_clear_winner_never_flips():
@@ -131,7 +134,19 @@ def test_noisy_tie_flips_sometimes():
     result = paired_bootstrap(a, b, n_resamples=2000, seed=3)
     assert result.diff == 0.0
     assert 0.0 < result.p_le_zero < 1.0
+    assert 0.0 < result.p_ge_zero < 1.0
+    # ties at exactly zero count on both sides, never on neither
+    assert result.p_le_zero + result.p_ge_zero >= 1.0
     assert result.ci.lo < 0.0 < result.ci.hi
+
+
+def test_clear_loser_mirrors_clear_winner():
+    a = [0.1] * 12
+    b = [1.0] * 12
+    result = paired_bootstrap(a, b, n_resamples=500)
+    assert result.p_ge_zero == 0.0
+    assert result.p_le_zero == 1.0
+    assert result.ci.hi < 0.0
 
 
 def test_mismatched_lengths_raise():

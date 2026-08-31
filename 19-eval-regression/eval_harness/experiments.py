@@ -12,6 +12,7 @@ set size.
 from dataclasses import dataclass
 
 from .compare import compare_runs, gate_ci, gate_combined, gate_naive, gate_slice
+from .correction import gate_combined_bh, gate_slice_bh, gate_slice_bonferroni
 from .data import GoldenItem
 from .datagen import build_golden_items
 from .harness import run_eval
@@ -19,7 +20,16 @@ from .model import ScriptedModel, stable_u64
 
 NAIVE_THRESHOLDS = (0.01, 0.02)
 
-GATE_NAMES = ("naive-0.01", "naive-0.02", "ci", "slice", "ci+slice")
+GATE_NAMES = (
+    "naive-0.01",
+    "naive-0.02",
+    "ci",
+    "slice",
+    "slice-bonf",
+    "slice-bh",
+    "ci+slice",
+    "ci+slice-bh",
+)
 
 
 @dataclass(frozen=True)
@@ -76,7 +86,10 @@ def measure_gate_rates(
             gate_naive(comparison, NAIVE_THRESHOLDS[1]),
             gate_ci(comparison),
             gate_slice(comparison),
+            gate_slice_bonferroni(comparison),
+            gate_slice_bh(comparison),
             gate_combined(comparison),
+            gate_combined_bh(comparison),
         ]
         for verdict in verdicts:
             if not verdict.passed:

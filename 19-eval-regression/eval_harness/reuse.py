@@ -19,6 +19,10 @@ if not _DIR.is_dir():
 if str(_DIR) not in sys.path:
     sys.path.insert(0, str(_DIR))
 
-from retrieval_eval.bootstrap import PairedComparison, paired_bootstrap  # noqa: E402
+from retrieval_eval.bootstrap import (  # noqa: E402
+    ConfidenceInterval,
+    PairedComparison,
+    paired_bootstrap,
+)
 
-__all__ = ["PairedComparison", "paired_bootstrap"]
+__all__ = ["ConfidenceInterval", "PairedComparison", "paired_bootstrap"]

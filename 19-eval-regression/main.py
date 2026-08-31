@@ -2,8 +2,9 @@
 
 Runs the committed 240-item golden set through four scripted model
 versions, persists and reloads run records the way a CI pipeline
-stores eval artifacts, then measures three gate families (naive
-threshold, paired-bootstrap ci, per-slice ci) on the four situations a
+stores eval artifacts, then measures the gate families (naive
+threshold, paired-bootstrap ci, per-slice ci, and the slice gate under
+bonferroni and benjamini-hochberg correction) on the four situations a
 gate faces: pure rerun noise, a slice regression sized to vanish from
 the aggregate, a small uniform drift, and a true improvement. Finishes
 with a power curve: how large the golden set must be before the ci
@@ -20,6 +21,11 @@ from eval_harness.compare import (
     gate_combined,
     gate_naive,
     gate_slice,
+)
+from eval_harness.correction import (
+    gate_combined_bh,
+    gate_slice_bh,
+    gate_slice_bonferroni,
 )
 from eval_harness.data import dataset_fingerprint, load_golden
 from eval_harness.experiments import (
@@ -64,23 +70,27 @@ def print_headline(items) -> None:
         f"{flips.both_correct} both correct, {flips.both_wrong} both wrong, "
         f"{flips.fixed} fixed, {flips.broken} broken"
     )
-    print("per category (candidate minus baseline):")
+    print("per category (candidate minus baseline; p is bootstrap p_ge_zero):")
     for cat in comparison.categories:
         ci = cat.comparison.ci
         print(
             f"  {cat.category:<10} n={cat.n_items}  "
             f"{cat.baseline_accuracy:.4f} -> {cat.candidate_accuracy:.4f}  "
-            f"delta {cat.comparison.diff:+.4f}  ci [{ci.lo:+.4f}, {ci.hi:+.4f}]"
+            f"delta {cat.comparison.diff:+.4f}  ci [{ci.lo:+.4f}, {ci.hi:+.4f}]  "
+            f"p={cat.comparison.p_ge_zero:.4f}"
         )
     for verdict in (
         gate_naive(comparison, 0.01),
         gate_naive(comparison, 0.02),
         gate_ci(comparison),
         gate_slice(comparison),
+        gate_slice_bonferroni(comparison),
+        gate_slice_bh(comparison),
         gate_combined(comparison),
+        gate_combined_bh(comparison),
     ):
         state = "pass" if verdict.passed else "FAIL"
-        print(f"gate {verdict.gate:<10} {state}  ({verdict.reason})")
+        print(f"gate {verdict.gate:<11} {state}  ({verdict.reason})")
     print()
 
 
@@ -92,7 +102,7 @@ def print_rates(title: str, truth: str, rates: GateRates) -> None:
     )
     print(f"ground truth: {truth}")
     for name in GATE_NAMES:
-        print(f"  {name:<10} fails {rates.fail_rates[name]:>5.1%} of pairs")
+        print(f"  {name:<11} fails {rates.fail_rates[name]:>5.1%} of pairs")
     print(f"  improvement confirmed (ci above zero) in {rates.improve_rate:.1%}")
     print()
 
