@@ -92,6 +92,9 @@ Re-attempted 2026-08-30 (08-drift run): still denied, same sideband disconnect
 on ref deletion; the nine stale claude/* branches remain a by-hand delete from
 the github branches page. this run's own session branch existed only locally
 and was removed.
+Re-attempted 2026-08-31 (08-caching run): still denied, sideband disconnect
+on ref deletion. Unchanged: all nine stale claude/* branches are merged or
+superseded by main, deletion stays a by-hand task on the github branches page.
 Re-attempted 2026-08-30 (02-pruning run): still 403 with the same sideband
 disconnect. unchanged: all nine stale claude/* branches are merged or
 superseded by main, deletion stays a by-hand task on the github branches
