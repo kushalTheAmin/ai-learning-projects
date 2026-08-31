@@ -66,6 +66,18 @@ def test_maxsim_reranking_hurts_on_this_corpus(evaluator):
         )
 
 
+def test_depth_sweep_published_numbers(evaluator):
+    assert evaluator.run_reranked("bm25", "pooled-lsa", 10).system.mrr == pytest.approx(
+        0.858, abs=5e-4
+    )
+    assert evaluator.run_reranked("bm25", "maxsim", 20).system.mrr == pytest.approx(
+        0.838, abs=5e-4
+    )
+    assert evaluator.run_reranked("bm25", "maxsim", 100).system.mrr == pytest.approx(
+        0.825, abs=5e-4
+    )
+
+
 def test_maxsim_cost_accounting_published_number(evaluator):
     maxsim = evaluator.run_reranked("bm25", "maxsim", 20)
     assert maxsim.system.latent_dots_per_query == pytest.approx(1909.45, abs=1e-9)
