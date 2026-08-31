@@ -23,9 +23,11 @@ the eval side is the part interviews actually probe — retrieval quality is mea
 - `retrieval_eval/bootstrap.py` — paired bootstrap resampling: confidence intervals on mrr and on the gap between systems
 - `retrieval_eval/inverted.py` — the same bm25 served from an inverted index, pinned bit-identical to the flat scan
 - `retrieval_eval/pruned.py`: maxscore and wand dynamic pruning over that index, exact top-k for a fraction of the postings
+- `retrieval_eval/blockmax.py`: block-max wand, per-block score maxes so the pivot can skip inside a posting list, still exact
 - `retrieval_eval/synth.py` — seeded synthetic corpora with zipf term frequencies, for the scaling study
 - `scaling.py` — full scan vs inverted index, measured: wall clock, docs scanned, postings touched
 - `pruning.py`: how much of the postings bill the score bounds skip, per stratum and per k
+- `blockmax_study.py`: what block maxes cut below plain wand, block size sweep included
 - `data/corpus.jsonl` — 40 short docs on dev topics (git, docker, python, http, sql, shell), including two deliberately long kitchen-sink docs that exist to trip up naive scoring
 - `data/queries.jsonl` — 38 queries, each labeled with its relevant doc ids. some use exact doc vocabulary, some paraphrase, and a few share almost no words with their answer on purpose
 
@@ -40,6 +42,7 @@ python -m pytest
 python main.py
 python scaling.py
 python pruning.py
+python blockmax_study.py
 ```
 
 python 3.11+. the only dependency is pytest — the retrieval code itself is stdlib
@@ -216,6 +219,77 @@ where the bound stops paying:
 
 the threshold is the k-th best score seen so far, so bigger k means a weaker threshold for longer: at k=1 the pruners read a quarter of the bill, at k=1000 they read 60% of it and the gap is still closing. dynamic pruning is a top-k technology in the strictest sense: "give me everything relevant" gets no help, and anything that lowers the threshold (a heap that must fill before pruning starts, a rescoring stage that wants deep candidate pools) is paid for directly in postings read
 
+## block-max wand: skipping inside a posting list
+
+the pruning section left a floor: at top-10 on common-heavy traffic, wand still scores 29.5% of the bill, because a common terms whole-list upper bound is set by its single best posting and holds that value across the entire list. block-max wand (the ding and suel 2011 idea, simplified) cuts each posting list into fixed-size blocks and stores the exact max gain per block next to the last doc index the block covers. pivot selection still runs on the whole-list bounds, but before a pivot is scored, the sum of the pivot terms current block maxes is checked against the threshold. when even that local bound cant reach it, the cursors jump past the covered range without reading a posting. `retrieval_eval/blockmax.py` implements it as a subclass over the unchanged index, `blockmax_study.py` measures it against plain wand on the same corpus, strata, and seeds
+
+exactness first, same contract as before, block skipping may change the work but never the answer:
+
+```
+== same top-k, pinned against the flat scan ==
+golden corpus, top-10 identical: 38/38 queries
+golden corpus, full depth identical: 38/38 queries
+synthetic 2000-doc corpus, top-10 identical: 150/150 queries (all strata, block size 32)
+```
+
+the tests also rerun the all-ties trap per block size, including block size 1, where a `<=` in the shallow skip comparison would silently drop right answers
+
+what the blocks actually tighten:
+
+```
+== the mechanism: whole-list bound vs block maxes (block size 32) ==
+term              df  list bound  block max p50      p90      max
+-----------------------------------------------------------------
+rank-1        31,972      0.0021         0.0020   0.0020   0.0021
+rank-5        24,149      0.6157         0.5291   0.5595   0.6157
+rank-20        8,744      2.5039         2.0512   2.2130   2.5039
+rank-1000        135      7.0511         6.9172   7.0511   7.0511
+```
+
+this table contradicts the intuition the whole build runs on. the rank-1 term, the one whose 31,972 postings dominate the bill, gets almost nothing from blocks: its median block max is 0.0020 against a list bound of 0.0021, because idf already flattened it, every block of a term that appears everywhere looks the same. the tightening lives in the middle of the common range, rank-5 drops 14% at the median and rank-20 drops 18%. individually modest, but the skip fires on the sum across the query terms, and at top-10 the threshold sits close under the whole-list sum, so a 15% tighter sum kills a lot of pivots. the win is real and it does not come from where the postings are
+
+the block size sweep, common-heavy at top-10, against plain wands 20306 scored (29.5% of the 68765 bill):
+
+```
+== block size sweep, common-heavy, top-10, 32,000 docs, 100 queries ==
+ block  scored/q  % of bill  skips/q  checks/q  probes/q  directory  overhead    ms/q
+-------------------------------------------------------------------------------------
+     8      6207       9.0%     5546     54062     25907    177,297     13.1%  65.634
+    16      9593      14.0%     4208     68015     24597     94,273      7.0%  74.179
+    32     12127      17.6%     3478     77667     24537     54,688      4.1%  79.745
+    64     13892      20.2%     2946     83234     24392     36,019      2.7%  80.535
+   128     15203      22.1%     2466     87111     24136     27,331      2.0%  80.820
+   256     16363      23.8%     1945     90797     23830     23,297      1.7%  85.473
+```
+
+- **the answer to the open question: block maxes cut the common-heavy floor from 29.5% to 9.0% of the bill at block size 8**, 20306 postings down to 6207, a 3.3x deeper cut than plain wand, priced at a block directory holding one (last doc, max gain) pair per 8 postings, 13.1% of the posting count. block size 32 still cuts to 17.6% for 4.1% overhead
+- **smaller blocks skip more and check less.** at block size 8 a query rejects 5546 pivots shallowly with 54062 directory lookups; at 256 it rejects 1945 with 90797 lookups. bigger blocks mean looser local bounds, so more pivots survive the shallow test, get deep-scored, and each scored pivot paid its checks too
+- **probes barely move.** the leapfrogging is the same wand machinery, the shallow skip just jumps it further per rejection
+
+per stratum at block size 32, top-10:
+
+```
+stratum         taat post/q    wand  % of bill     bmw  % of bill  skips/q
+--------------------------------------------------------------------------
+typical               46950    4928      10.5%    3007       6.4%      483
+common-heavy          68765   20306      29.5%   12127      17.6%     3478
+rare-only                77      68      88.5%      64      83.7%        2
+```
+
+typical traffic drops from 10.5% to 6.4% of the bill, and rare-only stays untouchable for the same reason as before, 77 postings has nothing worth skipping. and the k sweep says the advantage survives everywhere while decaying the same way wands does:
+
+```
+== k sweep, common-heavy, block size 32, 32,000 docs ==
+    k  taat post/q    ms/q    wand  % of bill    ms/q     bmw  % of bill    ms/q
+--------------------------------------------------------------------------------
+    1        68765  13.883   16327      23.7%  52.951    6980      10.2%  62.146
+   10        68765  15.820   20306      29.5%  59.869   12127      17.6%  78.336
+  100        68765  15.064   26853      39.1%  63.251   18608      27.1%  88.151
+ 1000        68765  18.153   40528      58.9%  79.401   32890      47.8% 107.492
+```
+
+the wall clock is the same honest asterisk as the pruning study, sharper. block-max wand is slower than plain wand at every block size and every k, and both lose to term-at-a-time on this stratum by 4-6x, in this runs conditions taat sits at 15.820ms at k=10 while bmw pays 78.336ms to score a sixth of the postings. the arithmetic of why: at block size 32 on common-heavy, one query pays 77667 shallow checks plus 24537 probes plus cursor sorting to avoid scoring 56638 postings, so the bookkeeping operations outnumber the postings they save, and in python a bisect into a block directory costs far more than the dict-lookup-and-add it replaces. the counts are the portable result: a native engine gets the checks nearly free (a block directory is a flat array read with predictable branches), which is why lucene ships exactly this algorithm and why it wins there. same lesson as the pruning study and the ann project (13), the operation count transfers, the clock is a property of the interpreter
+
 ## tradeoffs and limits
 
 - the golden corpus is 40 docs and the original scorer loops over all of them per query term — fine here, wrong at scale, and now measured instead of asserted: the section above puts the flat scan at 65.229ms/query by 32k docs while the inverted twin returns the bit-identical ranking for a fraction of the work
@@ -229,7 +303,10 @@ the threshold is the k-th best score seen so far, so bigger k means a weaker thr
 - how many queries would it take before the bm25 vs tf-idf interval excludes zero, assuming the effect is real? the per-query win rate is measurable, so a power analysis could answer this with simulation instead of hand-waving
 - 03s alpha sweep picked 0.2 over 0.5 on 40 queries and called it tea leaves — this exact machinery would say whether any of those alpha differences are distinguishable at all
 - significance is not importance: with enough queries a +0.001 mrr gap becomes "real" — what mrr delta actually changes anything a user sees? that number has to come from the product, not the bootstrap
-- the whole-list upper bound of a common term is set by its single best posting. block-max wand keeps a max per posting block instead, so the pivot can skip within a list, not just between lists. how much deeper does that cut the 30% common-heavy floor at top-10?
+- blocks here follow doc order, so each block max is a near-random sample of the terms gains and it drifts toward the list bound as blocks grow. impact-ordered layouts cluster the high gains into few blocks, which should deepen the skip at the same directory size, but they break the doc-ordered merge every document-at-a-time algorithm relies on, the classic tension this study didnt enter
+- the shallow-check bill is the new currency: at block size 256 a query pays 90797 directory lookups to reject 1945 pivots, and each check re-bisects from the cursors current block. carrying a block cursor per term instead of re-deriving it should cut most of those lookups to one comparison, unmeasured
+- pivot selection still runs on whole-list bounds, the block maxes only veto after the pivot is chosen. the full bmw algorithm also reorders on the next shallow block boundary before scoring, and how much that buys over this veto-only version is unmeasured
+- once postings are delta-encoded and varint-compressed (the memory thread below), the block is also the decompression unit, so block size stops being a free bound-tightness knob and couples to decode cost per skip
 - the common-heavy wall-clock inversion is a constant-factor story: the same document-at-a-time counts in native code (or with block-encoded postings and vectorized scoring) should follow the counts; the crossover between "counts win" and "clock wins" is unmeasured here
 - pruning only starts once the top-k heap fills; a warm-start threshold (from a cached previous run of the same query, or a cheap first-pass estimate) would prune from posting one. at k=10 the k=1 column bounds what that could buy (31.7% → 24.8%), and whether a stale threshold ever drops a right answer is the interesting failure mode
 - the bounds here are exact because the index is static: every added doc can raise a terms bound and every deletion can strand it too high, so mutation either re-prices bounds per update or lets them go stale-but-sound; the cost of each choice is unmeasured (same shape as the rebuild-vs-patch question below)
