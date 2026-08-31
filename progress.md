@@ -99,6 +99,66 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-31] 16 — the arrangement-trap section credited order
+  randomization with a win rate of 0.485, and 0.485 is the both-order column.
+  `runChampion` only ever ran `as-stored` and `both-order` on the champion
+  pairs, so randomized order was never measured on that set at all — the
+  sentence "randomizing or swapping order restores 0.485" quoted the swapping
+  number for both, and the cost paragraph then reused it as the evidence that
+  "randomized order is free and fixes aggregate win rates ... 0.485 vs 0.380 on
+  the champion set". the cheap protocol was being sold on the expensive
+  protocol's number. same shape as the 15/13 ef-endpoint finding: a figure read
+  off the wrong column, and nothing in the project computed the quoted one, so
+  no test could have caught it. the harness now runs all three protocols on the
+  champion set and prints them; randomized comes out at 0.440 against a truth
+  of 0.500, so randomizing takes back most of the 0.380 suppression and
+  swapping takes back the rest (0.485), with calibrated flat at 0.500/0.500/
+  0.495 as the control. unlike the earlier findings of this shape the
+  conclusion did move: the old text said both-order buys "per-item confidence
+  ... not to improve the average", and on this set both-order is 4.5 points
+  closer to truth than randomizing, so the recommendation now says so. the root
+  index row carried the same "randomization fixes that for free" takeaway and
+  was rewritten with both numbers. five tests pin it — one recomputes the
+  randomized column from `runPairs(..., "randomized", ...)` over the champion
+  pairs for every judge, one holds randomized and both-order apart as distinct
+  measurements, and three parse the readme: the champion table must list all
+  three protocols in order, and the two prose paragraphs must quote the
+  randomized run for randomized order. all five fail on the old code, and the
+  three readme tests fail on the old prose alone with the fix applied. no other
+  published number moved, 81/81 green. found and fixed 2026-08-31
+- [medium] 16 — the pointwise grading set's provenance is confounded with gold.
+  `buildGrading` assigns provenance by `i % 2` and gold by `i % 10 < 7`, so
+  house answers pass 80% of the time and rival answers 60%, not 70/70. the
+  self-pref judge adds its +0.15 to house answers, which are the ones that
+  mostly deserve to pass, so its printed pointwise accuracy is flattered:
+  0.975 as shipped against 0.945 with provenance re-assigned to sit at the
+  set's own 70% pass rate, three full points. the pair sets all balance their
+  attribute by construction and `assertBalance` checks each one, but the
+  grading set balances only the pass rate and nothing checks provenance
+  against it. the readme quotes no self-pref pointwise number so nothing
+  published is wrong, but `main.ts` prints the row, and it is the one number in
+  that table that reads as "pointwise barely notices self-preference".
+  found 2026-08-31
+- [low] 16 — judge noise is not keyed on the run seed. `gradePointwise` draws
+  from `${judge.name}|point|${itemId}` and `judgePair` from
+  `${judge.name}|pair|${pair.id}|${firstSlot}`, and item ids are `grade-000`,
+  `core-000` and so on regardless of seed, so `runExperiment(8)` rebuilds the
+  dataset but replays byte-identical noise. the open questions already ask for
+  a confidence interval on the 0.600 house inflation, and a seed sweep is the
+  obvious way to get one — it would hold the noise fixed and understate the
+  spread. adding the seed to those two identity strings is the whole fix.
+  found 2026-08-31
+- [low] 16 — the cost table prints as-stored $1.26 and both-order $2.53 while
+  the text one line above says both-order "costs exactly 2x". the underlying
+  values are exactly 2x (1.26264 and 2.52528, and a test pins the ratio to
+  1e-8); it is two-decimal rounding landing on either side. a reader checking
+  the arithmetic on the published table gets 2.008x. found 2026-08-31
+- [low] 16 — `GRADE_RUBRIC` and `gradeCallTokens` exist to price a pointwise
+  call and nothing calls them outside the tests: `runPointwise` does no cost
+  accounting and the cost table covers the three pairwise protocols only. the
+  readme's "per-protocol token and cost accounting" is true of pairwise and
+  silent on pointwise, which is the mode the project recommends running
+  alongside it. found 2026-08-31
 - [fixed 2026-08-30] 15 — the open question weighing int8's recall cost against
   hnsw's ef knob quoted 13 as "ef 80 to 320 buys 0.5 points for 6x the distance
   budget". 13's published sweep has ef 80 at recall 0.999 / 260 dists per query
@@ -751,6 +811,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 16-llm-as-judge | 2026-08-31 |
 | 15-embedding-quantization | 2026-08-30 |
 | 14-context-window | 2026-08-30 |
 | 13-ann-hnsw | 2026-08-29 |
@@ -1082,6 +1143,41 @@ sweep for others came back nearly empty — 11, 22 and 25 all reference sibling
 projects qualitatively and quote no sibling number — but "nearly empty" is the
 answer for today's repo, not a property of it, so cross-project quotes are
 worth re-sweeping whenever a project's headline numbers move.
+
+16 came back clean on the metrics and dirty on which column a number came from.
+cohen's kappa is (po - pe) / (1 - pe) with pe off both marginals, matching a
+hand reference to 1e-16, and the degenerate branch is right: always-pass has a
+constant pred and a non-constant gold, so pe is 0.700 and kappa is a real 0.000
+rather than the guarded case. the judge cast does what the readme says it does
+— position bonus lives only in `judgePair` and pass threshold only in
+`gradePointwise`, so the "each mode is blind to a different bias class" finding
+is structural and not a coincidence of this seed. the balanced sets hold by
+construction: house-better and house-in-a are each exactly 50/100 and
+uncorrelated, same interleave for long-better and long-in-a, every pair gap
+clears the 0.08 floor, and `assertBalance` checks all of it at build time. the
+internal arithmetic is consistent — verbose's 0.800 longer-wins is exactly its
+1.000 and 0.400 split recombined — and primacy's 0.380 suppression matches what
+a 0.15 bonus against gaps uniform on [0.08, 0.4] predicts by hand (0.39).
+reruns are byte-identical and every readme number matches `main.ts` from a
+fresh clone; the only two that aren't printed (0.08, 0.15) are authored
+constants and both match the source.
+
+the defect was a third variant of the wrong-column shape, and the worst of the
+three so far: the readme credited order randomization with 0.485, which is the
+both-order column, and `runChampion` never ran randomized on that set at all.
+the previous two (14's near-tripling, 15's ef endpoint) were arithmetic read
+off a table that existed. this one quoted a number for a measurement that was
+never taken, so there was nothing to compare against — the check that finds it
+is not "does the number match the table" but "does a column with this name
+exist in this experiment". worth carrying: when prose names a protocol,
+configuration or variant, confirm the run actually has that arm before checking
+its value. and unlike the other two, the conclusion moved — randomizing gets to
+0.440 and swapping to 0.485, so "pay 2x for the diagnostic, not the average"
+was backwards on this set. the four remaining findings are all in the same
+project and none of them touch a published number: a gold/provenance confound
+in the pointwise set worth three points to self-pref, judge noise that ignores
+the run seed, a 2x claim that rounds to 2.008x on the printed table, and a
+pointwise call-cost helper nothing calls.
 
 ## MECHANISMS
 
