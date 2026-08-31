@@ -79,7 +79,7 @@ def main() -> None:
     )
     print(f"vocabulary from train only: {len(vocabulary)} tokens")
 
-    print("\n== 1. accuracy converges, calibration keeps drifting ==")
+    print("\n== 1. accuracy slides, calibration slides faster ==")
     print("epochs  train acc  train nll  val acc  val nll  val ece")
     model = SoftmaxRegression(len(vocabulary), len(LABELS))
     done = 0

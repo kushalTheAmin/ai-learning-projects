@@ -22,7 +22,7 @@ no api keys, no downloads, runs in about a second. seeded and deterministic end 
 
 ## what happens
 
-600 training tickets, 4 intents, 277 vocabulary tokens, trained 3200 epochs with weak l2. the training curve is the guo et al story in miniature: validation accuracy is done moving early (0.818 at epoch 100, 0.772 at 3200) while validation ece climbs the whole time, 0.034 at epoch 100 to 0.159 at 3200. cross-entropy keeps paying the model to sharpen distributions long after it has stopped learning anything about the labels.
+600 training tickets, 4 intents, 277 vocabulary tokens, trained 3200 epochs with weak l2. the training curve is the guo et al shape with a wrinkle worth naming — validation ece dips to 0.034 at epoch 100 and rots from there to 0.159 at 3200, but validation accuracy is sliding the whole way too, 0.835 at epoch 50 down to 0.772, and it never turns back up. so this is not the clean "accuracy is done, only calibration rots" version of the story. cross-entropy keeps paying the model to sharpen distributions long past the point where sharpening buys anything, and both numbers pay for it — calibration just pays much more steeply, ece 0.061 to 0.159 is 2.6x worse while the error rate behind that accuracy, 0.165 to 0.228, is 1.4x worse. hold onto the accuracy half for section 3: scaling never reorders a row, so one temperature gives back the calibration those epochs cost and none of the accuracy.
 
 on held-out test the raw model reads: accuracy 0.795, nll 0.994, brier 0.333, ece 0.130, mce 0.303. the reliability table says where it lies. the [0.70,0.80) bin claims 0.753 and delivers 0.450. the big bin is worse in aggregate than it looks per item: 919 of 1200 predictions sit above 0.9 confidence, claiming 0.990 and delivering 0.886.
 
@@ -50,6 +50,18 @@ then the part that keeps this honest: distribution shift. the shifted stream rai
 - accuracy among answered items is not the only policy metric. calibrated coverage at t=0.90 is half the raw coverage; whether thats a win depends on what an escalation costs versus a wrong auto-answer. this project prices the promise, not the business
 
 python was the right language here. the whole project is matrix arithmetic, softmax algebra and a numeric search, which is numpy territory; the same code hand-rolled in typescript would be slower to write, slower to run, and would teach the same thing worse. the tokenizer is imported from 02-retrieval-eval so tokenization semantics stay identical across the repos python projects.
+
+## fixes
+
+- 2026-08-31 — section 1 was headed "accuracy converges, calibration keeps
+  drifting" and the readme said validation accuracy was "done moving early"
+  while ece "climbs the whole time". the printed table says neither: val
+  accuracy falls at every checkpoint, 0.835 at epoch 50 to 0.772 at 3200, and
+  val ece dips to 0.034 at 100 before it rots. heading and paragraph now
+  describe the curve as it prints — both metrics degrade, calibration 2.6x
+  against the error rate's 1.4x — and say the part that follows from it, that
+  scaling gives back the calibration and none of the accuracy. no measured
+  number moved
 
 ## open questions
 
