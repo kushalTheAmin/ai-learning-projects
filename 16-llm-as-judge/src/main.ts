@@ -52,11 +52,14 @@ for (const row of result.core) {
   );
 }
 
-console.log("\n== challenger win rate, champion always presented first (truth 0.500) ==");
-console.log(`${pad("judge", 12)}${pad("champion-first", 16)}${pad("both-order", 12)}`);
+console.log("\n== challenger win rate, incumbent stored in slot a (truth 0.500) ==");
+console.log(
+  `${pad("judge", 12)}${pad("champion-first", 16)}${pad("randomized", 12)}${pad("both-order", 12)}`,
+);
 for (const row of result.champion) {
   console.log(
-    `${pad(row.judge, 12)}${pad(num(row.singleOrder), 16)}${pad(num(row.bothOrder), 12)}`,
+    `${pad(row.judge, 12)}${pad(num(row.championFirst), 16)}${pad(num(row.randomized), 12)}` +
+      `${pad(num(row.bothOrder), 12)}`,
   );
 }
 

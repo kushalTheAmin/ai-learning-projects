@@ -77,16 +77,18 @@ the arrangement trap, 100 champion-vs-challenger pairs where the incumbent is
 always presented first and the challenger truly wins half:
 
 ```
-judge       champion-first  both-order
-calibrated  0.500           0.495
-primacy     0.380           0.485
+judge       champion-first  randomized  both-order
+calibrated  0.500           0.500       0.495
+primacy     0.380           0.440       0.485
 ```
 
 presenting the incumbent first is the natural way to build a comparison eval,
 and under a primacy judge it silently drags the challengers measured win rate
-from a true 0.500 down to 0.380. randomizing or swapping order restores 0.485.
-if your new model "loses" an a/b eval where the old model was always option
-one, this is the first thing to rule out.
+from a true 0.500 down to 0.380. randomizing the order per pair takes back most
+of that (0.440), asking both orders takes back the rest (0.485). calibrated
+runs 0.500 / 0.500 / 0.495 across all three, so what moves is the arrangement
+and not the protocol. if your new model "loses" an a/b eval where the old model
+was always option one, this is the first thing to rule out.
 
 self-preference, 100 house-vs-rival pairs, house truly wins half:
 
@@ -124,13 +126,14 @@ randomized  1 call/pair   $1.26
 both-order  2 calls/pair  $2.53
 ```
 
-randomized order is free and fixes aggregate win rates under position bias
-(0.887 vs 0.847 on core pairs, 0.485 vs 0.380 on the champion set). both-order
-costs exactly 2x and buys something different: per-item confidence and the
-flip-rate diagnostic itself. note primacy's effective accuracy under
-both-order (0.857, counting abstentions as coin flips) is not better than
-randomized single-order in aggregate. pay 2x to find out whether your judge is
-position-biased and which items it cannot decide, not to improve the average.
+randomized order is free and takes back most of a position bias — core
+accuracy 0.847 to 0.887, champion win rate 0.380 to 0.440 against a truth of
+0.500. both-order costs exactly 2x, closes the rest of the champion gap
+(0.485), and buys what randomizing cannot: per-item confidence and the
+flip-rate diagnostic itself. it does not buy accuracy — primacy's effective
+accuracy under both-order (0.857, counting abstentions as coin flips) is below
+its randomized single-order accuracy of 0.887. pay 2x for the position-bias
+diagnostic and the undecidable items, not for the average.
 
 ## the sharpest finding
 
@@ -162,6 +165,16 @@ other scored as perfect.
 - costs scale linearly in pairs and answer length; the interesting regime,
   adaptive protocols that only pay the second call on low-margin items, is not
   built here
+
+## fixes
+
+- 2026-08-31 — the champion set credited order randomization with 0.485, which
+  is the both-order column — randomized order was never run on that set at all,
+  so the cheap protocol was being sold on the 2x protocol's number. the harness
+  now runs all three protocols there and randomized comes out at 0.440, so
+  randomizing takes back most of the 0.380 suppression and swapping takes back
+  the rest. the recommendation moved with it: both-order is no longer "same
+  average, extra diagnostics", it is 4.5 points closer to truth on this set
 
 ## language
 

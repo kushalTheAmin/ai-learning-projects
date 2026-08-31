@@ -55,6 +55,16 @@ export interface WinRateRow {
   bothOrder: number;
 }
 
+export interface ChampionRow {
+  judge: string;
+  /** One call per pair with the incumbent always in the first slot. */
+  championFirst: number;
+  /** One call per pair with the presentation order drawn per pair. */
+  randomized: number;
+  /** Two calls per pair, abstentions counted half. */
+  bothOrder: number;
+}
+
 export interface LengthRow {
   judge: string;
   /** Win rate of the longer answer under randomized order; gold is 0.5. */
@@ -75,8 +85,8 @@ export interface ExperimentResult {
   seed: number;
   pointwise: PointwiseResult;
   core: CoreRow[];
-  /** Challenger win rate, true value 0.5, measured with the champion presented first. */
-  champion: WinRateRow[];
+  /** Challenger win rate, true value 0.5, under each of the three protocols. */
+  champion: ChampionRow[];
   /** House win rate, true value 0.5, measured under randomized order. */
   house: WinRateRow[];
   length: LengthRow[];
@@ -144,11 +154,14 @@ function slotWinRate(run: ProtocolRun, slot: Slot): number {
   return wins / run.verdicts.length;
 }
 
-function runChampion(dataset: Dataset, seed: number): WinRateRow[] {
+function runChampion(dataset: Dataset, seed: number): ChampionRow[] {
   // Slot a is the incumbent; as-stored is exactly the champion-first layout.
+  // Randomized is the debiasing move the cheap protocol offers, so it is
+  // measured here rather than read off the both-order column.
   return JUDGES.map((judge) => ({
     judge: judge.name,
-    singleOrder: slotWinRate(runPairs(judge, dataset.championPairs, "as-stored", seed), "b"),
+    championFirst: slotWinRate(runPairs(judge, dataset.championPairs, "as-stored", seed), "b"),
+    randomized: slotWinRate(runPairs(judge, dataset.championPairs, "randomized", seed), "b"),
     bothOrder: slotWinRate(runPairs(judge, dataset.championPairs, "both-order", seed), "b"),
   }));
 }
