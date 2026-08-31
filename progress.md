@@ -108,6 +108,10 @@ Re-attempted 2026-08-31 (26-reranking run): still denied, same sideband
 disconnect on ref deletion. unchanged: the nine stale claude/* branches are
 merged or superseded, deletion stays a by-hand task on the github branches
 page.
+Re-attempted 2026-08-31 (19-correction run): still denied, same sideband
+disconnect on ref deletion. unchanged: nothing on those branches is
+unlanded, deletion stays a by-hand task on the github branches page. this
+run's own session branch existed only locally and was removed.
 
 ## FINDINGS
 
