@@ -51,6 +51,10 @@ export interface TaskOutcome {
   toolCalls: number;
   tokensIn: number;
   tokensOut: number;
+  /** Input tokens of each model call in order; sums to tokensIn. */
+  inputTokensPerCall: number[];
+  /** Output tokens of each model call in order; sums to tokensOut. */
+  outputTokensPerCall: number[];
   costUsd: number;
   virtualMs: number;
 }
@@ -73,6 +77,8 @@ export async function runTask(
   let toolCalls = 0;
   let tokensIn = 0;
   let tokensOut = 0;
+  const inputTokensPerCall: number[] = [];
+  const outputTokensPerCall: number[] = [];
   let feedbacksThisIntent = 0;
   const invalidEmissions = new Map<string, number>();
 
@@ -85,6 +91,8 @@ export async function runTask(
     toolCalls,
     tokensIn,
     tokensOut,
+    inputTokensPerCall,
+    outputTokensPerCall,
     costUsd: costUsd(tokensIn, tokensOut),
     virtualMs: clock.now() - startMs,
     ...extra,
@@ -92,11 +100,15 @@ export async function runTask(
 
   while (modelCalls < policy.maxModelCalls) {
     modelCalls++;
-    tokensIn += historyTokens(history);
+    const callInputTokens = historyTokens(history);
+    tokensIn += callInputTokens;
+    inputTokensPerCall.push(callInputTokens);
     await clock.sleep(MODEL_LATENCY_BASE_MS + Math.floor(rng() * MODEL_LATENCY_JITTER_MS));
     const turn = scriptedModelTurn(task, history);
     const assistantMsg: Message = { role: "assistant", turn };
-    tokensOut += messageTokens(assistantMsg);
+    const turnOutputTokens = messageTokens(assistantMsg);
+    tokensOut += turnOutputTokens;
+    outputTokensPerCall.push(turnOutputTokens);
     history.push(assistantMsg);
 
     if (turn.type === "final") {

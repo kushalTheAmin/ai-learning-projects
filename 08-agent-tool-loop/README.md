@@ -4,7 +4,9 @@ an agent loop with zod-validated tool calling and a hard retry/failure policy, r
 over 25 scripted tasks to price what malformed tool args actually cost in model
 calls, tokens, dollars and latency. plus a drift study over 10 more tasks where
 the model mutates its broken call every round, asking what a loop guard should
-key on: exact call identity, or the zod issue signature.
+key on: exact call identity, or the zod issue signature. plus a caching study
+that reprices the same runs under a warm prompt cache and asks how much of the
+loop guard's headline saving survives when replayed history costs a tenth.
 
 everything model-shaped here is simulated. the "model" is a scripted intent list
 per task: the tool calls a competent model would make, each optionally wrapped in
@@ -176,6 +178,75 @@ so these numbers measure what each guard key can and cannot see, not how often
 real models drift. a real stubborn model probably drifts messier than my six
 authored variants, which would only widen the exact guard's blind spot.
 
+## the caching extension: repricing the burn with a warm prompt cache
+
+the main table charges every model call for its whole history, which is what a
+naive client pays. providers with prompt caching dont bill it that way: an
+append-only conversation with a cache breakpoint after each request's input
+means call n reads call n-1's entire input from cache and only pays fresh for
+its own new suffix. the loop now records the per-call input token trace, and a
+pricing layer replays that trace under anthropic's published multipliers, reads
+at 0.1x the fresh input price, writes at 1.25x. accounting only; the loop, the
+completions and every call count above are untouched. the cache is modeled as
+always warm within a task (calls sit seconds apart, far inside any real ttl)
+and nothing is shared across tasks, so this is the best case for caching, the
+strongest test the guard's saving could face.
+
+```
+policy    tokens-in  cache-read  cache-write  effective-in  uncached   cached     saved
+strict         1052         233          819          1047    $0.0165    $0.0165   0.1%
+feedback       7323        4249         3074          4267    $0.0500    $0.0409  18.3%
+guarded        3978        1624         2354          3105    $0.0356    $0.0330   7.4%
+```
+
+caching helps most exactly where the guard helps, the feedback policy grinding
+its history back through the model: 18.3% off its total bill vs 0.1% for
+strict, whose histories are so short the 1.25x write premium eats almost the
+whole read discount.
+
+the question the last run left open: 3 stubborn tasks burn 3969 tokens under
+feedback vs 759 guarded, an 80.9% token saving, and full-history replay
+dominates that burn, so how much survives once replay costs a tenth?
+
+```
+pricing             feedback   guarded    guard-saves        pct
+uncached             $0.0172    $0.0045       $0.012654     73.6%
+cached 0.1x/1.25x    $0.0110    $0.0042       $0.006834     61.9%
+```
+
+two separate corrections happen here. first, the 80.9% was never 80.9% in
+dollars: output tokens cost 5x input in this price table and the stubborn burn
+is nearly 40% output, so the uncached dollar saving is already 73.6%. second,
+caching takes that to 61.9%, and it cuts the absolute saving roughly in half,
+$0.012654 to $0.006834 on the 3 tasks. the guard survives, but half its dollar
+value on stubborn tasks was an artifact of paying full price for replay.
+
+the read-price sweep pins the floor:
+
+```
+read-mult  feedback     guarded      guard-saved-pct
+     0.00    $0.010271    $0.004136            59.7%
+     0.05    $0.010654    $0.004170            60.9%
+     0.10    $0.011037    $0.004203            61.9%
+     0.25    $0.012186    $0.004304            64.7%
+     0.50    $0.014101    $0.004471            68.3%
+     1.00    $0.017930    $0.004805            73.2%
+```
+
+even at literally free cache reads the guard still saves 59.7%, because the
+things caching cannot discount are the things a stubborn model keeps buying:
+output tokens for every doomed retry, and the cache write for every new
+validation-error message appended to the prefix. the composition table says it
+directly: under cached pricing feedback's stubborn bill is $0.000766 reads,
+$0.003656 writes, $0.006615 output. replay, the thing the thread worried
+about, is now the smallest line item.
+
+so the verdict on the guard flips from "saves 80.9% of tokens" to "saves about
+60% of dollars against a provider with caching, mostly by not generating doomed
+output". thats still worth having, but the case for it is no longer about
+input replay, and anyone justifying a loop guard by multiplying history length
+by input price is overstating it by roughly 2x.
+
 ## tradeoffs and where it breaks
 
 - the feedback cap and the guard threshold are both blunt. 6 rounds is generous
@@ -188,9 +259,11 @@ authored variants, which would only widen the exact guard's blind spot.
   a failure that rotates enough distinct shapes walks past both. no key
   computed from the current call alone can see "this conversation is not
   converging"
-- token accounting replays the full history every call with no caching. thats
-  faithful to a naive client but overstates the cost of long loops against any
-  provider with prompt caching
+- the cached pricing is the best case for caching: always warm, breakpoint
+  after every request, nothing evicted. real ttls, concurrent tasks racing the
+  first write, and per-breakpoint minimum token counts all push the real bill
+  back toward the uncached column, so the two pricings bracket the truth
+  rather than one of them being it
 - validation strictness is doing real work: zod strict objects reject the extra
   field a lenient schema would silently drop. lenient parsing would have turned
   the extra-field tasks into silent successes with possibly wrong semantics,
@@ -232,9 +305,15 @@ holds the message-passing honest end to end.
   misfire on a tool whose schema legitimately varies by a discriminated union
   branch: two different union arms can share paths and codes. none of the
   tools here have that shape, so it is unmeasured
-- prompt caching would collapse the replayed-history cost that dominates the
-  stubborn burn. with cached input priced at a tenth of fresh input, how much
-  of the 80.9% saving survives
+- the cache model bills the 5m ttl and always hits it because tasks run
+  sequentially on the virtual clock. a concurrent task mix with real
+  inter-call gaps would miss sometimes, and 11-prompt-caching already has the
+  ttl machinery to price how fast the 61.9% climbs back toward 73.6% as the
+  hit rate decays
+- output tokens are now the dominant stubborn cost and the estimate is ~4
+  chars/token flat. real tool-call outputs tokenize denser than prose, so the
+  output share, and with it the guard's cached-world value, could be off in
+  either direction; needs a real tokenizer over these transcripts
 - error message quality is untested: the scripted model corrects on any
   feedback, but a real model corrects better on some phrasings. an ablation
   needs a real model in the loop

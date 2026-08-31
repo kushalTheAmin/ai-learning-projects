@@ -4,6 +4,7 @@
  * running the experiment twice.
  */
 
+import type { CachingReport } from "./caching.js";
 import type { DriftReport } from "./driftStudy.js";
 import type { ExperimentReport } from "./experiment.js";
 import { PRICING } from "./messages.js";
@@ -67,6 +68,57 @@ export function renderReport(report: ExperimentReport): string {
   const savedTokens = s.feedbackTokens - s.guardedTokens;
   const savedPct = (100 * savedTokens) / s.feedbackTokens;
   lines.push(`  saved: ${savedTokens} tokens (${savedPct.toFixed(1)}%) on those tasks`);
+  return lines.join("\n");
+}
+
+export function renderCachingReport(report: CachingReport): string {
+  const lines: string[] = [];
+  lines.push(`caching study: the same runs re-priced with a warm prompt cache`);
+  lines.push(
+    `(accounting only, no behavior change; breakpoint after every request's input, ` +
+      `reads 0.1x, writes 1.25x, nothing shared across tasks)`,
+  );
+  lines.push("");
+  lines.push(
+    `policy    tokens-in  cache-read  cache-write  effective-in  uncached   cached     saved`,
+  );
+  for (const p of report.perPolicy) {
+    lines.push(
+      `${p.policy.padEnd(8)}${pad(p.tokensIn, 11)}${pad(p.cacheReadTokens, 12)}` +
+        `${pad(p.cacheWriteTokens, 13)}${pad(Math.round(p.effectiveInputTokens), 14)}` +
+        `${pad(money(p.uncachedCostUsd), 11)}${pad(money(p.cachedCostUsd), 11)}` +
+        `${pad(`${p.cachingSavedPct.toFixed(1)}%`, 7)}`,
+    );
+  }
+  lines.push("");
+  lines.push(
+    `stubborn burn (${report.stubbornTasks} tasks that never correct; ` +
+      `token-based guard saving ${report.stubbornTokensSavedPct.toFixed(1)}%):`,
+  );
+  lines.push(`pricing             feedback   guarded    guard-saves        pct`);
+  for (const row of report.stubborn) {
+    lines.push(
+      `${row.label.padEnd(18)}${pad(money(row.feedbackCostUsd), 10)}${pad(money(row.guardedCostUsd), 11)}` +
+        `${pad(`$${row.guardSavedUsd.toFixed(6)}`, 16)}${pad(`${row.guardSavedPct.toFixed(1)}%`, 10)}`,
+    );
+  }
+  lines.push("");
+  lines.push(`stubborn cost composition under cached pricing:`);
+  for (const c of report.stubbornComposition) {
+    lines.push(
+      `  ${c.policy.padEnd(8)} reads $${c.readUsd.toFixed(6)}  writes $${c.writeUsd.toFixed(6)}  ` +
+        `output $${c.outputUsd.toFixed(6)}`,
+    );
+  }
+  lines.push("");
+  lines.push(`read-price sweep on the stubborn burn (writes stay 1.25x):`);
+  lines.push(`read-mult  feedback     guarded      guard-saved-pct`);
+  for (const row of report.sweep) {
+    lines.push(
+      `${pad(row.readMult.toFixed(2), 9)}${pad(`$${row.feedbackCostUsd.toFixed(6)}`, 13)}` +
+        `${pad(`$${row.guardedCostUsd.toFixed(6)}`, 13)}${pad(`${row.guardSavedPct.toFixed(1)}%`, 17)}`,
+    );
+  }
   return lines.join("\n");
 }
 
