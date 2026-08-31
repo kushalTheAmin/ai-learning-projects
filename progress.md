@@ -119,6 +119,63 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-31] 17 — section 1 sold the clean guo et al shape and the
+  curve underneath it is a different shape. the heading read "accuracy
+  converges, calibration keeps drifting" and the readme said validation
+  accuracy was "done moving early (0.818 at epoch 100, 0.772 at 3200)" while
+  validation ece "climbs the whole time". both halves are refuted by the table
+  `main.py` prints directly above the sentence: val accuracy falls at every
+  single printed checkpoint, 0.835 at epoch 50 to 0.772 at 3200, never once
+  turning back up, and val ece does not climb throughout — it dips 0.061 to
+  0.034 between epochs 50 and 100 before it starts rotting. the parenthetical
+  is the tell: it quotes 0.818 and 0.772 as evidence for "done moving", and
+  those two numbers are 4.6 points apart. this is the 14/15/16 wrong-column
+  family again but a new member of it — not a figure read off the wrong
+  column, a *shape* asserted over a table that shows a different one, which no
+  number-matching check would catch because every individual number quoted was
+  real. the fix is prose and one heading string, no measured number moved. it
+  does change the takeaway though: the old text says overfitting costs you
+  calibration and one scalar buys it back, which reads as "overfitting is free
+  if you calibrate". on this data it is not — training past epoch 50 costs
+  0.063 of val accuracy that temperature scaling provably cannot return, since
+  scaling never reorders a row, and the readme now says so and carries the
+  comparison honestly (ece 2.6x worse against the error rate's 1.4x). seven
+  tests in `tests/test_claims.py`: three recompute the curve at `main.py`'s own
+  CHECKPOINTS and pin the shape (accuracy monotonically non-increasing, ece
+  non-monotone with a dip), four hold the readme's what-happens section and the
+  printed heading to it. the four prose tests fail on the old text and pass on
+  the new; the three shape tests pass on both because they assert facts about
+  the run, which is the point — they are what the prose is now checked
+  against. the readme claim tests deliberately read only the what-happens
+  section, since the fixes log quotes the removed wording on purpose.
+  found and fixed 2026-08-31
+- [medium] 17 — the shift section's oracle ece is in-sample and the number it
+  is compared against is not. `main.py` fits the oracle temperature on
+  `logits_shift, y_shift` and then scores ece on those same 1200 shifted
+  tickets, so the printed 0.024 is a fit-and-score-on-one-set number, while
+  the 0.140 beside it comes from a temperature fitted on validation and
+  applied out-of-sample. the word "oracle" signals the intent and the readme's
+  conclusion (T moves 3.060 -> 5.691, so calibration is a property of the
+  traffic) rests on the temperature moving, not on the 0.024. but the two
+  figures sit on one printed line reading as a like-for-like comparison and
+  they are not; 0.024 is optimistic by an amount nothing here measures.
+  splitting the shifted stream and fitting the oracle on one half would price
+  it. found 2026-08-31
+- [low] 17 — the readme says the shifted stream swaps filler "for vocabulary
+  the model never saw", and 16 of the 56 drift-filler token types are already
+  in the training vocabulary (account, back, by, change, dashboard, in, is,
+  new, on, our, shows, still, the, this, two, we). the shift is real — 40 of 56
+  types and 57% of drift-filler token occurrences are genuinely unseen — but
+  the sentence claims all of it. `test_drift_filler_is_unseen_by_training_
+  vocabulary` only asserts `len(novel) >= 10`, so it would still pass if the
+  overlap grew a lot worse. found 2026-08-31
+- [low] 17 — `fit_temperature` clamps to its bracket silently. the search runs
+  golden-section over s in [1/hi, 1/lo] with lo=0.02, hi=50, and an optimum
+  outside that range returns the endpoint with no signal: on synthetic logits
+  whose true optimum is far above 50 it returns exactly 50.000000 and the
+  caller cannot tell that from a converged fit. nothing published is affected
+  (T=3.060 and the oracle's 5.691 sit well inside), and the tests cover a bad
+  bracket but not a hit endpoint. found 2026-08-31
 - [fixed 2026-08-31] 16 — the arrangement-trap section credited order
   randomization with a win rate of 0.485, and 0.485 is the both-order column.
   `runChampion` only ever ran `as-stored` and `both-order` on the champion
@@ -831,6 +888,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 17-confidence-calibration | 2026-08-31 |
 | 16-llm-as-judge | 2026-08-31 |
 | 15-embedding-quantization | 2026-08-30 |
 | 14-context-window | 2026-08-30 |
@@ -1198,6 +1256,44 @@ project and none of them touch a published number: a gold/provenance confound
 in the pointwise set worth three points to self-pref, judge noise that ignores
 the run seed, a 2x claim that rounds to 2.008x on the printed table, and a
 pointwise call-cost helper nothing calls.
+
+17 came back clean on every formula and dirty on the one paragraph that draws
+a shape instead of quoting a number. the metrics were checked against
+independent references rather than by reading: log_softmax and softmax match
+scipy to 0.0, nll matches sklearn's log_loss to 0.0, the multiclass brier
+matches a hand reference to 0.0, and ece matches an independently written
+equal-width binner to 0.0. the temperature fit matches scipy's bounded brent
+to seven significant figures with an nll gap of 2.2e-16, and the choice to
+search over inverse temperature is not incidental — nll is convex in s because
+logsumexp(s*z) is convex in s and the label term is linear, which is exactly
+what makes golden-section sound here; nll in T is not convex, so the readme's
+justification is correct and load-bearing. bin edges were probed for the
+off-by-one this repo has been bitten by: conf*n_bins lands on exact integers
+for every k/10 in float64, so nothing straddles. evaluation hygiene holds —
+vocabulary from train only, T from validation, test untouched by both. reruns
+are byte-identical and 35 of the 37 three-decimal figures in the readme prose
+are printed by `main.py` verbatim; the two that are not (0.165, 0.228) are the
+error rates the sentence itself defines as 1 minus the two accuracies beside
+them. no other project in the repo implements ece, brier or a reliability
+table, so there was no cross-project drift to find.
+
+the defect is a new member of the wrong-column family and the first one that
+is not a number at all. 14, 15 and 16 were figures read off the wrong column
+or a column that did not exist; this is a *shape* asserted over a table that
+shows a different shape, with every individual number in the sentence real and
+correctly transcribed. that matters for how to review: number-matching, which
+is the check that has caught the last three, cannot catch this one. the check
+that does is to read the printed table as a curve and ask whether the sentence
+above it describes that curve — monotonicity, turning points, and "the whole
+time" claims especially. worth carrying: any prose that says always, never,
+converges, plateaus or throughout is an assertion about every row, and it
+should be tested against every row. the three shape tests added here are the
+template — recompute the curve at the entry point's own checkpoints, assert
+the monotonicity that actually holds, and let the prose tests fail when the
+text drifts from it. the three remaining findings are all in 17 and none
+touches a published number: an in-sample oracle ece printed beside an
+out-of-sample one, a drift-vocabulary claim that is 71% true, and a
+temperature search that clamps to its bracket without saying so.
 
 ## MECHANISMS
 
