@@ -119,6 +119,74 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-08-31] 18 — the readme sold threshold 0.80 as the operating
+  point where the semantic layer stops serving wrong answers, and that zero
+  is one traffic draw. `npm start` ran a single seed (20260828) and the
+  readme read its wrong-answer column as a property of the threshold:
+  "serves zero wrong answers on this replay", repeated in the running-it
+  section as a pinned claim and in the root index table as "81.4% saved at
+  zero wrong answers". the same config over 20 seeds (20260828..20260847) is
+  zero-wrong on 12 of them and serves up to 9 on the worst, mean 1.15,
+  median 0 — so the published zero is the median, not the value, and 8 seeds
+  in 20 serve at least one wrong answer at the threshold the project called
+  safe. the hedge "on this replay" was there and is not enough: the whole
+  deliverable is a dollars-against-wrong-answers dial, and the risk column
+  is the one column a single draw cannot price. what the resample shows is
+  an asymmetry worth having: savings barely move (79.1%-82.4% at 0.80) while
+  wrong serves swing an order of magnitude, so cost is measurable off one
+  replay and risk is not. `seedSpread` in `src/replay.ts` runs the three
+  operating points the readme decides off (word 0.80, word 0.75, char 0.75)
+  across `SPREAD_SEEDS`, generating traffic once per seed and reusing it
+  across configs; main prints the spread table; the readme carries the
+  ranges in a new "one seeds zero" section and separates what survives a
+  resample (char serves more wrong answers than word at 0.75 on 20 of 20
+  seeds) from what does not (every count). nine tests in
+  `tests/claims.test.ts`: six recompute the spread and pin every published
+  number, three hold the readme text to it. the revert check was run twice
+  because the two halves bind differently — reverting the source breaks the
+  six sweep tests on the missing export, reverting only the readme breaks
+  exactly the three prose tests. no measured number moved; the original
+  sweep's 0.80 row is still 0 wrong and 81.4% saved. `npm start` goes 4s ->
+  20s and the suite 3s -> 13s for the 60 extra replays, stated in the readme.
+  found and fixed 2026-08-31
+- [medium] 18 — "near-miss false positives only die out at 0.80" is the word
+  row read as if it covered both featurizers. the sentence lands right after
+  "char trigrams are the same story at 98.7%", so it reads as a claim about
+  the pair analysis as a whole, and char's near-miss fpr is still 2.2% at
+  0.80 and 1.1% at 0.85 — it only reaches 0.0% at 0.90, two full steps of the
+  printed ladder later. the paragraph's thesis survives (no threshold
+  separates paraphrases from near-misses, since paraphrase recall is 0.0%
+  everywhere for both), which is why this is a clause error and not a
+  section error, but the number quoted is the wrong featurizer's.
+  found 2026-08-31
+- [medium] 18 — the non-monotone bullet's headline example is the one seed it
+  happens on at that size. "char features serve 44 wrong at 0.50 but 85 at
+  0.70" is real on 20260828, and across the 15 seeds 20260828..20260842 that
+  is the *only* seed where char at 0.70 exceeds char at 0.50 — everywhere
+  else 0.50 is far worse (66->16, 98->12, 297->119). the general claim is
+  fine and is in fact better supported than the example suggests: at least
+  one step where wrong serves rise going up the ladder shows on 7 of 15 word
+  seeds and 11 of 15 char seeds. so the lesson holds, the illustration is an
+  outlier, and the readme's causal story (a lower threshold serves more
+  aggressively early, so fewer phrasings enter the store — store sizes 88 at
+  0.50 vs 144 at 0.70 confirm it) is the part that generalizes. the seed
+  spread now published covers 0.75 only, so this bullet is still quoting a
+  single draw. found 2026-08-31
+- [low] 18 — the typo comparison counts only semantic serves, so typoed
+  requests the exact layer absorbs are invisible to it. at 0.75 the exact
+  layer serves 10 typoed requests under word features and 1 under char, on
+  top of the published 157 and 233. the sentence means what it says (char
+  sees through typos the semantic layer would otherwise miss) and the
+  direction is unaffected, but `semanticHitsOnTypoed` is the only typo
+  number the project has and it is not "typoed requests served from cache".
+  found 2026-08-31
+- [low] 18 — punctuation-only queries all share the empty normalized key, so
+  the exact layer will serve one's answer for another: `insert("???")` then
+  `lookup("!!!")` returns an exact hit. unreachable from this dataset
+  (`validateDataset` rejects a phrasing that normalizes to empty) and from
+  the traffic (every request carries an intent phrasing), so nothing
+  published is affected, but `SemanticCache` is the reusable piece here and
+  the exact layer is the half sold as zero-risk. found 2026-08-31
 - [fixed 2026-08-31] 17 — section 1 sold the clean guo et al shape and the
   curve underneath it is a different shape. the heading read "accuracy
   converges, calibration keeps drifting" and the readme said validation
@@ -519,6 +587,8 @@ Fixed items stay listed with their fix date so the history reads in one place.
   two things in two folders, which is exactly the reading error the label is
   supposed to prevent. left open rather than renamed in the fix commit: it
   touches 18's output and 18 has not been reviewed yet. found 2026-08-29
+  — 18 reviewed 2026-08-31, so the blocker is gone; still open because the
+  reviewed fix that run was 18's single-seed zero and one fix ships per run.
 - [low] 11 — experiment 5's readme sentence says "at 26 blocks per turn the
   tail breakpoint cant see back far enough: hit rate collapses from 77.2% to
   15.5%". 77.2% is the *spaced-15* row at 26 blocks, not the 10-block row the
@@ -888,6 +958,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 18-semantic-caching | 2026-08-31 |
 | 17-confidence-calibration | 2026-08-31 |
 | 16-llm-as-judge | 2026-08-31 |
 | 15-embedding-quantization | 2026-08-30 |
