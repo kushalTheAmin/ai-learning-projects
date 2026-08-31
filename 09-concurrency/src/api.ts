@@ -9,7 +9,9 @@
  * Failure model: a call containing any poisoned item is rejected as a whole
  * after the base latency (a validation-shaped failure: fast, no output
  * generated, no word about which item was at fault). Input tokens are still
- * charged on rejected calls; output tokens are not.
+ * charged on rejected calls; output tokens are not. Items may also be flaky
+ * (`flakeRate`): they fail probabilistically per attempt instead of always,
+ * with the same whole-call rejection when they do.
  */
 import { VirtualClock } from "../../06-rate-limiting/src/clock.js";
 import type { Rng } from "../../05-token-streaming/src/rng.js";
@@ -18,6 +20,14 @@ import { Semaphore } from "./semaphore.js";
 export interface WorkItem {
   id: number;
   poisoned: boolean;
+  /**
+   * Per-attempt failure probability. A flaky item fails each call it rides in
+   * with this probability, independently per attempt; when it fails, the whole
+   * call is rejected exactly like a poisoned one. 0 (or absent) never fails,
+   * 1 always fails. Draws come from a dedicated rng so enabling flake leaves
+   * the seeded latency stream untouched.
+   */
+  flakeRate?: number;
 }
 
 export interface ItemResult {
@@ -93,6 +103,7 @@ export class SimulatedApi {
     private readonly clock: VirtualClock,
     private readonly rng: Rng,
     opts: Partial<ApiOptions> = {},
+    private readonly flakeRng?: Rng,
   ) {
     this.opts = { ...DEFAULT_API_OPTIONS, ...opts };
     this.slots = new Semaphore(this.opts.maxConcurrent);
@@ -116,7 +127,7 @@ export class SimulatedApi {
       this.opts.promptOverheadTokens + items.length * this.opts.perItemInputTokens;
     try {
       const jitter = 1 - this.opts.latencyJitter + 2 * this.opts.latencyJitter * this.rng();
-      if (items.some((item) => item.poisoned)) {
+      if (items.some((item) => item.poisoned) || this.drawFlakes(items)) {
         await this.clock.sleep(this.opts.baseLatencyMs * jitter);
         this.stats.failedCalls++;
         throw new ApiError("validation", "batch rejected: one or more items failed validation");
@@ -131,6 +142,24 @@ export class SimulatedApi {
     } finally {
       release();
     }
+  }
+
+  /**
+   * One draw per flaky item in call order, never short-circuited, so the
+   * flake rng advances by exactly the call's flaky-item count no matter the
+   * outcomes. Calls with no flaky items draw nothing.
+   */
+  private drawFlakes(items: readonly WorkItem[]): boolean {
+    let anyFlaked = false;
+    for (const item of items) {
+      const rate = item.flakeRate ?? 0;
+      if (rate <= 0) continue;
+      if (this.flakeRng === undefined) {
+        throw new Error(`item ${item.id} has flakeRate ${rate} but the api has no flake rng`);
+      }
+      if (this.flakeRng() < rate) anyFlaked = true;
+    }
+    return anyFlaked;
   }
 
   snapshot(): ApiStats {

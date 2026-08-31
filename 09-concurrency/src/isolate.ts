@@ -114,7 +114,7 @@ export async function runWithIsolation(
   };
 }
 
-function assertValidationError(error: unknown): void {
+export function assertValidationError(error: unknown): void {
   if (!(error instanceof ApiError) || error.kind !== "validation") {
     throw error;
   }

@@ -3,8 +3,10 @@
 Everything here is simulated: the "LLM API" is a latency and token model on a
 virtual clock, prices are parameterized constants loosely shaped like current
 frontier pricing, arrivals are a seeded exponential process, and the poisoned
-items that fail a batch are flags the fixture set itself. No network, no real
-clock, no API key. What the numbers demonstrate is the relative shape of the
+items that fail a batch are flags the fixture set itself. The flaky items in
+the extension are seeded coin flips, independent per attempt, which is the
+friendliest possible flake for a retry to meet. No network, no real clock, no
+API key. What the numbers demonstrate is the relative shape of the
 strategies, how cost, latency and failure blast radius move against each other
 under one reproducible model. Absolute values would differ against a real
 provider, and the failure model (a whole batch rejected fast, no word about
@@ -42,6 +44,7 @@ npm ci
 npm run typecheck
 npm test
 npm start
+npm run start:flaky
 ```
 
 ## results (seed 42, printed by `npm start`)
@@ -172,6 +175,134 @@ And batching has a fourth currency the first two knobs dont: blast radius. A
 batch is a bet that all n items are good, and the recovery strategy decides
 what losing that bet costs.
 
+## the flaky poison extension: when the bad item only sometimes fails
+
+Section 4's poison was deterministic, and this repo's own open-questions list
+predicted that flake would be bisect's undoing: "if items fail
+probabilistically, bisect needs repeated probes per level; at what flake rate
+does it stop beating one-by-one entirely?" So this extension makes items
+flaky, a per-attempt failure probability drawn from a dedicated rng (the
+seeded latency stream is untouched, draws are one per flaky item per call,
+never short-circuited), gives every strategy the same fairness rule, at most
+4 attempts per item at singleton level, and sweeps flake rate x flaky-item
+count. One trial of a coin flip is a sample, not a measurement, so every cell
+is a mean over 250 seeded trials, and the trial seeds are shared across
+strategies so the first call is paired exactly: every difference in the table
+comes from the trials where that first call failed.
+
+`npm run start:flaky` (seed 42, batch of 32, flaky ids spread evenly):
+
+```
+flaky  rate     strategy  1st fail  calls  in tokens  healthy done  flaky done  elapsed
+    1   0.1     fail-all      8.0%    1.0     2320.0         92.0%       92.0%    666ms
+    1   0.1  retry-whole      8.0%    1.1     2514.9        100.0%      100.0%    724ms
+    1   0.1   one-by-one      8.0%    3.6     3499.4        100.0%      100.0%    923ms
+    1   0.1       bisect      8.0%    1.2     2544.6        100.0%      100.0%    732ms
+    1   0.3     fail-all     30.8%    1.0     2320.0         69.2%       69.2%    525ms
+    1   0.3  retry-whole     30.8%    1.4     3303.7         99.6%       99.6%    753ms
+    1   0.3   one-by-one     30.8%   11.0     6909.0        100.0%       99.6%   1521ms
+    1   0.3       bisect     30.8%    1.9     3360.1        100.0%      100.0%    791ms
+    1   0.5     fail-all     50.4%    1.0     2320.0         49.6%       49.6%    396ms
+    1   0.5  retry-whole     50.4%    1.9     4315.2         92.8%       92.8%    741ms
+    1   0.5   one-by-one     50.4%   17.6     9935.8        100.0%       95.2%   2041ms
+    1   0.5       bisect     50.4%    3.0     4391.9        100.0%       99.6%    877ms
+    1   0.7     fail-all     70.0%    1.0     2320.0         30.0%       30.0%    269ms
+    1   0.7  retry-whole     70.0%    2.5     5911.4         74.4%       74.4%    676ms
+    1   0.7   one-by-one     70.0%   24.5    13131.8        100.0%       80.0%   2595ms
+    1   0.7       bisect     70.0%    5.3     6119.0        100.0%       95.6%   1058ms
+    1   0.9     fail-all     90.4%    1.0     2320.0          9.6%        9.6%    141ms
+    1   0.9  retry-whole     90.4%    3.4     7953.0         34.8%       34.8%    496ms
+    1   0.9   one-by-one     90.4%   32.1    16627.8        100.0%       38.8%   3195ms
+    1   0.9       bisect     90.4%    9.8     9022.9        100.0%       61.2%   1419ms
+    4   0.1     fail-all     35.2%    1.0     2320.0         64.8%       64.8%    498ms
+    4   0.1  retry-whole     35.2%    1.5     3424.3         98.8%       98.8%    755ms
+    4   0.1   one-by-one     35.2%   12.4     7553.0        100.0%      100.0%   1633ms
+    4   0.1       bisect     35.2%    1.9     3480.0        100.0%      100.0%    800ms
+    4   0.3     fail-all     72.0%    1.0     2320.0         28.0%       28.0%    260ms
+    4   0.3  retry-whole     72.0%    2.6     6106.2         71.6%       71.6%    669ms
+    4   0.3   one-by-one     72.0%   25.2    13452.0        100.0%       99.5%   2656ms
+    4   0.3       bisect     72.0%    5.1     6296.1        100.0%      100.0%   1054ms
+    4   0.5     fail-all     92.4%    1.0     2320.0          7.6%        7.6%    129ms
+    4   0.5  retry-whole     92.4%    3.6     8370.6         24.0%       24.0%    444ms
+    4   0.5   one-by-one     92.4%   33.5    17286.6        100.0%       94.2%   3318ms
+    4   0.5       bisect     92.4%   10.5    10067.6        100.0%       99.6%   1484ms
+    4   0.7     fail-all     98.4%    1.0     2320.0          1.6%        1.6%     90ms
+    4   0.7  retry-whole     98.4%    3.9     9150.1          2.8%        2.8%    333ms
+    4   0.7   one-by-one     98.4%   38.6    19625.2        100.0%       76.3%   3712ms
+    4   0.7       bisect     98.4%   19.3    15153.2        100.0%       92.6%   2183ms
+    4   0.9     fail-all    100.0%    1.0     2320.0          0.0%        0.0%     80ms
+    4   0.9  retry-whole    100.0%    4.0     9280.0          0.0%        0.0%    320ms
+    4   0.9   one-by-one    100.0%   42.9    21571.9        100.0%       34.2%   4019ms
+    4   0.9       bisect    100.0%   33.3    22299.4        100.0%       51.2%   3268ms
+```
+
+And the direct answer to the question, bisect's mean cost divided by
+one-by-one's:
+
+```
+flaky  rate  calls ratio  tokens ratio
+    1   0.1         0.33          0.73
+    1   0.3         0.17          0.49
+    1   0.5         0.17          0.44
+    1   0.7         0.22          0.47
+    1   0.9         0.31          0.54
+    4   0.1         0.16          0.46
+    4   0.3         0.20          0.47
+    4   0.5         0.31          0.58
+    4   0.7         0.50          0.77
+    4   0.9         0.78          1.03
+```
+
+### the prediction was backwards
+
+Bisect never stops beating one-by-one on calls. Not at any rate, not at any
+count in this grid; the worst cell is 0.78 at 4 items flaking 90% of the
+time. The one crossover in the whole table is tokens at that same extreme
+cell, 1.03, and section 4 already showed the deterministic version of it
+(bisect 21520 tokens vs 17040 at 4 poisoned). So the crossover the question
+asked for exists, but it lives in the near-deterministic corner, exactly the
+regime the question assumed flake would drag bisect away from.
+
+The prediction failed because "bisect needs repeated probes per level" has
+the mechanism inverted. Bisect only descends into a slice that failed, and
+under flake a slice containing a flaky item passes whenever the item misses
+its draw, which retires every item in it in one call. Flake gives bisect's
+large slices a survival chance the deterministic world never allowed, so the
+recursion usually collapses after a level or two. One-by-one cannot collect
+that gift: once the first call fails it pays its fixed floor of 32 singleton
+calls no matter how mild the flake was, which is why its calls column sits
+near 33 wherever the first call usually fails.
+
+The same mechanism decides completion. A flaky item riding a passing slice is
+done, so bisect hands it extra chances beyond the shared 4-attempt singleton
+budget, and at rate 0.9 with one flaky item bisect completes it 61.2% of the
+time against one-by-one's 38.8%, while ALSO spending a third of the calls
+(9.8 vs 32.1). Cheaper and more complete at the same time; there is no trade
+here, bisect just dominates.
+
+### retry-whole's redemption
+
+Section 4 called retry-whole "the strategy everyone ships by accident" and
+priced it as pure waste, 4x the tokens of fail-all for zero recovery. Against
+flake it flips: at 1 item flaking 10%, retry-whole completes 100.0% for a
+mean 1.1 calls, the cheapest full recovery in the table, and it stays above
+99% up to rate 0.3. The accidental strategy is accidentally correct whenever
+failures are rare and transient, which is precisely the regime generic retry
+wrappers were written for. Its collapse is the all-or-nothing shape: a resend
+passes only if no flaky item fires, so at 4 items flaking 0.5 it completes
+24.0% while burning 3.6 calls, and at 4 x 0.9 it is section 4's dead loss
+again, 4.0 calls, 0 items, every time. The healthy-done and flaky-done
+columns are identical in every retry-whole row because the batch lives or
+dies as one unit; healthy items are hostage to the flaky ones.
+
+### what the extension says as one sentence
+
+Probabilistic failure is kinder to bisection than deterministic failure,
+because a passing slice retires its items whether or not they were suspects,
+so the right mental model for a flaky batch is not "poison hunting got
+harder" but "most attempts are now partial successes", and the strategy that
+can bank a partial success at any granularity, bisect, wins the whole grid.
+
 ## typescript, and why
 
 This is the day-job stack on purpose: the subject here IS the async runtime,
@@ -202,8 +333,14 @@ Imports rather than rewrites: the virtual clock and percentile come from
 - the server cap is fixed and honest; real providers shed load with 429s and
   variable latency under pressure, which is 06's model, and the two arent
   composed here
-- poison is deterministic. A flaky item (fails 30% of the time) breaks
-  bisect's core assumption that a passing half is clean
+- flake is independent per attempt, the friendliest model a retry can meet.
+  Real flakes cluster in time (a bad shard, a deploy window, an overloaded
+  dependency), and a correlated bad window would hit bisect's rapid-fire
+  slice resends much harder than these numbers show
+- a given-up item at rate below 1 is a false poison verdict on an item that
+  could have succeeded; the table counts them (the gap under flaky done) but
+  nothing here prices what quarantining a healthy-but-unlucky item costs
+  downstream
 - the arrival process is stationary. Bursts would make the micro-batcher's
   fixed wait budget look much worse than this steady stream does
 
@@ -214,9 +351,17 @@ Imports rather than rewrites: the virtual clock and percentile come from
   deadline recover vs the best fixed setting?
 - real batch APIs sometimes name the failing index in the error; how much of
   bisect's advantage survives when a single probe call can be replaced by
-  parsing the error body?
-- flaky poison: if items fail probabilistically, bisect needs repeated probes
-  per level; at what flake rate does it stop beating one-by-one entirely?
+  parsing the error body? under flake the named index carries one attempt's
+  truth, not the item's nature, which makes the question sharper
+- bisect retries only singletons here; retrying a failing slice once before
+  splitting is a cheap "was that real" probe at every level, and at low rates
+  it should collapse most trees to two calls, unmeasured
+- correlated flake: draws here are iid per attempt, and a time-window model
+  (every call inside a bad window fails) would test whether bisect's win
+  survives failures that dont reroll per call
+- an adaptive policy could estimate the flake rate from the failures it has
+  already seen and pick a strategy per batch; what it recovers vs the best
+  static column in the table is unmeasured
 - composing this with 06: a server that 429s under the herd AND takes batches
   would price batching as a rate-limit dodge, since one call of 32 items costs
   one admission token
