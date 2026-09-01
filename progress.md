@@ -143,6 +143,85 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-01] 19 — every gate rate in the headline table was a bare
+  point estimate off 50 seed pairs, printed to one decimal and reasoned from
+  in prose as if it were the gate's rate. that is the exact error the project
+  argues against — "an eval score is a sample, not a fact" — committed one
+  level up, on the measurement of the gates rather than the models. the
+  readme caught itself doing it and looked away: the ci gate's detection of
+  the 3-point drift reads 6.0% in the table and 23.3% in the power curve two
+  sections later, one quantity measured twice, and the text called the
+  four-fold gap "the same quantity at different sweep seeds and resample
+  counts, both honestly low". it is not a seed difference. 400 pairs puts the
+  rate at 13.0% on the committed golden set and 16.8% on the power curve's
+  set, and resample count is not the lever (300 vs 500 moved it 13.0 -> 12.8
+  and 16.8 -> 15.2); 6.0% is 3/50 and 23.3% is 7/30, two draws whose wilson
+  intervals ([2.1%, 16.2%] and [11.8%, 40.9%]) overlap exactly where the
+  truth sits. the published 6.0% was then quoted twice in prose as a property
+  of the gate ("it only sees 6.0% at this size"). the fix is
+  `wilson_interval` in experiments.py, a 95% interval on every rate cell,
+  every power-curve point and the improvement-confirmed rate, all printed by
+  main.py with their raw counts. one thing had to come with it: the corrected
+  slice gates are nested inside the plain one, so their marginal intervals
+  overlap (68.0% [54.2%, 79.2%] vs 50.0% [36.6%, 63.4%]) and bracketing alone
+  would have retired the project's own headline claim as unsupported when it
+  is in fact solid — so `discordance` records the paired counts, and on the
+  masked scenario slice-bonf spares 9 of the 34 pairs slice flagged and adds
+  0, a sign test at 2^-9. twenty tests: seven on the interval itself in a new
+  `tests/test_claims.py` (values checked by hand, endpoints clamped at 0 and
+  1), six holding the readme to the printed output including a regex that
+  fails on any bare rate cell in the table, three on the two-draws point
+  itself, plus four in test_experiments.py binding the dataclasses (interval
+  brackets its rate, and plain - spared + added == corrected reconciles the
+  discordance against both marginals). the revert check splits: reverting the
+  source removes `wilson_interval` and `CORRECTED_GATES` so both new test
+  modules fail to import — nothing in them can pass without the fix —
+  and reverting only the readme fails exactly 5 of the prose tests with the
+  other 127 green. one of those prose tests was vacuous on the first pass
+  (the phrase it banned wraps across a line in the readme, so `in` never
+  matched either version) and only the revert check caught it; it normalizes
+  whitespace now. no measured rate moved — every number in the table and the
+  power curve is what it was, they just carry their width now, and the root
+  index row is untouched. found and fixed 2026-09-01
+- [medium] 19 — "the aggregate is unchanged by construction" is not zero, it
+  is -0.0020, and the cause is a clip nobody accounted for. masked-2.0 is
+  built to trade -0.24 on date against +0.048 on the other five so the
+  category mean cancels, and model.py's own comment is careful to say "the
+  unclipped mean over categories is unchanged" — but `p_correct` clamps to
+  P_MAX = 0.995 and the gaining categories sit high enough to hit it: with
+  the item difficulty offset added, 13 of 40 arithmetic items, 6 unit and 3
+  entity clip under masked-2.0 against 2 under baseline-1.0. so arithmetic
+  gains 0.0397 where it is authored to gain 0.0480, and the true expected
+  aggregate delta is -0.0020 rather than 0. it is a fifth of a point against
+  rerun noise of seven, no published rate is wrong (the 50-pair mean delta,
+  -0.0011, is consistent with either), and the scenario still does what it
+  exists to do. but "by construction" is a claim about the construction, it
+  appears in the readme, in main.py's printed ground-truth line and in
+  model.py's comment, and the construction does not deliver it exactly.
+  found 2026-09-01
+- [low] 19 — the plain slice gate and the uncorrected p-value test are not
+  quite the same test, so "the corrected gates spend the same 0.025 budget
+  and only the correction differs" is true to within 3 comparisons in 200
+  rather than exactly. the gate tests `ci.hi < 0` where the corrected gates
+  test `p_ge_zero <= 0.025`; over the four scenarios' 200 pairs they agree on
+  197, and all 3 disagreements are the interval firing where the p-value test
+  did not (1 each on noise, drift and improved, 0 on masked), never the
+  reverse. so the interval gate is a shade more liberal than the level it is
+  described as, and a hair of the measured "cost of correction" is the test
+  changing rather than the correction. the discrepancy is discreteness at 500
+  resamples, it is small and it is one-directional. found 2026-09-01
+- [low] 19 — the readme says `main.py` "takes about 45 seconds"; it takes 59
+  on the machine this review ran on, and the number is quoted bare rather
+  than labelled as wall clock. same shape as the 05 and 21 timing findings,
+  both of which were resolved by naming the column wall clock instead of
+  pinning a figure. found 2026-09-01
+- [low] 19 — `gate_slice_bonferroni` divides by `len(comparison.categories)`
+  and raises ZeroDivisionError on a comparison with no categories, where
+  `gate_slice_bh` passes cleanly (`benjamini_hochberg([])` returns `[]`
+  without ever evaluating the threshold). unreachable — `run_eval` refuses an
+  empty item list so a RunComparison always carries at least one category —
+  but the two corrections built to be interchangeable disagree on the empty
+  case. found 2026-09-01
 - [fixed 2026-09-01] 21 — section 5's hub attack was not selecting hubs. the
   attack ranks live nodes by layer-0 degree and takes the top `count`, but
   layer-0 degree is capped at m0 = 32 and 675 of the 2000 heuristic nodes
@@ -1128,6 +1207,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 19-eval-regression | 2026-09-01 |
 | 21-vector-store-persistence | 2026-09-01 |
 | 20-guardrails | 2026-08-31 |
 | 18-semantic-caching | 2026-08-31 |
@@ -1594,6 +1674,37 @@ removing the 100 lowest ids reproduced the published 0.638 to within 0.001,
 which no hub story can explain. two more findings came out of the same read
 (a numpy id class the store cannot serialize, and a monotone claim in section
 4 that the printed waste column contradicts) and are listed open.
+
+19 came back clean on its statistics and dirty on its own thesis. the
+imported bootstrap really is 02's object (a test asserts identity, not
+equality), the paired resampling is over per-item differences, benjamini-
+hochberg is a correct step-up (largest rank k with p_(k) <= k*q/m, reject
+1..k, ties safe because the threshold grows with rank), the bonferroni cut
+is alpha/m with alpha the 0.025 the plain gate's two-sided 95% interval
+implies, and p_ge_zero counts resamples at or above zero so it is
+conservative in the direction a regression test wants. the harness half is
+sound: the fingerprint covers every item field in order, load_run recomputes
+both aggregates and refuses a record that disagrees with itself, and
+comparing across fingerprints raises rather than returning a number. the
+run is deterministic — two `python3 main.py` invocations byte-identical —
+and every number in the readme reproduced before the fix.
+
+the defect was one level up from all of that, in the measurement of the
+gates rather than in the gates. the project's whole argument is that a point
+estimate without an error bar is gating on noise, and every cell of its own
+gate-rate table was a point estimate off 50 pairs with no error bar. the
+review move that found it was reading the two halves of the readme against
+each other: the table says the ci gate detects the 3-point drift 6.0% of the
+time and the power curve, three paragraphs down, says 23.3% at the same
+n=240. one quantity, twice, four-fold apart, and the text explained the gap
+away instead of resolving it. 400 pairs said 13-17% and that resample count
+was not the lever, so both cells were draws and neither was the rate. the
+general lesson to carry: when a document reports the same quantity twice
+and reconciles them in prose, the prose is the finding — and the second
+half of it, that bracketing nested comparisons by their marginals would
+have retired a claim that pairing establishes, is the reason the fix prints
+discordance counts next to the intervals rather than intervals alone. four
+smaller findings came out of the same read and are listed open.
 
 ## MECHANISMS
 

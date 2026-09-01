@@ -29,6 +29,7 @@ from eval_harness.correction import (
 )
 from eval_harness.data import dataset_fingerprint, load_golden
 from eval_harness.experiments import (
+    CORRECTED_GATES,
     GATE_NAMES,
     GateRates,
     measure_gate_rates,
@@ -102,8 +103,23 @@ def print_rates(title: str, truth: str, rates: GateRates) -> None:
     )
     print(f"ground truth: {truth}")
     for name in GATE_NAMES:
-        print(f"  {name:<11} fails {rates.fail_rates[name]:>5.1%} of pairs")
-    print(f"  improvement confirmed (ci above zero) in {rates.improve_rate:.1%}")
+        lo, hi = rates.fail_intervals[name]
+        print(
+            f"  {name:<11} fails {rates.fail_rates[name]:>5.1%} of pairs "
+            f"({rates.fail_counts[name]}/{rates.n_pairs}, 95% ci "
+            f"[{lo:.1%}, {hi:.1%}])"
+        )
+    lo, hi = rates.improve_interval
+    print(
+        f"  improvement confirmed (ci above zero) in {rates.improve_rate:.1%} "
+        f"({rates.improve_count}/{rates.n_pairs}, 95% ci [{lo:.1%}, {hi:.1%}])"
+    )
+    for corrected, plain in CORRECTED_GATES:
+        spared, added = rates.discordance[corrected]
+        print(
+            f"  paired: {corrected} spares {spared} of the "
+            f"{rates.fail_counts[plain]} pairs {plain} flagged, adds {added}"
+        )
     print()
 
 
@@ -166,7 +182,11 @@ def main() -> None:
         POWER_RESAMPLES,
         POWER_DATAGEN_SEED,
     ):
-        print(f"  n={point.n_items:<5} detection {point.detection_rate:.1%}")
+        lo, hi = point.interval
+        print(
+            f"  n={point.n_items:<5} detection {point.detection_rate:.1%} "
+            f"({point.detected}/{POWER_PAIRS}, 95% ci [{lo:.1%}, {hi:.1%}])"
+        )
     print()
 
 

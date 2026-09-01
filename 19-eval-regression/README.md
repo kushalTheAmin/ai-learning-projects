@@ -67,34 +67,48 @@ slice gate exists for, lands at p=0.0052 on the date slice, just above
 the bonferroni cut of 0.025/6 = 0.0042. both corrected gates pass a real
 24-point regression on this seed pair. correction is not free.
 
-gate error rates over 50 seed pairs per scenario:
+gate error rates over 50 seed pairs per scenario, each cell with its 95%
+wilson interval — a rate over 50 comparisons is a sampled number like any
+other, and this project would be a hypocrite quoting it bare:
 
 | scenario (truth) | naive-0.01 | naive-0.02 | ci | slice | slice-bonf | slice-bh |
 |---|---|---|---|---|---|---|
-| noise only (no change) | 40.0% | 28.0% | 2.0% | 16.0% | 4.0% | 4.0% |
-| masked slice regression | 40.0% | 32.0% | 4.0% | 68.0% | 50.0% | 50.0% |
-| 3-point uniform drift | 72.0% | 58.0% | 6.0% | 24.0% | 14.0% | 14.0% |
-| true 4-point improvement | 2.0% | 2.0% | 0.0% | 6.0% | 0.0% | 0.0% |
+| noise only (no change) | 40.0% [27.6%, 53.8%] | 28.0% [17.5%, 41.7%] | 2.0% [0.4%, 10.5%] | 16.0% [8.3%, 28.5%] | 4.0% [1.1%, 13.5%] | 4.0% [1.1%, 13.5%] |
+| masked slice regression | 40.0% [27.6%, 53.8%] | 32.0% [20.8%, 45.8%] | 4.0% [1.1%, 13.5%] | 68.0% [54.2%, 79.2%] | 50.0% [36.6%, 63.4%] | 50.0% [36.6%, 63.4%] |
+| 3-point uniform drift | 72.0% [58.3%, 82.5%] | 58.0% [44.2%, 70.6%] | 6.0% [2.1%, 16.2%] | 24.0% [14.3%, 37.4%] | 14.0% [7.0%, 26.2%] | 14.0% [7.0%, 26.2%] |
+| true 4-point improvement | 2.0% [0.4%, 10.5%] | 2.0% [0.4%, 10.5%] | 0.0% [0.0%, 7.1%] | 6.0% [2.1%, 16.2%] | 0.0% [0.0%, 7.1%] | 0.0% [0.0%, 7.1%] |
+
+the intervals are wide, and that is the first thing to read off the
+table — 50 pairs pins a rate to about ±13 points in the middle of the
+range. every comparison below that survives its intervals is a real
+gap, and the ones that dont are called out as such.
 
 reading it down:
 
 - the naive gates are unusable at this eval size. a 1-point tolerance
-  false-alarms on 40.0% of no-change reruns; to a team on that gate, "the
-  eval is red" carries almost no information, which is how eval gates die
-  culturally. and it buys nothing: on the masked regression the naive gate
-  fails 40.0%, exactly its false alarm rate, because the aggregate it
-  watches genuinely didnt move.
-- the ci gate holds false alarms at 2.0% but pays for it with blindness:
-  6.0% detection on a real 3-point drift, 4.0% on the masked regression.
-  an honest error bar on 240 items simply cannot see a 3-point change.
+  false-alarms on 40.0% [27.6%, 53.8%] of no-change reruns; to a team on
+  that gate, "the eval is red" carries almost no information, which is how
+  eval gates die culturally. and it buys nothing: on the masked regression
+  the naive gate fails at the same 40.0%, its own false alarm rate, because
+  the aggregate it watches genuinely didnt move.
+- the ci gate holds false alarms at 2.0% [0.4%, 10.5%] and pays for it
+  with blindness — 4.0% [1.1%, 13.5%] on the masked regression, 6.0%
+  [2.1%, 16.2%] on a real 3-point drift. dont read that 6.0% as the
+  gate's detection rate: it is 3 hits out of 50 and its interval runs to
+  16%, which is the same span the power curve's n=240 point lands in
+  (23.3% [11.8%, 40.9%], 7 of 30) from a different golden set. the two
+  cells are one quantity measured twice and neither pins it. what
+  survives both is the shape — an honest error bar on 240 items cannot
+  reliably see a 3-point change, and getting a sharper number than
+  "somewhere around one in ten" needs hundreds of pairs, not fifty.
 - the slice gate is the only one that catches the masked regression
-  (68.0%), and its price is printed right above: 16.0% false alarms on
-  noise, because six 95% intervals per comparison get six chances to be
-  unlucky. multiple comparisons is not a footnote, it is a sixth of your
-  green runs turning red.
+  (68.0% [54.2%, 79.2%]), and its price is printed right above: 16.0%
+  [8.3%, 28.5%] false alarms on noise, because six 95% intervals per
+  comparison get six chances to be unlucky. multiple comparisons is not a
+  footnote, it is a sixth of your green runs turning red.
 - everything passes the improvement, and the ci confirms the improvement
-  (interval fully above zero) in only 28.0% of pairs. even good news is
-  hard to prove at n=240.
+  (interval fully above zero) in only 28.0% [17.5%, 41.7%] of pairs. even
+  good news is hard to prove at n=240.
 
 ## what correction costs
 
@@ -115,6 +129,21 @@ is the price of twelve points of false alarms. whether thats a good trade
 depends on what a red run costs your team; the point of measuring it is
 that its now a number and not a footnote.
 
+that trade is the one comparison here the intervals cannot carry —
+68.0% [54.2%, 79.2%] against 50.0% [36.6%, 63.4%] overlap heavily, and
+read as two independent proportions the difference would be nothing. it
+holds because the gates are nested: a slice clearing the bonferroni cut
+clears the uncorrected level too, so the corrected gate only ever fires
+where the plain one did. the entry point prints the paired count instead,
+and that is what the claim rests on — on the masked scenario slice-bonf
+spares 9 of the 34 pairs slice flagged and adds 0, and the same 9-and-0
+for slice-bh. nine flips all one direction out of fifty is a sign test at
+p = 2^-9, so the cost is real even though the marginals dont show it. the
+noise column is the same shape, 6 of 8 spared and 0 added, and the drift
+column 5 of 12 and 0. this is the paired-vs-unpaired lesson from the
+bootstrap itself, one level up: pairing is what makes a small difference
+visible, and here the thing being paired is the gate verdicts.
+
 two things the table says that i didnt expect when writing it down:
 
 - bonferroni and benjamini-hochberg are identical in every cell here. bh
@@ -125,37 +154,45 @@ two things the table says that i didnt expect when writing it down:
   p-value to get small. one strong signal or six weak ones, neither is
   the shape bh exists for.
 - the drift scenario is where correction hurts most in relative terms
-  (24.0% detection falling to 14.0%, nearly half the signal gone). a
-  diffuse regression puts every slice near the threshold, and correction
-  moves the threshold away from exactly there. the aggregate ci gate is
-  the right tool for that shape and it only sees 6.0% at this size; the
-  honest reading is that a 3-point drift on 240 items is invisible to
-  every gate, corrected or not, and the power curve below is the fix.
+  (24.0% detection falling to 14.0%, 5 of 12 pairs spared and 0 added,
+  nearly half the signal gone). a diffuse regression puts every slice
+  near the threshold, and correction moves the threshold away from
+  exactly there. the aggregate ci gate is the right tool for that shape
+  and it sees roughly one drift in ten at this size — 6.0% [2.1%, 16.2%]
+  in the table, 23.3% [11.8%, 40.9%] in the power curve below, one
+  quantity that fifty pairs cannot pin tighter than its own order of
+  magnitude. the honest reading is that a 3-point drift on 240 items is
+  near-invisible to every gate, corrected or not, and the power curve is
+  the fix.
 
-the combined production gate moves the same way: ci+slice fails 16.0% of
-clean runs where ci+slice-bh fails 6.0% (the extra 2 points over slice-bh
-alone are the aggregate ci gate's own false alarms), and both catch the
-masked regression at their slice gate's rate (68.0% vs 50.0%).
+the combined production gate moves the same way: ci+slice fails 16.0%
+[8.3%, 28.5%] of clean runs where ci+slice-bh fails 6.0% [2.1%, 16.2%]
+(the extra 2 points over slice-bh alone are the aggregate ci gate's own
+false alarms), and both catch the masked regression at their slice gate's
+rate (68.0% vs 50.0%).
 
 one honesty note on the p-values: p_ge_zero is a bootstrap direction
 fraction pressed into service as a p-value, not an exact test, and at 500
 resamples its resolution is 0.002, so the bonferroni cut of 0.0042
 effectively tests at 0.004. the measured false alarm rates are the check
-that this approximation behaves: 4.0% observed against a nominal
-family-wise 2.5%, in the right regime on 50 pairs.
+that this approximation behaves: 4.0% [1.1%, 13.5%] observed against a
+nominal family-wise 2.5%, an interval that covers the nominal rate — the
+check it can pass at 50 pairs, and not a tighter one.
 
 power curve for the ci gate on the 3-point drift, growing the golden set
 with the same templates:
 
 ```
-n=240   detection 23.3%
-n=960   detection 46.7%
-n=3840  detection 93.3%
+n=240   detection 23.3% (7/30, 95% ci [11.8%, 40.9%])
+n=960   detection 46.7% (14/30, 95% ci [30.2%, 63.9%])
+n=3840  detection 93.3% (28/30, 95% ci [78.7%, 98.2%])
 ```
 
-(the 6.0% above and the 23.3% here are the same quantity at different
-sweep seeds and resample counts, both honestly low.) the shape is the
-lesson: reliably seeing a 3-point regression takes thousands of items, not
+30 pairs per size, so these are wider than the table above — the n=240
+point overlaps the 6.0% cell it duplicates, and n=960 overlaps both its
+neighbours. what does not overlap is the two ends: [11.8%, 40.9%] at 240
+against [78.7%, 98.2%] at 3840, and that gap is the whole lesson.
+reliably seeing a 3-point regression takes thousands of items, not
 hundreds. a 240-item eval is an alarm for catastrophes, not a caliper for
 drift.
 
@@ -187,6 +224,16 @@ prevent.
 - the correction is measured at exactly six slices. more slices make the
   uncorrected gate worse and the bonferroni cut smaller in lockstep;
   nothing here says where a 40-slice eval (per-language, per-locale) lands.
+
+## fixes
+
+- 2026-09-01 — every gate rate was a bare point estimate off 50 pairs,
+  which is the exact error this project argues against, and it showed:
+  the ci gate's drift detection read 6.0% in the table and 23.3% in the
+  power curve, one quantity twice, and the text called the gap a seed
+  difference. now every rate prints its 95% wilson interval and the
+  nested slice-vs-corrected comparison prints its paired count. no
+  measured rate moved.
 
 ## why python
 

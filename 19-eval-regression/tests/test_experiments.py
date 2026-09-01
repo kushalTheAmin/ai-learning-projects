@@ -2,6 +2,7 @@ import pytest
 
 from eval_harness.data import CATEGORIES
 from eval_harness.experiments import (
+    CORRECTED_GATES,
     GATE_NAMES,
     measure_gate_rates,
     power_curve,
@@ -56,12 +57,52 @@ class TestGateRates:
         with pytest.raises(ValueError, match="n_pairs"):
             measure_gate_rates(items, BASELINE, BASELINE, 0, 50, "t7")
 
+    def test_every_rate_carries_a_bracketing_interval(self):
+        items = items_for(("unit", "date"), 8)
+        rates = measure_gate_rates(items, BASELINE, BASELINE, 6, 50, "t8")
+        assert set(rates.fail_intervals) == set(GATE_NAMES)
+        for name in GATE_NAMES:
+            lo, hi = rates.fail_intervals[name]
+            assert lo <= rates.fail_rates[name] <= hi
+            assert rates.fail_counts[name] == rates.fail_rates[name] * 6
+        lo, hi = rates.improve_interval
+        assert lo <= rates.improve_rate <= hi
+        assert rates.improve_count == rates.improve_rate * 6
+
+    def test_discordance_reconciles_the_two_marginal_counts(self):
+        items = items_for(("unit", "date"), 12)
+        rates = measure_gate_rates(items, SURE, LOST, 5, 50, "t9")
+        for corrected, plain in CORRECTED_GATES:
+            spared, added = rates.discordance[corrected]
+            assert (
+                rates.fail_counts[plain] - spared + added
+                == rates.fail_counts[corrected]
+            )
+
+    def test_correction_only_ever_spares_on_a_borderline_scenario(self):
+        # the corrected gates are nested inside the plain one, so on this
+        # noise run they take pairs away and never add any
+        items = items_for(("unit", "date", "entity"), 20)
+        rates = measure_gate_rates(items, BASELINE, BASELINE, 8, 200, "t10")
+        for corrected, _ in CORRECTED_GATES:
+            assert rates.discordance[corrected][1] == 0
+
 
 class TestPowerCurve:
     def test_catastrophic_regression_detected_at_any_size(self):
         points = power_curve(SURE, LOST, (12,), 3, 50, datagen_seed=100)
         assert points[0].n_items == 12
         assert points[0].detection_rate == 1.0
+        assert points[0].detected == 3
+        assert points[0].interval[1] == 1.0
+        assert points[0].interval[0] < 1.0
+
+    def test_detection_rate_sits_inside_its_interval(self):
+        points = power_curve(BASELINE, BASELINE, (24, 48), 5, 50, datagen_seed=103)
+        for point in points:
+            lo, hi = point.interval
+            assert lo <= point.detection_rate <= hi
+            assert point.detected == point.detection_rate * 5
 
     def test_sizes_must_split_into_categories(self):
         with pytest.raises(ValueError, match="divisible"):
