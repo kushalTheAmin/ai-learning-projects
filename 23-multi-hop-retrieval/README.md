@@ -26,16 +26,23 @@ single           0.083     0.667    0.323    0.667      1.00
 iter-append      0.083     0.958    0.403    0.958      2.00
 iter-focus       0.083     1.000    0.414    1.000      2.00
 oracle           0.083     0.958    0.415    0.958      2.00
+
+paired bootstrap on answer mrr, 95% ci over 24 two-hop queries
+  iter-append vs single      diff +0.080 [+0.043, +0.119]  p(diff <= 0) = 0.0000  clears zero: yes
+  iter-focus vs iter-append  diff +0.010 [-0.011, +0.032]  p(diff <= 0) = 0.1895  clears zero: no
+  oracle vs iter-append      diff +0.011 [+0.000, +0.028]  p(diff <= 0) = 0.1275  clears zero: no
 ```
 
-single-shot leaves the answer doc out of the top 5 on a third of the two-hop queries; both iterative modes close that to 0.958 and 1.000, and pair@5 (both gold docs in the top 5, which is what a reader needs to actually justify the answer) moves the same way, 0.667 to 0.958. the paired bootstrap on per-query answer mrr says the gap is real on this set: +0.080 [+0.043, +0.119] 95% ci, p(diff <= 0) = 0.0000. the price is exactly 2.00 searches per query instead of 1.00, serial, so double retrieval latency.
+single-shot leaves the answer doc out of the top 5 on a third of the two-hop queries; both iterative modes close that to 0.958 and 1.000, and pair@5 (both gold docs in the top 5, which is what a reader needs to actually justify the answer) moves the same way, 0.667 to 0.958. the paired bootstrap on per-query answer mrr says that gap is real on this set: +0.080 [+0.043, +0.119], p(diff <= 0) = 0.0000. the price is exactly 2.00 searches per query instead of 1.00, serial, so double retrieval latency.
+
+that is the one comparison here that clears zero. every system-vs-system gap now prints with its interval, because 24 queries is not many and the two gaps between the iterative modes both straddle zero — read the ordering of the middle rows and you are reading noise.
 
 recall@1 is 0.083 for every system, including the oracle, and thats structural: the combined ranking leads with hop 1's top doc, which on a two-hop question is the capability doc, not the answer. the only queries where the answer sits at rank 1 are the two where it leaked (below). if a downstream reader consumed only the top 1 result, no amount of better hopping would help under this merge; the interleave trades rank-1 sharpness for never dropping what hop 1 already found.
 
-three results i didnt author on purpose but the harness surfaced:
+three things i didnt author on purpose but the harness surfaced:
 
-- **iter-focus beats iter-append and ties the oracle.** hop-2 querying with the bridge terms alone (focus) hit 1.000 recall@5; keeping the question words too (append) let them drag distractors back in. t03 is the clean case: the question's email words pulled the deliverability primer into the append hop 2 and the answer sank to rank 6. the intuition "keep the question for context" measurably hurt here.
-- **oracle equals extracted almost everywhere.** gold bridge coverage is 0.958 (23 of 24), so scripted extraction is nearly free on this corpus. the one miss is t01, where hop 1's top doc was the postgres tuning guide and the extractor faithfully pulled autovacuum, bloating, buffers.
+- **the focus-vs-append ordering is 4 queries wide and doesnt survive a resample.** hop-2 with the bridge terms alone hit 1.000 recall@5 against append's 0.958 — that whole gap is t03 and nothing else. on answer mrr the paired bootstrap puts focus over append at +0.010 [-0.011, +0.032], p(diff <= 0) = 0.1895, so the ordering is not distinguishable from zero. only 4 of 24 queries move at all and t10 moves the other way, append over focus by 0.133. t03 is still a clean look at the mechanism — the question's email words pulled the deliverability primer into the append hop 2 and the answer sank to rank 6 — but "keeping the question for context drags distractors back in" is a hypothesis this set cant settle, and one query is what it rests on.
+- **oracle equals extracted almost everywhere.** gold bridge coverage is 0.958 (23 of 24), so scripted extraction is nearly free on this corpus, and oracle over append is +0.011 [+0.000, +0.028] — the same too-close-to-call as above, which is the point. the one miss is t01, where hop 1's top doc was the postgres tuning guide and the extractor faithfully pulled autovacuum, bloating, buffers.
 - **the drift trap fired once and cost nothing.** conditioned on hop 1's top doc: gold on 21 queries (mrr 0.350), the answer doc itself on 2 (leak, mrr 1.000, questions whose attribute words were distinctive enough that no hop was needed), and a genuinely wrong doc once (mrr 0.333). that one poisoned hop 2 was an echo: autovacuum and friends have document frequency 1, they point straight back at the tuning guide hop 1 already ranked, and the interleave dedups it. drift damages you when the wrong doc's distinctive vocabulary is shared by yet more wrong docs, a topic cluster, not a vocabulary island. my corpus has islands, so the failure i designed for mostly refused to happen.
 
 the 8 single-hop control queries run through the same blind pipeline (nothing routes "this needs one hop"): mrr stays 1.000 under both iterative modes, so on this corpus the second hop never hurt an easy query, it just doubled its cost. 2.00 searches for zero gain is the router argument in one line.
@@ -49,6 +56,18 @@ the 8 single-hop control queries run through the same blind pipeline (nothing ro
 - lexical retrieval end to end. paraphrase questions with zero token overlap fail at hop 1 before any hop logic matters, same wall as 02 and 03.
 
 python was the right language: the entire bm25/metrics/bootstrap stack this builds on lives in 02-retrieval-eval, and reimporting it keeps two-hop scoring semantics identical to the single-hop baseline by construction instead of by promise.
+
+## fixes
+
+- 2026-09-01 — "iter-focus beats iter-append" was published as a result, bolded,
+  with a design lesson on it, off a mean gap read straight from the table while
+  the paired bootstrap two paragraphs up was only ever pointed at
+  iter-append vs single. the gap is +0.010 [-0.011, +0.032], p(diff <= 0) =
+  0.1895 — it straddles zero, 4 of 24 queries move at all, t10 moves the other
+  way, and the 0.958 -> 1.000 recall@5 headline is one query (t03). every
+  system-vs-system gap runs through `compare_rr` now and prints with its
+  interval and whether it clears zero. no measured number moved — the table is
+  what it was, the two iterative rows just stopped being an ordering.
 
 ## open questions
 

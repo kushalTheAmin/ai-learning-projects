@@ -17,7 +17,13 @@ from dataclasses import dataclass
 
 from .data import Query
 from .pipeline import Retrieval, iterative, single_shot
-from .reuse import BM25Index, mean, reciprocal_rank
+from .reuse import (
+    BM25Index,
+    PairedComparison,
+    mean,
+    paired_bootstrap,
+    reciprocal_rank,
+)
 
 RR_K = 10
 PAIR_K = 5
@@ -159,6 +165,38 @@ def drift_split(results: list[QueryResult]) -> dict[str, tuple[int, float]]:
         key: (len(values), mean(values) if values else 0.0)
         for key, values in buckets.items()
     }
+
+
+def two_hop_rr(
+    results: dict[str, list[QueryResult]], name: str
+) -> tuple[list[str], list[float]]:
+    """Per-query answer rr over the two-hop queries, with their query ids.
+
+    oracle only ever ran on two-hop queries, the rest ran blind over all
+    of them; both come back on the same 24 in the same order.
+    """
+    rows = results[name] if name == "oracle" else two_hop(results[name])
+    return [r.query.id for r in rows], [r.rr for r in rows]
+
+
+def compare_rr(
+    results: dict[str, list[QueryResult]], name_a: str, name_b: str
+) -> PairedComparison:
+    """Paired bootstrap on answer rr, system a minus system b.
+
+    Every system-vs-system gap the readme reasons from goes through here,
+    so no ordering gets published as a fact without the interval that says
+    whether it survives a resample. The pairing is checked rather than
+    assumed: run_all appends in query order, but a paired bootstrap over
+    two different query sets is wrong without ever raising.
+    """
+    ids_a, rr_a = two_hop_rr(results, name_a)
+    ids_b, rr_b = two_hop_rr(results, name_b)
+    if ids_a != ids_b:
+        raise ValueError(
+            f"{name_a} and {name_b} scored different queries; cannot pair them"
+        )
+    return paired_bootstrap(rr_a, rr_b)
 
 
 def bridge_accuracy(results: list[QueryResult]) -> float:

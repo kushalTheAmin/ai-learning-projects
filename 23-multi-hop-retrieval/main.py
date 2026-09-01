@@ -4,12 +4,12 @@ from multihop.data import load_corpus, load_queries, validate
 from multihop.evaluate import (
     aggregate,
     bridge_accuracy,
+    compare_rr,
     drift_split,
     run_all,
     single_hop,
     two_hop,
 )
-from multihop.reuse import paired_bootstrap
 
 
 def fmt(value: float | None) -> str:
@@ -36,14 +36,22 @@ def main() -> None:
             f"{fmt(agg.mrr):>8} {fmt(agg.pair5):>8} {agg.search_calls:>9.2f}"
         )
 
-    single_rr = [r.rr for r in two_hop(results["single"])]
-    append_rr = [r.rr for r in two_hop(results["iter-append"])]
-    comparison = paired_bootstrap(append_rr, single_rr)
+    n_pairs = len(two_hop(results["single"]))
     print(
-        f"\npaired bootstrap, iter-append vs single, answer mrr over {len(single_rr)} two-hop queries:"
-        f"\n  diff {comparison.diff:+.3f} [{comparison.ci.lo:+.3f}, {comparison.ci.hi:+.3f}]"
-        f" 95% ci, p(diff <= 0) = {comparison.p_le_zero:.4f}"
+        f"\npaired bootstrap on answer mrr, 95% ci over {n_pairs} two-hop queries"
     )
+    for name_a, name_b in (
+        ("iter-append", "single"),
+        ("iter-focus", "iter-append"),
+        ("oracle", "iter-append"),
+    ):
+        c = compare_rr(results, name_a, name_b)
+        clears = "yes" if c.ci.lo > 0 else "no"
+        print(
+            f"  {name_a + ' vs ' + name_b:<26}"
+            f" diff {c.diff:+.3f} [{c.ci.lo:+.3f}, {c.ci.hi:+.3f}]"
+            f"  p(diff <= 0) = {c.p_le_zero:.4f}  clears zero: {clears}"
+        )
 
     print(f"\nbridge extraction (tf*idf novel terms, top 3): gold bridge covered on "
           f"{fmt(bridge_accuracy(results['iter-append']))} of two-hop queries")

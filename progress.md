@@ -143,6 +143,73 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-01] 23 — "iter-focus beats iter-append" was published as a
+  result, bolded, one of "three results i didnt author on purpose but the
+  harness surfaced", with a design lesson hung on it: "the intuition 'keep the
+  question for context' measurably hurt here". it was read straight off two
+  means in the table. the project has a paired bootstrap — imported from 02,
+  used two paragraphs earlier — and pointed it only at iter-append vs single,
+  where the gap is real (+0.080 [+0.043, +0.119], p(diff <= 0) = 0.0000). so
+  the comparison the readme expected got its interval and the comparison it
+  discovered did not, which is the wrong way round. on answer rr the
+  focus-append gap is +0.010 [-0.011, +0.032], p(diff <= 0) = 0.1895: it
+  straddles zero, only 4 of the 24 queries move at all (t03 +0.167, t05
+  +0.083, t24 +0.133, t10 -0.133) and t10 moves the other way, and the
+  0.958 -> 1.000 recall@5 difference the bullet leads with is exactly one
+  query, t03. the fix is `two_hop_rr` and `compare_rr` in evaluate.py — every
+  system-vs-system gap goes through the paired bootstrap, and the pairing is
+  checked rather than assumed (run_all appends in query order and oracle only
+  ever ran the two-hop subset, so the lists do align, but a paired bootstrap
+  over two different query sets is wrong without ever raising) — plus main.py
+  printing all three comparisons with their intervals and a clears-zero
+  column. the third row is the one that makes the point land: oracle vs
+  iter-append is +0.011 [+0.000, +0.028], p = 0.1275, so "oracle equals
+  extracted almost everywhere" was the safe claim all along and its neighbour
+  was not, off gaps the same size. fourteen tests in a new
+  `tests/test_claims.py`: seven recompute the three comparisons and pin the
+  4-query spread and the one-query recall@5 difference, two hold the pairing
+  (all four systems on the same 24 ids, and compare_rr refusing a misaligned
+  pair), three hold the entry point to printing the intervals, four hold the
+  readme to them. the revert check splits — reverting main.py and evaluate.py
+  removes `compare_rr` so the whole new module fails to import, nothing in it
+  can pass without the fix; reverting only the readme fails exactly the 4
+  prose tests with the other 67 green, and all 4 are non-vacuous (the banned
+  phrases are matched against whitespace-normalized text, the trap from the
+  19 fix). no measured number moved: the table is character for character
+  what it was, the two iterative rows just stopped being an ordering. the
+  root index row carried the claim too and is corrected. found and fixed
+  2026-09-01
+- [medium] 23 — `bridge_accuracy` scores the extractor over the queries the
+  extractor produced terms for. `score` leaves `bridge_hit` at None when
+  `retrieval.bridge_terms` is empty, and `bridge_accuracy` filters on
+  `is not None`, so a query where extraction came back with nothing drops out
+  of the denominator instead of counting as a miss — an extraction failure
+  read as not-applicable. it is reachable: `extract_bridge_terms` returns []
+  whenever every term in hop 1's top doc is either already in the question or
+  scores 0, `iterative` then falls back to the single search, and the query
+  still has a gold bridge it demonstrably failed to find. nothing published
+  is wrong — all 24 two-hop queries extract terms on this corpus, so 0.958 is
+  23 of 24 over the full set — but the metric is defined so that the only way
+  to lose coverage is to extract the wrong terms, never to extract none, and
+  that is the direction that flatters. same shape as the 06 finding: the
+  number is not computed wrong, it is computed over the wrong population.
+  found 2026-09-01
+- [low] 23 — `drift_split` files a hop 1 that retrieved nothing under
+  "hop1 top-1 other (drift)". `hop1_top1_correct` is `bool(hop1_ranking) and
+  hop1_ranking[0] == hop1_id`, so an empty hop 1 is False, the leak branch
+  needs a non-empty ranking too, and the else arm takes it — the bucket that
+  means "the extractor was fed a wrong doc" also holds "there was no doc",
+  and the rr 0.0 that comes with it drags the drift mean down. unreachable
+  from the entry point (every committed question has known terms, so hop 1
+  always returns something) and the three buckets are otherwise exactly the
+  split the docstring promises. found 2026-09-01
+- [low] 23 — there is no focus-mode oracle. `run_all` builds the oracle with
+  `mode="append"` only, so "the gap between oracle and extracted is the price
+  of scripted extraction" is measured for append and undefined for focus,
+  while the table prints iter-focus and oracle as adjacent rows inviting the
+  comparison. the readme no longer makes that cross-mode claim, but a
+  focus-mode oracle row is one call to `iterative` and would say whether
+  focus's 1.000 recall@5 is extraction luck or the mode. found 2026-09-01
 - [fixed 2026-09-01] 19 — every gate rate in the headline table was a bare
   point estimate off 50 seed pairs, printed to one decimal and reasoned from
   in prose as if it were the gate's rate. that is the exact error the project
@@ -1207,6 +1274,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 23-multi-hop-retrieval | 2026-09-01 |
 | 19-eval-regression | 2026-09-01 |
 | 21-vector-store-persistence | 2026-09-01 |
 | 20-guardrails | 2026-08-31 |
@@ -1705,6 +1773,34 @@ half of it, that bracketing nested comparisons by their marginals would
 have retired a claim that pairing establishes, is the reason the fix prints
 discordance counts next to the intervals rather than intervals alone. four
 smaller findings came out of the same read and are listed open.
+
+23 came back clean on every mechanism and dirty on one comparison. the reuse
+of 02 is real reuse: bm25 dedupes query terms, reciprocal_rank is 1-indexed
+and cut at RR_K=10, recall slices k, the bootstrap is seeded, and the whole
+run is byte-identical across PYTHONHASHSEED. nothing from the query set
+reaches the index or the idf the extractor scores with. the pipeline does
+what the readme says term for term — interleave leads with hop 1 and dedups,
+which is exactly why recall@1 is pinned at 0.083 for every system including
+the oracle; append and focus differ only in the hop-2 query string; the
+fallback to the single search when no bridge is extracted keeps search_calls
+honest; and validate refuses a two-hop query whose bridge tokens are missing
+from either gold doc or already present in the question, so the corpus cannot
+quietly hold single-hop queries wearing a bridge. every readme number matched
+`python main.py` before the fix.
+
+the defect was in which comparisons got an interval. the project imports a
+paired bootstrap and runs it on iter-append vs single, the comparison it set
+out to make, and there the gap is real. it then read a second ordering —
+iter-focus over iter-append — straight off two means in the same table and
+published it bolded as a discovered result with a design lesson attached. it
+does not survive a resample: +0.010 [-0.011, +0.032], four queries moving out
+of 24 and one of them backwards, and the recall@5 headline under it is a
+single query. the general lesson to carry, and it is the mirror of the 06
+one: the comparison you went looking for is the one that gets the error bar,
+and the comparison that surprises you is the one that needs it more. the tell
+was structural rather than numerical — a bootstrap sitting three lines above
+a bolded "X beats Y" that never went through it. three smaller findings came
+out of the same read and are listed open.
 
 ## MECHANISMS
 
