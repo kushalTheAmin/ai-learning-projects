@@ -142,3 +142,131 @@ describe("AsyncQueue", () => {
     expect(queue.stats.sizeHighWaterMark).toBe(0);
   });
 });
+
+describe("byte-budgeted AsyncQueue", () => {
+  const byteLength = (chunk: Uint8Array) => chunk.byteLength;
+
+  it("admits up to the byte budget exactly, then blocks", async () => {
+    const queue = new AsyncQueue<Uint8Array>({ maxBytes: 10, sizeOf: byteLength });
+    await queue.push(new Uint8Array(6));
+    // 6 + 4 fills the budget exactly and must not block
+    await queue.push(new Uint8Array(4));
+    expect(queue.bufferedBytes).toBe(10);
+    let accepted = false;
+    const pending = queue.push(new Uint8Array(1)).then(() => {
+      accepted = true;
+    });
+    await tick();
+    expect(accepted).toBe(false);
+    expect(queue.stats.stalledPushes).toBe(1);
+
+    const iterator = queue[Symbol.asyncIterator]();
+    expect((await iterator.next()).value.byteLength).toBe(6);
+    await pending;
+    expect(accepted).toBe(true);
+    expect(queue.bufferedBytes).toBe(5);
+  });
+
+  it("admits several waiting small pushes on one large drain", async () => {
+    const queue = new AsyncQueue<Uint8Array>({ maxBytes: 30, sizeOf: byteLength });
+    await queue.push(new Uint8Array(25));
+    const settled = [false, false, false];
+    const pendings = settled.map((_, i) =>
+      queue.push(new Uint8Array(10)).then(() => {
+        settled[i] = true;
+      }),
+    );
+    await tick();
+    expect(settled).toEqual([false, false, false]);
+
+    const iterator = queue[Symbol.asyncIterator]();
+    expect((await iterator.next()).value.byteLength).toBe(25);
+    await Promise.all(pendings);
+    // all three 10-byte items fit the freed 30-byte budget together
+    expect(settled).toEqual([true, true, true]);
+    expect(queue.bufferedBytes).toBe(30);
+  });
+
+  it("keeps FIFO order: a small pusher cannot jump an earlier oversized one", async () => {
+    const queue = new AsyncQueue<Uint8Array>({ maxBytes: 16, sizeOf: byteLength });
+    await queue.push(new Uint8Array(10));
+    void queue.push(new Uint8Array(100));
+    // 10 + 5 would fit, but the 100-byte push is ahead in line
+    void queue.push(new Uint8Array(5));
+    await tick();
+
+    queue.close();
+    const sizes: number[] = [];
+    for await (const chunk of queue) sizes.push(chunk.byteLength);
+    expect(sizes).toEqual([10, 100, 5]);
+  });
+
+  it("admits an item larger than the whole budget into an empty buffer instead of deadlocking", async () => {
+    const queue = new AsyncQueue<Uint8Array>({ maxBytes: 16, sizeOf: byteLength });
+    await queue.push(new Uint8Array(100));
+    expect(queue.stats.oversizedPushes).toBe(1);
+    expect(queue.stats.sizeHighWaterMark).toBe(100);
+    queue.close();
+    const sizes: number[] = [];
+    for await (const chunk of queue) sizes.push(chunk.byteLength);
+    expect(sizes).toEqual([100]);
+  });
+
+  it("counts zero-size items against maxItems but never against maxBytes", async () => {
+    const unbounded = new AsyncQueue<Uint8Array>({ maxBytes: 1, sizeOf: () => 0 });
+    for (let i = 0; i < 50; i++) await unbounded.push(new Uint8Array(0));
+    expect(unbounded.stats.highWaterMark).toBe(50);
+    expect(unbounded.stats.stalledPushes).toBe(0);
+
+    const capped = new AsyncQueue<Uint8Array>({ maxItems: 3, maxBytes: 1, sizeOf: () => 0 });
+    for (let i = 0; i < 3; i++) await capped.push(new Uint8Array(0));
+    let accepted = false;
+    void capped.push(new Uint8Array(0)).then(() => {
+      accepted = true;
+    });
+    await tick();
+    expect(accepted).toBe(false);
+  });
+
+  it("applies whichever cap binds first when both are set", async () => {
+    const itemBound = new AsyncQueue<Uint8Array>({ maxItems: 2, maxBytes: 100, sizeOf: byteLength });
+    await itemBound.push(new Uint8Array(10));
+    await itemBound.push(new Uint8Array(10));
+    let acceptedByItems = false;
+    void itemBound.push(new Uint8Array(10)).then(() => {
+      acceptedByItems = true;
+    });
+    await tick();
+    expect(acceptedByItems).toBe(false);
+
+    const byteBound = new AsyncQueue<Uint8Array>({ maxItems: 10, maxBytes: 15, sizeOf: byteLength });
+    await byteBound.push(new Uint8Array(10));
+    let acceptedByBytes = false;
+    void byteBound.push(new Uint8Array(10)).then(() => {
+      acceptedByBytes = true;
+    });
+    await tick();
+    expect(acceptedByBytes).toBe(false);
+  });
+
+  it("rejects a sizeOf result that is negative or not finite", async () => {
+    const negative = new AsyncQueue<number>({ maxBytes: 10, sizeOf: () => -1 });
+    await expect(negative.push(1)).rejects.toThrow(TypeError);
+    const nan = new AsyncQueue<number>({ maxBytes: 10, sizeOf: () => NaN });
+    await expect(nan.push(1)).rejects.toThrow(TypeError);
+  });
+
+  it("validates the options form", () => {
+    expect(() => new AsyncQueue<number>({ maxBytes: 8 })).toThrow(TypeError);
+    expect(() => new AsyncQueue<number>({ maxBytes: 0, sizeOf: () => 1 })).toThrow(RangeError);
+    expect(() => new AsyncQueue<number>({ maxItems: 0 })).toThrow(RangeError);
+  });
+
+  it("keeps the positional form's sizeOf as statistics only", async () => {
+    const queue = new AsyncQueue<Uint8Array>(3, byteLength);
+    for (let i = 0; i < 3; i++) await queue.push(new Uint8Array(1000));
+    // never blocked: 3000 buffered bytes are measured, not enforced
+    expect(queue.stats.stalledPushes).toBe(0);
+    expect(queue.stats.sizeHighWaterMark).toBe(3000);
+  });
+});

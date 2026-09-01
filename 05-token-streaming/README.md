@@ -48,7 +48,20 @@ that, from scratch, and measures each one.
 - **`src/queue.ts`** — bounded async queue with producer-side backpressure:
   `await push()` doesn't resolve while the buffer is full, so the producer
   runs at the consumer's pace. Records its own high-water mark and stall
-  time.
+  time. Capacity comes in two currencies: the positional form counts items,
+  and the options form (`{ maxBytes, sizeOf }`) budgets bytes, admitting an
+  item only while the buffered total stays inside the budget. One rule keeps
+  the byte budget deadlock free: an item is always admitted into an empty
+  buffer, even when it alone exceeds the budget, so the true bound is
+  max(budget, largest single item) and `stats.oversizedPushes` counts how
+  often that escape hatch fired.
+- **`src/byteQueueStudy.ts`**: the measurement rig for measurement 6, a
+  seeded heavy-tailed chunk-size workload (90% tiny 3..30 bytes, 9% medium
+  200..2000, 1% huge 16384..32768), seeded shuffles, and a replay harness
+  where the producer pushes steadily or in bursts and the consumer takes one
+  chunk per macrotask tick, counting idle ticks, stalls, and byte
+  high-water. Every reported number is a count or a byte total, so the runs
+  reproduce exactly.
 - **`src/pipeline.ts`** — chunks → SSE events → accumulated text and
   tool-call arguments, with a partial-parse snapshot after every fragment.
 
@@ -56,8 +69,8 @@ that, from scratch, and measures each one.
 
 ```
 npm ci
-npm test        # 77 tests
-npm start       # the five measurements below
+npm test        # 98 tests
+npm start       # the six measurements below
 npm run typecheck
 ```
 
@@ -154,6 +167,68 @@ baseline at 64KB but the same shape. The win lives in `view()`, and `view()`
 comes with a contract: the value is the parser's live tree, valid until the
 next call, never to be mutated. Cheap reads or owned reads, pick per call.
 
+**6. Byte-budgeted backpressure.** Measurement 3 capped the queue at 8
+chunks and it worked because the fixture's chunks are all 1..24 bytes. This
+one asks what happens when chunk sizes stop being polite. The workload is
+2000 seeded chunks, 620116 bytes total, sizes 3..32706 bytes (median 19,
+span 10902x): mostly single-token deltas, an occasional huge tool-argument
+fragment. The tail owns the memory story, 16 chunks over 4096 bytes are
+0.8% of the chunks and 63.0% of the bytes.
+
+First, what a chunk count actually promises. Same workload, six arrival
+orders, steady producer, consumer takes one chunk per tick:
+
+| ordering | count cap 8, peak bytes | byte cap 65536, peak bytes |
+|---|---|---|
+| as generated | 49061 | 65536 |
+| shuffle 1 | 59971 | 65536 |
+| shuffle 2 | 54583 | 65536 |
+| shuffle 3 | 35570 | 65536 |
+| shuffle 4 | 35750 | 65536 |
+| huge first | 221864 | 65536 |
+
+The count cap's memory is ordering luck: the five seeded orders sit between
+35570 and 59971 bytes, and the adversarial order (all huge chunks first)
+holds 221864, 4.5x the friendliest seed, because eight slots filled with
+32KB chunks cost what eight 32KB chunks cost. Its only real promise is
+8 x 32706 = 261648 bytes. The byte cap holds exactly 65536 under every
+ordering, including the hostile one; a budget in the unit memory is spent
+in cannot be gamed by arrival order.
+
+Second, what the promise costs. To promise 64KB with a chunk count on this
+workload you must cap at 2 chunks (2 x 32706 = 65412). Bursty producer,
+bursts of 50 chunks then 25 silent ticks, consumer takes one chunk per tick:
+
+| queue | worst-case bytes | peak bytes | mean buffered bytes | consumer idle ticks | stalled pushes |
+|---|---|---|---|---|---|
+| unbounded | none | 293111 | 154359 | 0 | 0 |
+| count cap 8 | 261648 | 49061 | 2407 | 624 | 1679 |
+| count cap 2 | 65412 | 33623 | 616 | 858 | 1919 |
+| byte cap 65536 | 65536 | 65536 | 46412 | 0 | 28 |
+
+The two caps that promise the same 64KB behave nothing alike. Count cap 2
+holds a mean of 616 buffered bytes, two typically-tiny chunks of run-ahead,
+so every silent gap starves the consumer: 858 idle ticks on a 2000-chunk
+stream, a 43% delivery-time tax. The byte cap buffers a mean of 46412
+bytes, hundreds of tiny chunks deep when chunks are tiny and two chunks
+deep when they are huge, rides out every gap with zero idle ticks, and
+stalls the producer 28 times instead of 1919. That is the whole argument:
+a count cap prices every chunk at one slot, so it must assume the worst
+chunk everywhere; a byte cap prices each chunk at its size, so depth floats
+exactly where depth is cheap. The unbounded row is the price of refusing to
+choose, peak 293111 bytes, nearly half the stream buffered at once.
+
+Two edges worth naming. A budget below the largest chunk cannot hold: byte
+cap 4096 on this workload peaks at 32706 bytes, the largest chunk, with 16
+oversized admissions, because an item bigger than the whole budget is
+admitted alone into an empty buffer rather than deadlocking; the bound is
+max(budget, largest item), and the stats say every time it was the item.
+And the uniform control (1..24-byte chunks) shows why measurement 3 was
+never wrong: count cap 8 peaks at 160 bytes of its 192-byte worst case;
+near-uniform sizes are the one regime where a chunk count is an honest
+memory bound. The full pipeline runs behind a 256-byte-capped queue and
+parses the fixture byte-identically, so the budget costs no correctness.
+
 ## Design notes, and the honest parts
 
 - **A partial value is a snapshot, not a promise.** `"12` may become `125`,
@@ -199,7 +274,21 @@ next call, never to be mutated. Cheap reads or owned reads, pick per call.
   talking.** With a consumer-bound pipeline, pacing the producer is free.
   With a bursty consumer, a capacity of 8 would add latency the unbounded
   queue absorbs — the right capacity is a claim about burst shape, and this
-  demo doesn't measure that.
+  demo doesn't measure that. Measurement 6 measures exactly that shape for
+  the producer side: bursts against a too-shallow cap starve the consumer.
+- **FIFO under a byte budget needs an explicit rule.** Under an item cap,
+  "the buffer has room" and "a producer is waiting" cannot both be true, so
+  admission never has to think about the waiting line. Under a byte budget
+  they can: a tiny chunk fits while a huge one waits, and admitting the tiny
+  one would reorder the stream. The queue's first byte-capped draft had
+  exactly that bug; the FIFO test caught a later 5-byte push overtaking a
+  pending 100-byte one, and admission now defers to the waiting line before
+  it checks the budget.
+- **The idle-tick currency belongs to the harness.** The consumer pays one
+  tick per chunk whatever its size, so idle ticks price starvation in
+  chunks, not bytes. A consumer whose cost scales with chunk size would
+  shift the starvation numbers; the memory columns would not move, they are
+  properties of admission alone.
 
 ## fixes
 
@@ -215,9 +304,20 @@ next call, never to be mutated. Cheap reads or owned reads, pick per call.
 
 ## Open questions
 
-- The queue's capacity is in chunks, not bytes — a byte-budgeted queue is
-  what a real memory ceiling wants. What does the high-water story look
-  like when chunk sizes vary by 1000x?
+- The byte budget cannot bound below the largest item, but chunks are just
+  bytes: the queue could slice an oversized chunk into budget-sized pieces
+  instead of admitting it whole. That restores the strict bound at the cost
+  of more queue operations per chunk and a consumer that must tolerate
+  arbitrary re-chunking; where the slicing overhead crosses the memory win
+  is unmeasured.
+- `sizeOf` is trusted, and for byte chunks it is exact. For decoded objects
+  (22 measures its wire events by serialized length) it is an estimate, and
+  estimate error rescales the real memory bound by exactly the error; how
+  wrong a practical estimator runs on real event mixes is unmeasured.
+- The run-ahead a budget buys depends on burst shape: 65536 bytes held a
+  mean of 46412 buffered under 50-chunk bursts and never starved, but a
+  burst larger than the budget would starve the byte cap too. The
+  burst-size-over-budget sweep that maps where that starts is unrun.
 - The SSE parser buffers one line, but a malicious or broken stream can
   send an unbounded line with no terminator. Where's the cap, and what's
   the right failure mode when it's hit?

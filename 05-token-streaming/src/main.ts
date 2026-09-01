@@ -24,6 +24,15 @@ import { SseParser } from "./sse.js";
 import { parsePartialJson } from "./partialJson.js";
 import { ResumableJsonParser } from "./resumableJson.js";
 import { makeToolCallJson, replayTimed } from "./resumableBench.js";
+import {
+  heavyTailedSizes,
+  uniformSizes,
+  shuffled,
+  summarizeWorkload,
+  replayThroughQueue,
+  type ProducerPacing,
+  type StudyRun,
+} from "./byteQueueStudy.js";
 
 const SEED = 20260826;
 
@@ -242,8 +251,124 @@ function resumableDemo(): void {
   );
 }
 
+async function byteQueueDemo(): Promise<void> {
+  console.log("");
+  console.log("== 6. byte-budgeted backpressure: where counting chunks stops working ==");
+  const seed = 20260901;
+  const sizes = heavyTailedSizes(2000, seed);
+  const summary = summarizeWorkload(sizes, 4096);
+  console.log(
+    `workload: ${summary.count} chunks, ${summary.totalBytes} bytes total, sizes ` +
+      `${summary.minSize}..${summary.maxSize} bytes (median ${summary.medianSize}, ` +
+      `span ${fmt(summary.maxSize / summary.minSize, 0)}x)`,
+  );
+  console.log(
+    `  chunks over 4096 bytes: ${summary.hugeCount} of ${summary.count} ` +
+      `(${fmt((100 * summary.hugeCount) / summary.count)}% of chunks, ` +
+      `${fmt(100 * summary.hugeByteShare)}% of the bytes)`,
+  );
+
+  console.log("");
+  console.log("memory high-water by arrival order (steady producer, consumer takes 1 chunk per tick):");
+  console.log(`  ${"ordering".padEnd(14)} ${"count cap 8".padStart(12)} ${"byte cap 65536".padStart(15)}`);
+  const orderings: { label: string; order: number[] }[] = [
+    { label: "as generated", order: sizes },
+    { label: "shuffle 1", order: shuffled(sizes, 1) },
+    { label: "shuffle 2", order: shuffled(sizes, 2) },
+    { label: "shuffle 3", order: shuffled(sizes, 3) },
+    { label: "shuffle 4", order: shuffled(sizes, 4) },
+    { label: "huge first", order: [...sizes].sort((a, b) => b - a) },
+  ];
+  for (const { label, order } of orderings) {
+    const count8 = await replayThroughQueue(order, { maxItems: 8 });
+    const byte64 = await replayThroughQueue(order, { maxBytes: 65536 });
+    console.log(
+      `  ${label.padEnd(14)} ${`${count8.bytesHighWater} B`.padStart(12)} ${`${byte64.bytesHighWater} B`.padStart(15)}`,
+    );
+  }
+  console.log(
+    `  count cap 8 can only promise 8 x ${summary.maxSize} = ${8 * summary.maxSize} bytes;` +
+      ` the byte cap promises 65536 under every ordering`,
+  );
+
+  console.log("");
+  const pacing: ProducerPacing = { burstChunks: 50, gapTicks: 25 };
+  console.log(
+    `bursty producer (bursts of ${pacing.burstChunks} chunks, ${pacing.gapTicks}-tick gaps), same workload:`,
+  );
+  console.log(
+    `  ${"queue".padEnd(16)} ${"worst-case B".padStart(12)} ${"peak B".padStart(8)}` +
+      ` ${"mean buffered B".padStart(15)} ${"idle ticks".padStart(10)} ${"stalls".padStart(7)}`,
+  );
+  const burstConfigs: { label: string; worstCase: string; run: StudyRun }[] = [
+    {
+      label: "unbounded",
+      worstCase: "none",
+      run: await replayThroughQueue(sizes, {}, pacing),
+    },
+    {
+      label: "count cap 8",
+      worstCase: String(8 * summary.maxSize),
+      run: await replayThroughQueue(sizes, { maxItems: 8 }, pacing),
+    },
+    {
+      label: "count cap 2",
+      worstCase: String(2 * summary.maxSize),
+      run: await replayThroughQueue(sizes, { maxItems: 2 }, pacing),
+    },
+    {
+      label: "byte cap 65536",
+      worstCase: "65536",
+      run: await replayThroughQueue(sizes, { maxBytes: 65536 }, pacing),
+    },
+  ];
+  for (const { label, worstCase, run } of burstConfigs) {
+    console.log(
+      `  ${label.padEnd(16)} ${worstCase.padStart(12)} ${String(run.bytesHighWater).padStart(8)}` +
+        ` ${fmt(run.meanBufferedBytes, 0).padStart(15)} ${String(run.consumerIdleTicks).padStart(10)}` +
+        ` ${String(run.stalledPushes).padStart(7)}`,
+    );
+  }
+  console.log(
+    "  count cap 2 is the only chunk count that matches the byte cap's 64 KB promise, and it" +
+      "\n  pays for it in consumer idle ticks; the byte cap holds the same promise with deep run-ahead",
+  );
+
+  console.log("");
+  const tight = await replayThroughQueue(sizes, { maxBytes: 4096 });
+  console.log(
+    `budget below the largest chunk: byte cap 4096 admits an oversized chunk only into an empty buffer` +
+      `\n  bytes high-water ${tight.bytesHighWater} (= largest chunk, not the budget), oversized admissions ` +
+      `${tight.oversizedPushes}, all ${tight.consumed} chunks delivered`,
+  );
+
+  const uniform = uniformSizes(2000, seed + 1, 1, 24);
+  const uniformCount8 = await replayThroughQueue(uniform, { maxItems: 8 }, pacing);
+  const uniformByte192 = await replayThroughQueue(uniform, { maxBytes: 192 }, pacing);
+  console.log(
+    `uniform control (1..24 byte chunks): count cap 8 peak ${uniformCount8.bytesHighWater} B of its ` +
+      `${8 * 24} B worst case,\n  byte cap 192 peak ${uniformByte192.bytesHighWater} B — near-uniform sizes` +
+      ` are the case where a chunk count was an honest memory bound`,
+  );
+
+  const bytes = scriptedSseBytes();
+  const queue = new AsyncQueue<Uint8Array>({ maxBytes: 256, sizeOf: (chunk) => chunk.byteLength });
+  const producer = (async () => {
+    for await (const chunk of chunkBytes(bytes, { seed: SEED, maxChunkBytes: 24, delayMs: 0 })) {
+      await queue.push(chunk);
+    }
+    queue.close();
+  })();
+  const piped = await runPipeline(queue, bytes.length);
+  await producer;
+  const identical = piped.text === ASSISTANT_TEXT && JSON.stringify(piped.toolArgs) === JSON.stringify(TOOL_ARGS);
+  console.log(`pipeline behind a 256-byte-capped queue parses the fixture identically: ${identical}`);
+  if (!identical) throw new Error("byte-capped pipeline mismatch");
+}
+
 await streamingDemo();
 await partialJsonDemo();
 await backpressureDemo();
 await fuzzDemo();
 resumableDemo();
+await byteQueueDemo();
