@@ -115,7 +115,7 @@ export function buildText(rng: Rng, targetTokens: number): string {
   return text;
 }
 
-function makeAnswer(
+export function makeAnswer(
   id: string,
   rng: Rng,
   quality: number,

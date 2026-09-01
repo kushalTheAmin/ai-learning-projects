@@ -34,6 +34,7 @@ npm ci
 npm run typecheck
 npm test
 npm start
+npm run start:direction
 ```
 
 node 20+. no network, no api key, no model download.
@@ -166,6 +167,84 @@ other scored as perfect.
   adaptive protocols that only pay the second call on low-margin items, is not
   built here
 
+## the direction extension: reading which way the flips point
+
+answers the first two open threads below with new code and no change to the
+harness: the flip rate conflates position bias with noise, so this extension
+reads the direction of each flip instead of just counting them, then sweeps
+authored bonus against quality gap to map when an arrangement bias flips an
+a/b verdict. same rules as everything above: the judges are scripted, the
+position bonuses are authored constants, so the statistic is being graded
+against a ground truth the harness holds. run it with `npm run start:direction`
+(seed 7, printed tables are what is quoted here).
+
+the statistic: over both-order calls, count how often the winner was the
+answer presented first. a pair whose two calls agree puts its winner in the
+first slot exactly once, so consistency contributes 0.5 by construction. only
+flips move the number, and only by their net direction: a flip where both
+calls picked their first-presented answer pushes up, both picking the second
+pushes down, and noise produces the two shapes in equal measure. first-win
+rate minus 0.5 is the position lean; symmetric noise cancels out of it.
+
+```
+judge       flip rate  toward-1st  toward-2nd  first-win  lean
+calibrated  0.007      0.000       0.007       0.497      -0.003
+lenient     0.007      0.000       0.007       0.497      -0.003
+primacy     0.287      0.287       0.000       0.643      0.143
+verbose     0.060      0.027       0.033       0.497      -0.003
+self-pref   0.013      0.007       0.007       0.500      0.000
+coin        0.507      0.253       0.253       0.500      0.000
+```
+
+ranked by flip rate, coin is the worst position offender on the board. ranked
+by lean, coin reads 0.000 exactly: its 76 flips split 38 toward-first, 38
+toward-second, pure noise canceling itself. primacy flips fewer pairs (0.287)
+but every single one lands toward-first, lean +0.143. that is the separation
+the thread asked for: flip rate measures self-disagreement from any cause,
+lean isolates the directional part, and the two together read primacy as
+"biased" and coin as "useless", two verdicts one number kept conflating.
+
+validated against authored ground truth, lean tracks the planted bonus:
+
+```
+bonus   0.00    0.03    0.06    0.09    0.12    0.15    0.20    0.25    0.30
+lean    0.000   0.013   0.007   0.040   0.070   0.117   0.187   0.253   0.310
+```
+
+monotone, zero at zero, and grows with the bonus. but the magnitude is not a
+bonus estimate. the expectation this was coded under was that more noise
+dilutes the signal; measured, 3x noise (sigma 0.12) reads the same bonus
+larger, 0.117 to 0.167 at bonus 0.15, 0.070 to 0.120 at 0.12. the mechanism:
+a clean pair whose gap exceeds the bonus never flips, so at the cast's small
+noise the bonus only sways the small-gap pairs, and extra noise hands it
+pairs it could not win alone. so lean is a detector with a sign, not a
+magnitude estimator; inverting it needs the noise floor and the gap
+distribution, and the noise floor is exactly what calibrated's flip rate was
+already measuring.
+
+the suppression map, challenger win rate under champion-first presentation,
+truth 0.500, 200 pairs per cell, exact quality gap per column:
+
+```
+bonus   gap 0.05  gap 0.10  gap 0.15  gap 0.20  gap 0.30
+0.00    0.485     0.485     0.500     0.500     0.500
+0.05    0.265     0.420     0.470     0.500     0.500
+0.10    0.070     0.275     0.425     0.485     0.500
+0.15    0.015     0.090     0.270     0.455     0.500
+0.20    0.000     0.010     0.100     0.285     0.475
+```
+
+the knee sits where gap equals bonus: at bonus 0.15 the gap-0.15 column reads
+0.270, roughly half the truly-better challengers erased, and the noise
+(sigma 0.04 per answer, 0.057 per comparison) sets how soft the knee is. read
+it as a verdict-flip map: an incumbent-first eval under a 0.15-primacy judge
+reports near zero for challengers whose edge rides on gaps at 0.05, and is
+honest again by gap 0.30. the original champion set's 0.380 is this map
+integrated over its own gap draw. the operational loop this buys: both-order
+calls are already paid for whenever the flip diagnostic runs, so lean is a
+free extra column, and a lean materially off zero says exactly which of your
+champion-first numbers, the small-gap ones, are fiction.
+
 ## fixes
 
 - 2026-08-31 — the champion set credited order randomization with 0.485, which
@@ -187,13 +266,17 @@ prng and 08's token estimator and pricing rather than rewriting them.
 
 ## open questions
 
-- flip rate conflates position bias with noise; two coin-flip calls disagree
-  half the time with zero position preference. a directional flip statistic
-  (how often does the winner follow the presentation slot, net) would separate
-  them, and this harness has the ground truth to validate it against
-- the champion set plants a 0.15 position bonus against gaps of 0.08 to 0.4;
-  the suppression (0.380) is one point on a curve. sweeping bonus against gap
-  distribution would map when an arrangement bias flips a real a/b verdict
+- lean detects and signs a position bias but does not size it: the same 0.15
+  bonus reads 0.117 or 0.167 depending on the noise floor. matching the
+  measured (flip rate, lean) pair against a simulated grid, with calibrated
+  pinning the noise floor, could bracket the bonus; unmeasured
+- the suppression map has exact gaps per column; a real eval has a gap
+  distribution, so its suppression should be the map integrated over the gap
+  histogram. checking that integral against the champion set's measured 0.380
+  would validate the map as a predictor, not just a description
+- lean needs both orders. a randomized single-call eval still correlates
+  winner with slot, a weaker signal at half the cost, and its statistical
+  power against both-order lean at an equal call budget is unmeasured
 - position bias here is constant per judge. real models show primacy on some
   prompt shapes and recency on others; a per-item-length or per-domain bias
   model would test whether the flip diagnostic still localizes the damage
