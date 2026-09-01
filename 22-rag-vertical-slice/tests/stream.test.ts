@@ -136,3 +136,53 @@ describe("streamEvents", () => {
     expect(run.stalledPushes).toBe(0);
   });
 });
+
+describe("byte-budgeted streaming", () => {
+  const tokenEvent = (chars: number): WireEvent => ({
+    event: "token",
+    data: JSON.stringify({ text: "x".repeat(chars) }),
+  });
+  // 12 similar token events with one done-sized event at the end, the mix
+  // a real /ask response puts on the wire.
+  const mixed: WireEvent[] = [...Array.from({ length: 12 }, () => tokenEvent(20)), tokenEvent(200)];
+  const wireSizes = mixed.map((event) => serializeEvent(event).length);
+  const totalWireBytes = wireSizes.reduce((a, b) => a + b, 0);
+
+  it("pins buffered bytes under the budget where an equal-window event cap cannot", async () => {
+    const eventCap = await runSlowClient("events-8", mixed, 8);
+    const lastWindow = wireSizes.slice(-8).reduce((a, b) => a + b, 0);
+    expect(eventCap.highWaterItems).toBe(8);
+    expect(eventCap.highWaterBytes).toBe(lastWindow);
+    expect(eventCap.highWaterBytes).toBeGreaterThan(256);
+
+    const byteCap = await runSlowClient("bytes-256", mixed, { maxBytes: 256 });
+    expect(byteCap.highWaterBytes).toBeLessThanOrEqual(256);
+    expect(byteCap.oversizedPushes).toBe(0);
+    expect(byteCap.events).toBe(mixed.length);
+    expect(byteCap.bytes).toBe(totalWireBytes);
+    expect(byteCap.stalledPushes).toBeGreaterThan(eventCap.stalledPushes);
+  });
+
+  it("admits an event larger than the whole budget alone and counts it", async () => {
+    const events = [tokenEvent(4), tokenEvent(200), tokenEvent(4)];
+    const bigWire = serializeEvent(events[1] as WireEvent).length;
+    expect(bigWire).toBeGreaterThan(64);
+    const run = await runSlowClient("bytes-64", events, { maxBytes: 64 });
+    expect(run.events).toBe(3);
+    expect(run.oversizedPushes).toBe(1);
+    expect(run.highWaterBytes).toBe(bigWire);
+  });
+
+  it("delivers identical events and bytes under every capacity currency", async () => {
+    const runs = await Promise.all([
+      runSlowClient("unbounded", mixed, Infinity),
+      runSlowClient("events-4", mixed, 4),
+      runSlowClient("bytes-128", mixed, { maxBytes: 128 }),
+      runSlowClient("both", mixed, { maxItems: 4, maxBytes: 128 }),
+    ]);
+    for (const run of runs) {
+      expect(run.events).toBe(mixed.length);
+      expect(run.bytes).toBe(totalWireBytes);
+    }
+  });
+});

@@ -9,9 +9,9 @@
 
 import type { AddressInfo } from "node:net";
 import { loadDocs, loadQueries } from "./data.js";
-import { createRagServer, QUEUE_CAPACITY } from "./server.js";
+import { computeUsage, createRagServer, QUEUE_CAPACITY } from "./server.js";
 import { DocIndex } from "./retrieval.js";
-import { answerPieces, answerText, MIN_OVERLAP } from "./model.js";
+import { answerPieces, answerText, MIN_OVERLAP, scoredAnswer } from "./model.js";
 import {
   captureKFacts,
   livePolicyRow,
@@ -36,7 +36,7 @@ import {
   type ScoredQuery,
 } from "./floorsweep.js";
 import { runSlowClient } from "./backpressure.js";
-import type { WireEvent } from "./stream.js";
+import { serializeEvent, type QueueLimit, type WireEvent } from "./stream.js";
 
 function fmt(value: number, digits: number): string {
   return value.toFixed(digits);
@@ -295,32 +295,79 @@ async function main(): Promise<void> {
     console.log();
 
     // --- backpressure against a slow client ---
-    console.log("--- backpressure: slow client (every write blocks one macrotask), bounded vs unbounded queue ---");
+    console.log("--- backpressure: slow client (every write blocks one macrotask), event cap vs byte budget ---");
     const index = new DocIndex(docs);
-    const longest = queries
-      .map((q) => answerText(q.query, index.topK(q.query, 3).map((r) => r.doc)))
-      .reduce((a, b) => (b.length > a.length ? b : a), "");
+    const longestCase = queries
+      .map((q) => ({ query: q.query, answer: answerText(q.query, index.topK(q.query, 3).map((r) => r.doc)) }))
+      .reduce((a, b) => (b.answer.length > a.answer.length ? b : a));
     const topDoc = index.topK(first.query, 1)[0];
     if (topDoc === undefined) throw new Error("no docs indexed");
-    const dumpText = topDoc.doc.text;
-    const cases: [string, string][] = [
-      [`longest golden answer (${answerPieces(longest).length} pieces)`, longest],
-      [`worst case, model dumps the whole top doc (${answerPieces(dumpText).length} pieces)`, dumpText],
+    const requestEvents = (question: string, answer: string): WireEvent[] => {
+      const retrieved = index.topK(question, 3);
+      const context = retrieved.map((r) => r.doc);
+      return [
+        {
+          event: "meta",
+          data: JSON.stringify({
+            requestId: "r0001",
+            k: 3,
+            retrieved: retrieved.map((r) => ({ docId: r.doc.id, score: Number(r.score.toFixed(4)) })),
+          }),
+        },
+        ...answerPieces(answer).map((piece) => ({ event: "token", data: JSON.stringify({ text: piece }) })),
+        {
+          event: "done",
+          data: JSON.stringify({
+            outcome: "answered",
+            bestOverlap: scoredAnswer(question, context).bestOverlap,
+            usage: computeUsage(question, context, answer),
+          }),
+        },
+      ];
+    };
+    const cases: [string, WireEvent[]][] = [
+      ["longest golden answer", requestEvents(longestCase.query, longestCase.answer)],
+      ["worst case, model dumps the whole top doc", requestEvents(first.query, topDoc.doc.text)],
     ];
-    for (const [label, text] of cases) {
-      const events: WireEvent[] = answerPieces(text).map((piece) => ({
-        event: "token",
-        data: JSON.stringify({ text: piece }),
-      }));
-      const unbounded = await runSlowClient("unbounded", events, Infinity);
-      const bounded = await runSlowClient(`bounded(${QUEUE_CAPACITY})`, events, QUEUE_CAPACITY);
-      console.log(`${label}:`);
+    const limits: [string, QueueLimit][] = [
+      ["unbounded", Infinity],
+      [`events-${QUEUE_CAPACITY}`, QUEUE_CAPACITY],
+      ["bytes-512", { maxBytes: 512 }],
+      ["bytes-128", { maxBytes: 128 }],
+    ];
+    for (const [label, events] of cases) {
+      const wire = events.map((event) => serializeEvent(event).length);
+      const tokenSizes = wire.slice(1, -1);
       console.log(
-        `  unbounded   high-water ${unbounded.highWaterItems} events / ${unbounded.highWaterBytes} bytes buffered, ${unbounded.stalledPushes} stalled pushes`,
+        `${label}: ${events.length} events / ${wire.reduce((a, b) => a + b, 0)} wire bytes (meta ${wire[0]} B, tokens ${Math.min(...tokenSizes)}-${Math.max(...tokenSizes)} B, done ${wire[wire.length - 1]} B)`,
       );
+      for (const [limitLabel, limit] of limits) {
+        const run = await runSlowClient(limitLabel, events, limit);
+        console.log(
+          `  ${limitLabel.padEnd(10)} high-water ${pad(run.highWaterItems, 3)} events / ${pad(run.highWaterBytes, 5)} bytes buffered, ${pad(run.stalledPushes, 3)} stalled pushes, ${run.oversizedPushes} oversized admissions`,
+        );
+      }
+    }
+    console.log();
+
+    // --- live server on a byte budget: same behavior, bytes pinned ---
+    const byteBudget = 1024;
+    const byteRag = createRagServer(docs, { queue: { maxBytes: byteBudget } });
+    await new Promise<void>((resolve) => byteRag.server.listen(0, "127.0.0.1", resolve));
+    const byteUrl = `http://127.0.0.1:${(byteRag.server.address() as AddressInfo).port}`;
+    try {
+      const { row: byteRow } = await evalGolden(byteUrl, queries, 3);
+      if (JSON.stringify(byteRow) !== JSON.stringify(k3)) {
+        throw new Error("byte-budget server eval row diverges from the event-cap server");
+      }
+      const maxBytesHigh = byteRag.log.reduce((acc, entry) => Math.max(acc, entry.queueHighWaterBytes), 0);
+      const oversizedTotal = byteRag.log.reduce((acc, entry) => acc + entry.queueOversizedPushes, 0);
       console.log(
-        `  bounded(${QUEUE_CAPACITY})  high-water ${bounded.highWaterItems} events / ${bounded.highWaterBytes} bytes buffered, ${bounded.stalledPushes} stalled pushes (producer paced by the client)`,
+        `live /ask on queue {maxBytes: ${byteBudget}}: k=3 eval row identical to the event-cap server (checked field by field), queue high-water ${maxBytesHigh} bytes and ${oversizedTotal} oversized admissions across ${byteRag.log.length} requests — with a fast local client the budget currency changes nothing observable`,
       );
+    } finally {
+      byteRag.server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => byteRag.server.close((err) => (err ? reject(err) : resolve())));
     }
     console.log();
 
@@ -372,9 +419,10 @@ async function main(): Promise<void> {
     // --- totals from the server's own log ---
     const totalCost = log.reduce((acc, entry) => acc + entry.usage.costUsd, 0);
     const maxQueueHighWater = log.reduce((acc, entry) => Math.max(acc, entry.queueHighWater), 0);
+    const maxQueueHighWaterBytes = log.reduce((acc, entry) => Math.max(acc, entry.queueHighWaterBytes), 0);
     console.log("--- request log totals ---");
     console.log(
-      `${log.length} requests served, total simulated spend $${fmt(totalCost, 4)}, per-request queue high-water never above ${maxQueueHighWater} (capacity ${QUEUE_CAPACITY})`,
+      `${log.length} requests served, total simulated spend $${fmt(totalCost, 4)}, per-request queue high-water never above ${maxQueueHighWater} events / ${maxQueueHighWaterBytes} bytes (capacity ${QUEUE_CAPACITY} events)`,
     );
   } finally {
     server.closeAllConnections();

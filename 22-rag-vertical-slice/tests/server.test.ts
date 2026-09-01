@@ -145,6 +145,57 @@ describe("POST /ask", () => {
   });
 });
 
+describe("byte-budgeted event queue", () => {
+  const withServer = async <T>(
+    options: Parameters<typeof createRagServer>[1],
+    run: (url: string, server: RagServer) => Promise<T>,
+  ): Promise<T> => {
+    const byteRag = createRagServer(docs, options);
+    await new Promise<void>((resolve) => byteRag.server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${(byteRag.server.address() as AddressInfo).port}`;
+    try {
+      return await run(url, byteRag);
+    } finally {
+      byteRag.server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => byteRag.server.close((err) => (err ? reject(err) : resolve())));
+    }
+  };
+
+  it("serves a golden question identically to the event-cap server", async () => {
+    const eventCap = await ask(baseUrl, { question: q01.query, k: 3 });
+    await withServer({ queue: { maxBytes: 2048 } }, async (url, byteRag) => {
+      const byteCap = await ask(url, { question: q01.query, k: 3 });
+      expect(byteCap.status).toBe(200);
+      expect(byteCap.answer).toBe(eventCap.answer);
+      expect(byteCap.usage).toEqual(eventCap.usage);
+      expect(byteCap.totalBytes).toBe(eventCap.totalBytes);
+      const entry = byteRag.log[byteRag.log.length - 1]!;
+      expect(entry.queueHighWaterBytes).toBeLessThanOrEqual(2048);
+      expect(entry.queueOversizedPushes).toBe(0);
+    });
+  });
+
+  it("streams a complete answer even when the budget is below one event", async () => {
+    await withServer({ queue: { maxBytes: 16 } }, async (url, byteRag) => {
+      const result = await ask(url, { question: q01.query, k: 3 });
+      expect(result.status).toBe(200);
+      expect(result.answer).toContain(q01.answer);
+      expect(result.totalBytes).toBe(result.wireBytes);
+      const entry = byteRag.log[byteRag.log.length - 1]!;
+      expect(entry.events).toBe(result.tokenEvents + 2);
+      // A fast local client can drain every event before it buffers, so the
+      // bytes high-water is bounded by the escape hatch, not asserted hit.
+      expect(entry.queueHighWaterBytes).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  it("rejects invalid queue limits at construction", () => {
+    expect(() => createRagServer(docs, { queue: 0 })).toThrow(RangeError);
+    expect(() => createRagServer(docs, { queue: { maxItems: 0 } })).toThrow(RangeError);
+    expect(() => createRagServer(docs, { queue: { maxBytes: 0 } })).toThrow(RangeError);
+  });
+});
+
 describe("GET /healthz", () => {
   it("reports the corpus size", async () => {
     const response = await fetch(`${baseUrl}/healthz`);

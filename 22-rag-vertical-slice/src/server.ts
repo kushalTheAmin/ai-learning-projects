@@ -13,7 +13,7 @@ import type { Doc } from "./data.js";
 import type { EscalationPolicy } from "./escalate.js";
 import { answerPieces, MIN_OVERLAP, REFUSAL, scoredAnswer, SYSTEM_PROMPT } from "./model.js";
 import { DocIndex } from "./retrieval.js";
-import { streamEvents, type StreamSink, type WireEvent } from "./stream.js";
+import { streamEvents, type QueueLimit, type StreamSink, type WireEvent } from "./stream.js";
 
 export const MAX_QUESTION_CHARS = 500;
 export const MAX_BODY_BYTES = 16 * 1024;
@@ -41,6 +41,10 @@ export interface RequestLogEntry {
   events: number;
   bytes: number;
   queueHighWater: number;
+  /** Peak buffered wire bytes in the event queue while streaming this response. */
+  queueHighWaterBytes: number;
+  /** Events admitted alone into an empty queue despite exceeding a byte budget. */
+  queueOversizedPushes: number;
   /** Present only on servers configured with an escalation policy. */
   escalated?: boolean;
   firstOverlap?: number;
@@ -61,6 +65,13 @@ export interface RagServerOptions {
    * at k2 and serve from the wider context, billing both model calls.
    */
   escalation?: EscalationPolicy;
+  /**
+   * Capacity of the per-response event queue between generation and the
+   * socket. A number caps buffered events (the default, QUEUE_CAPACITY);
+   * the object form can cap buffered wire bytes instead, which is what a
+   * memory ceiling actually wants once event sizes vary.
+   */
+  queue?: QueueLimit;
 }
 
 /** The prompt-shaped rendering of a doc that the token accounting prices. */
@@ -143,6 +154,14 @@ function sinkFor(res: ServerResponse): StreamSink {
 export function createRagServer(docs: readonly Doc[], options: RagServerOptions = {}): RagServer {
   const minOverlap = options.minOverlap ?? MIN_OVERLAP;
   const escalation = options.escalation;
+  const queueLimit = options.queue ?? QUEUE_CAPACITY;
+  if (typeof queueLimit === "number") {
+    if (queueLimit < 1) throw new RangeError("queue capacity must be >= 1");
+  } else {
+    const { maxItems, maxBytes } = queueLimit;
+    if (maxItems !== undefined && maxItems < 1) throw new RangeError("queue.maxItems must be >= 1");
+    if (maxBytes !== undefined && maxBytes <= 0) throw new RangeError("queue.maxBytes must be > 0");
+  }
   if (escalation !== undefined) {
     if (!Number.isInteger(escalation.k2) || escalation.k2 < 1 || escalation.k2 > MAX_K) {
       throw new RangeError(`escalation.k2 must be an integer in 1..${MAX_K}`);
@@ -242,7 +261,7 @@ export function createRagServer(docs: readonly Doc[], options: RagServerOptions 
       "cache-control": "no-cache",
       connection: "keep-alive",
     });
-    const result = await streamEvents(events, sinkFor(res), QUEUE_CAPACITY);
+    const result = await streamEvents(events, sinkFor(res), queueLimit);
     res.end();
     const entry: RequestLogEntry = {
       requestId,
@@ -255,6 +274,8 @@ export function createRagServer(docs: readonly Doc[], options: RagServerOptions 
       events: result.events,
       bytes: result.bytes,
       queueHighWater: result.queue.highWaterMark,
+      queueHighWaterBytes: result.queue.sizeHighWaterMark,
+      queueOversizedPushes: result.queue.oversizedPushes,
     };
     if (escalation !== undefined) {
       entry.escalated = escalated;

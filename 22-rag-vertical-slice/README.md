@@ -16,7 +16,7 @@ a vertical slice is the argument that composition is where production behavior l
 
 ```
 npm ci
-npm test          # 106 tests: unit + integration over a live server
+npm test          # 112 tests: unit + integration over a live server
 npm run typecheck
 npm start
 ```
@@ -97,7 +97,24 @@ every policy row is a projection over two floor-0 captures (per-query score, wou
 
 streaming: the first token completes at a mean 22.6% of the response bytes at k=3, computed from the wire encoding itself, so its exact and deterministic. a buffering client waits for 100% on all 40. (this number was 23.3% before the floor extension: the done event now carries the refusal score, so every response is a few bytes longer and the first tokens share of them smaller.)
 
-backpressure against a deliberately slow client (every write blocks one macrotask): on the worst case, the model dumping a whole 466-piece doc, an unbounded queue buffers 465 events / 17668 bytes at peak, the bounded(8) queue holds 8 events / 322 bytes with 457 stalled pushes, meaning generation itself was paced by the client 457 times. same shape 05 measured, now sitting where it belongs, between a server's generator and its socket. with a fast local client the queue never buffers at all (high-water 0 across all 202 logged requests): backpressure machinery is invisible until the client is slow, which is exactly the property you want.
+backpressure against a deliberately slow client (every write blocks one macrotask), re-read now that the queue can budget bytes. the /ask queue used to cap events; 05s queue grew a maxBytes budget, and this extension wires it through as a server option (`queue: {maxBytes}`), logs the per-request byte high-water, and re-measures. the harness now streams the full wire shape of a request, meta then tokens then done, because the sizes are nothing alike: token events run 34-48 wire bytes while meta and done carry json payloads near 190. the earlier table streamed token events only, so its numbers were smaller.
+
+```
+longest golden answer: 53 events / 2304 wire bytes (meta 195 B, tokens 34-43 B, done 185 B)
+  unbounded  high-water  52 events /  2109 bytes buffered,   0 stalled pushes, 0 oversized admissions
+  events-8   high-water   8 events /   448 bytes buffered,  44 stalled pushes, 0 oversized admissions
+  bytes-512  high-water  13 events /   496 bytes buffered,  39 stalled pushes, 0 oversized admissions
+  bytes-128  high-water   3 events /   185 bytes buffered,  49 stalled pushes, 1 oversized admissions
+worst case, model dumps the whole top doc: 468 events / 18078 wire bytes (meta 183 B, tokens 34-48 B, done 186 B)
+  unbounded  high-water 467 events / 17895 bytes buffered,   0 stalled pushes, 0 oversized admissions
+  events-8   high-water   8 events /   443 bytes buffered, 459 stalled pushes, 0 oversized admissions
+  bytes-512  high-water  14 events /   512 bytes buffered, 448 stalled pushes, 0 oversized admissions
+  bytes-128  high-water   3 events /   186 bytes buffered, 464 stalled pushes, 1 oversized admissions
+```
+
+the unbounded row is the memory bug: generation runs the whole response ahead of the client, 17895 bytes buffered on the dump. the shipped events-8 cap holds that to 8 events, but "8 events" is 272 bytes if they are the smallest tokens and 1560 if they are meta-sized payloads; the cap just doesnt know. here it reads 443-448 because the two big events never co-buffer on this stream, which is luck of the mix, the thing 05 measured swinging with item order under a heavy-tailed one. bytes-512 makes the promise in the right currency, peak 512 exactly on the dump, and buffers 13-14 events at roughly the memory the event cap spent on 8, so equal memory buys more run-ahead. bytes-128 shows the floor: the done event is 185-186 wire bytes, bigger than the whole budget, and the queue admits it alone rather than deadlocking (1 oversized admission, peak equal to the event, not the budget). a byte budgets real bound is max(budget, largest single event), the rule 05 established, holding with a server attached.
+
+and the swap costs nothing observable: a live /ask server on `queue: {maxBytes: 1024}` reproduces the event-cap servers k=3 eval row exactly, checked field by field, with queue high-water 0 bytes and 0 oversized admissions across its 40 requests, because a fast local client drains every event before it can buffer (high-water 0 across all 202 logged requests on the main server too). backpressure machinery stays invisible until the client is slow, which is exactly the property you want, and the request log now carries the byte high-water per request, so a slow client would leave a number instead of an anecdote.
 
 validation is a table of exact rejections: empty or non-string question 400, k outside 1..10 400, question over 500 chars 413, body over 16 KB 413, non-json body 400, GET /ask 405, unknown path 404, unicode question streams fine. every rejection names what was wrong.
 
@@ -107,7 +124,8 @@ validation is a table of exact rejections: empty or non-string question 400, k o
 - the refusal floor is one hand-set number, and the sweep shows the hand got lucky: 0.35 lands inside the (0.333, 0.400] window where it costs nothing and blocks every wrong-doc quote. that window is a property of these 40 queries, not of the mechanism; one paraphrased query with a 0.30 correct answer closes it, and then every floor is a real trade.
 - retrieval has no idf and no stemmer, docs are one vector each, and the corpus is 10 docs. at 10 docs a linear cosine scan is the right amount of machinery, at 10k docs youd want 13s hnsw under it, and the repo holds that part too.
 - cost is linear in k because every request re-sends the full context. 11 measured what a prefix cache does to exactly this shape of bill, and the composition is unbuilt.
-- the sse contract is asserted end to end (client-recomputed wire bytes must equal socket bytes, and they do), but the server never handles client disconnect mid-stream, and the queue caps events, not bytes; both are real production gaps left visible on purpose.
+- the sse contract is asserted end to end (client-recomputed wire bytes must equal socket bytes, and they do), but the server never handles client disconnect mid-stream; a real production gap left visible on purpose.
+- the queue now budgets bytes, but it measures an event by serializing it twice, once for admission and once for the write. at 468 events per response that cannot matter; at real throughput the wasted serialization is a cpu-for-memory trade nobody priced.
 
 ## why typescript
 
@@ -117,7 +135,8 @@ this is the applied-ai shape typescript actually ships: an http endpoint, stream
 
 - a real model behind the same harness: does answer accuracy track hit@k up once extraction stops being lexical, and what does the paraphrase column cost in tokens to fix with a better reader vs a better retriever
 - compose 11s prefix cache into the request path: system prompt and doc renderings are stable prefixes, so what does the k sweep's cost column look like with cache-billed tokens
-- the queue caps events; a byte-budgeted capacity (05s open thread, now with a server attached) is what a real memory ceiling wants
+- the queue buffers whole events while the wire is just bytes, so the byte budget floors at the largest single event; a byte-chunk queue between serializer and socket could pin any budget exactly with no oversized escape, and what losing event boundaries does to the first-token measurement and the logs event count is the design question
+- with a fast local client every byte high-water in the log reads 0; replaying a captured real network pace (05s thread, same gap) would turn the per-request byte column into a live signal instead of a slow-sink experiment
 - the floor is global while the score distribution is per category (keyword correct answers score high, paraphrase ones hug the floor), so a per-category floor or a score normalized by question length might reopen the free window on harder traffic; needs a corpus where the current window is closed
 - the trigger sees that a score is low, never why: a second signal that separates gold-missing from paraphrase-bound (the retrieval score margin between the top docs is already computed and on the wire) could route only the fixable misses and close part of the 61.5%-vs-34.3% oracle gap
 - escalation here widens k on the same retriever, so the 8 paraphrase-bound refusals are unreachable by construction; retrying with a different retriever instead (a stemmer, 03s fusion, 25s hyde rewrite) is the escalation that could reach them, and this harness prices it the same way

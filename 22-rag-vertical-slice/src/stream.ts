@@ -14,6 +14,16 @@
 
 import { AsyncQueue, type QueueStats } from "../../05-token-streaming/src/queue.js";
 
+/**
+ * Capacity of the queue between generation and the socket, in either
+ * currency: a number caps buffered events, the object form can also cap
+ * buffered wire bytes (05's byte-budget queue). Under a byte budget the
+ * bound is max(maxBytes, largest single event): an event bigger than the
+ * whole budget is admitted alone rather than deadlocking the stream, and
+ * the queue counts those admissions in `oversizedPushes`.
+ */
+export type QueueLimit = number | { maxItems?: number; maxBytes?: number };
+
 export interface WireEvent {
   /** Omitted on the wire when undefined; the parser defaults to "message". */
   event?: string;
@@ -66,9 +76,13 @@ export interface StreamResult {
 export async function streamEvents(
   source: AsyncIterable<WireEvent> | Iterable<WireEvent>,
   sink: StreamSink,
-  queueCapacity: number,
+  queueLimit: QueueLimit,
 ): Promise<StreamResult> {
-  const queue = new AsyncQueue<WireEvent>(queueCapacity, (event) => serializeEvent(event).length);
+  const wireBytes = (event: WireEvent): number => serializeEvent(event).length;
+  const queue =
+    typeof queueLimit === "number"
+      ? new AsyncQueue<WireEvent>(queueLimit, wireBytes)
+      : new AsyncQueue<WireEvent>({ ...queueLimit, sizeOf: wireBytes });
   const producer = (async () => {
     for await (const event of source) await queue.push(event);
     queue.close();

@@ -10,7 +10,7 @@
  */
 
 import { setImmediate as nextMacrotask } from "node:timers/promises";
-import { streamEvents, type StreamSink, type WireEvent } from "./stream.js";
+import { streamEvents, type QueueLimit, type StreamSink, type WireEvent } from "./stream.js";
 
 export interface BackpressureRun {
   label: string;
@@ -19,6 +19,7 @@ export interface BackpressureRun {
   highWaterItems: number;
   highWaterBytes: number;
   stalledPushes: number;
+  oversizedPushes: number;
 }
 
 function slowSink(): StreamSink {
@@ -33,9 +34,9 @@ function slowSink(): StreamSink {
 export async function runSlowClient(
   label: string,
   events: readonly WireEvent[],
-  queueCapacity: number,
+  queueLimit: QueueLimit,
 ): Promise<BackpressureRun> {
-  const result = await streamEvents(events.slice(), slowSink(), queueCapacity);
+  const result = await streamEvents(events.slice(), slowSink(), queueLimit);
   return {
     label,
     events: result.events,
@@ -43,5 +44,6 @@ export async function runSlowClient(
     highWaterItems: result.queue.highWaterMark,
     highWaterBytes: result.queue.sizeHighWaterMark,
     stalledPushes: result.queue.stalledPushes,
+    oversizedPushes: result.queue.oversizedPushes,
   };
 }
