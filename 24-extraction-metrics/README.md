@@ -135,6 +135,19 @@ sounds like the fix and isnt, recall is undefined on a path gold never has.
   at once, and a single scalar over mixed damage is exactly the ambiguity
   field-level P and R exist to split.
 
+## fixes
+
+- 2026-09-01 — the comparator decided a field was present with `key in pred`,
+  and `in` walks the prototype chain — so a document field named `toString` or
+  `constructor` or `hasOwnProperty` read as present on an object that never had
+  it. worst case a free hallucination: `{"a":1}` vs `{"a":1,"hasOwnProperty":"X"}`
+  charged nothing and scored 1.000 P, from the metric whose whole point is that
+  invented fields cost precision. the other direction called a dropped field
+  wrong instead of missing, and a dropped subtree conjured a spurious leaf out
+  of `Object.prototype` itself. both membership tests are `Object.hasOwn` now.
+  no number here moved — none of the 12 authored invoices has a field on a
+  colliding name, so every table is what it was.
+
 ## language
 
 typescript. extraction eval is glue you run next to the extraction service,

@@ -143,6 +143,73 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-01] 24 — `compareInto` decided field presence with `key in
+  pred` and `key in gold`, and `in` walks the prototype chain. every object in
+  the project comes from `structuredClone` or `JSON.parse`, so all of them
+  inherit `Object.prototype`, and any document field named `toString`,
+  `constructor`, `hasOwnProperty`, `valueOf` and friends read as present on an
+  object that never had it. three wrong outcomes, all silent: a field the
+  prediction invented on such a name failed the `!(key in gold)` test and was
+  charged nothing at all — `{"a":1}` vs `{"a":1,"hasOwnProperty":"X"}` scored
+  1.000 precision, a free hallucination from the metric whose stated purpose is
+  that hallucinated fields cost precision, and a direct violation of the
+  invariant at the top of compare.ts ("every predicted leaf ends up exactly one
+  of correct, wrong-value, spurious"); a gold field the prediction dropped was
+  scored `wrong` against the inherited function instead of `missing`, which
+  charges the precision denominator for a leaf the extractor never emitted; and
+  a dropped gold *subtree* took the structural-mismatch branch with
+  `Object.prototype.valueOf` as the predicted side, so `{"valueOf":{"a":1,
+  "b":2}}` vs `{}` produced 2 missing plus one spurious leaf that exists
+  nowhere in the prediction. the fix is two `Object.hasOwn` calls in
+  compare.ts, nothing else. six tests in a new
+  `field names that collide with Object.prototype` block in
+  tests/compare.test.ts: dropped field is missing not wrong, invented field is
+  spurious and drops precision to 0.5, invented subtree charged leaf by leaf
+  with its per-path row present, dropped subtree charges only its own leaves
+  and leaves no `valueOf` path behind, the same inside an array element, and a
+  genuine match on such a name still scoring one correct leaf. five of the six
+  fail on the old code, the sixth is the non-regression guard. no published
+  number moved — none of the 12 authored invoices carries a field on a
+  colliding name, so every table is character for character what it was, and
+  the root index row needed no change. `deepEqual` in json.ts has the same
+  `k in b` shape and was checked: b[k] would have to be a function for the
+  comparison to go wrong and a JsonValue never is, so it cannot return a wrong
+  answer and no failing test binds it — left alone. found and fixed 2026-09-01
+- [medium] 24 — same root cause one module over, not the identical change so
+  not folded into the fix: `parseDate` looks its month up in `MONTHS`, a plain
+  object literal, so `MONTHS["constructor"]` returns the `Object` constructor
+  rather than undefined, the `month === undefined` guard passes, and
+  `isoDate` compares a function against 1 and 12 (both false, NaN semantics),
+  indexes `DAYS_IN_MONTH[NaN]` to undefined, and returns
+  `"2024-function Object() { [native code] }-05"`. so a function documented to
+  return an ISO date or null returns neither. it also makes a false match
+  reachable: "constructor 5, 2024" and "5 constructor 2024" are different
+  strings that both parse to that same garbage and therefore compare equal at
+  L3. `CURRENCY_SYMBOL[currency] ?? "$"` in extractors.ts has the same shape
+  but its input is the dataset's own five currency codes. found 2026-09-01
+- [medium] 24 — the metric cannot see a dropped field whose value is an empty
+  container. `chargeSubtree` charges leaves, `flatten([])` yields none, so
+  gold `{"items":[]}` against pred `{}` scores 0/0/0/0 and `microMetrics`
+  reads that as a perfect extraction, 1.000 across the board. the dataset has
+  the shape that reaches it — invoice 5 has `line_items: []` — and only the
+  roster saves it, because `dropLeaves` drops primitive-valued keys and never
+  a container. it is the same free-pass shape as the fixed finding above and
+  the readme's "where it breaks" does not mention it. found 2026-09-01
+- [low] 24 — `DAYS_IN_MONTH` hardcodes 29 for february with no leap-year test,
+  so `parseDate("2023-02-29")` returns "2023-02-29" instead of null. the test
+  suite pins `parseDate("Feb 31, 2024")` to null, so the intent to reject
+  impossible dates is there and february is the hole in it. consequence is
+  narrow — a nonexistent day is treated as real rather than refused, and a
+  false match needs both sides to name the same nonexistent day. found
+  2026-09-01
+- [low] 24 — `corruptor` is documented as "each leaf independently wrong with
+  p=0.3" but `typo` swaps two adjacent characters, which is a no-op on any
+  string whose chosen pair is a doubled letter ("box of 500", "Müller &
+  Söhne"). so the authored damage rate is an upper bound, not the rate. it
+  does not touch any published number — the 0.728 in the table is measured
+  from the comparison, not derived from p, and the readme's "27% garbage" is
+  1 - 0.728 — but the extractor's own flaw string overstates what it does.
+  found 2026-09-01
 - [fixed 2026-09-01] 23 — "iter-focus beats iter-append" was published as a
   result, bolded, one of "three results i didnt author on purpose but the
   harness surfaced", with a design lesson hung on it: "the intuition 'keep the
@@ -1274,6 +1341,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 24-extraction-metrics | 2026-09-01 |
 | 23-multi-hop-retrieval | 2026-09-01 |
 | 19-eval-regression | 2026-09-01 |
 | 21-vector-store-persistence | 2026-09-01 |
@@ -1801,6 +1869,40 @@ and the comparison that surprises you is the one that needs it more. the tell
 was structural rather than numerical — a bootstrap sitting three lines above
 a bolded "X beats Y" that never went through it. three smaller findings came
 out of the same read and are listed open.
+
+24 came back clean on every published number and dirty on the comparator
+underneath them. precision is over predicted leaves and recall over gold
+leaves with the four counts partitioning both sides exactly as documented;
+the ladder is strictly nested and each level's forgiveness was checked in
+isolation (numeric before date before text, a number against a non-numeric
+string never falling through to folding, `12,34,567` and `4.800,00` refused,
+slash dates refused); greedy alignment is deterministic on a fully specified
+tie-break and scores pairs with the index policy inside so nested arrays cant
+recurse into their own alignment; the seeded rngs are one per (extractor,
+record) with no seed collision and reruns are byte-identical; there is no
+fitting anywhere so nothing can leak; and all 8 headline rows, both ladder
+rows, the alignment table and both per-field tables match `npm start` today.
+the constructed quality ordering in extractors.ts is recovered exactly by the
+semantic column, which is the audit the project exists to run, and the two
+places the readme could have oversold — the alpha-free tuning story and the
+macro blindness to hallucination — are both disclosed rather than claimed,
+the macro one written up as something the code showed rather than something
+designed in.
+
+the defect was one layer under all of that, in the field-presence test.
+`key in pred` walks the prototype chain, so on objects that all come from
+`JSON.parse` or `structuredClone` a field named `toString` or
+`hasOwnProperty` reads as present on an object that never had it — and the
+worst branch was the silent one, an invented field on such a name charged
+nothing at all and scoring a clean 1.000 precision. fixed above. the habit
+worth recording: this project states its invariant in a comment at the top of
+compare.ts — every predicted leaf is exactly one of correct, wrong, spurious
+— and the bug is exactly a leaf that is none of the three. an invariant
+written down as prose is a test waiting to be written, and the cheapest
+review move on a comparator is to hand it the field names the language
+already owns. four smaller findings came out of the same read, three of them
+the same prototype-shaped root cause or the same free-pass shape, and are
+listed open.
 
 ## MECHANISMS
 

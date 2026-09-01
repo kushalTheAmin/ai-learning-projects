@@ -97,16 +97,19 @@ function compareInto(
     return;
   }
   if (isObject(gold) && isObject(pred)) {
+    // Own properties only: `in` walks the prototype chain, so a document field
+    // named `toString` or `constructor` would read as present on an object that
+    // never had it, and the leaf would be scored against Object.prototype.
     for (const key of Object.keys(gold)) {
       const childPath = [...segments, key];
-      if (key in pred) {
+      if (Object.hasOwn(pred, key)) {
         compareInto(result, gold[key] as JsonValue, pred[key] as JsonValue, childPath, opts, arrayPolicy);
       } else {
         chargeSubtree(result, gold[key] as JsonValue, childPath, "missing");
       }
     }
     for (const key of Object.keys(pred)) {
-      if (!(key in gold)) {
+      if (!Object.hasOwn(gold, key)) {
         chargeSubtree(result, pred[key] as JsonValue, [...segments, key], "spurious");
       }
     }

@@ -36,6 +36,54 @@ describe("compare on primitives and objects", () => {
   });
 });
 
+describe("field names that collide with Object.prototype", () => {
+  // JSON.parse builds ordinary objects, so every one of these keys is a name a
+  // real document can carry while the object still inherits a same-named member.
+  const parse = (s: string): JsonValue => JSON.parse(s) as JsonValue;
+
+  it("a dropped gold field is missing, not wrong", () => {
+    expect(totals(parse('{"toString":"x"}'), parse("{}"))).toEqual({
+      correct: 0,
+      wrong: 0,
+      missing: 1,
+      spurious: 0,
+    });
+  });
+
+  it("an invented field is spurious and costs precision", () => {
+    const t = totals(parse('{"a":1}'), parse('{"a":1,"hasOwnProperty":"X"}'));
+    expect(t).toEqual({ correct: 1, wrong: 0, missing: 0, spurious: 1 });
+    expect(microMetrics(t).precision).toBeCloseTo(0.5, 10);
+  });
+
+  it("an invented subtree is charged leaf by leaf", () => {
+    const result = compare(parse('{"a":1}'), parse('{"a":1,"toString":{"x":1,"y":2}}'), STRICT, "index");
+    expect(result.total).toEqual({ correct: 1, wrong: 0, missing: 0, spurious: 2 });
+    expect(result.perPath.get("toString.x")).toEqual({ correct: 0, wrong: 0, missing: 0, spurious: 1 });
+  });
+
+  it("a dropped gold subtree charges its own leaves and invents no spurious leaf", () => {
+    const result = compare(parse('{"valueOf":{"a":1,"b":2}}'), parse("{}"), STRICT, "index");
+    expect(result.total).toEqual({ correct: 0, wrong: 0, missing: 2, spurious: 0 });
+    expect(result.perPath.get("valueOf")).toBeUndefined();
+  });
+
+  it("holds inside array elements too", () => {
+    const result = compare(parse('{"items":[{"toString":"t"}]}'), parse('{"items":[{}]}'), STRICT, "index");
+    expect(result.total).toEqual({ correct: 0, wrong: 0, missing: 1, spurious: 0 });
+    expect(result.perPath.get("items[].toString")).toEqual({ correct: 0, wrong: 0, missing: 1, spurious: 0 });
+  });
+
+  it("a matching pair on such a name is still one correct leaf", () => {
+    expect(totals(parse('{"constructor":"C"}'), parse('{"constructor":"C"}'))).toEqual({
+      correct: 1,
+      wrong: 0,
+      missing: 0,
+      spurious: 0,
+    });
+  });
+});
+
 describe("array policies", () => {
   const goldItems: JsonValue = [
     { name: "a", qty: 1 },
