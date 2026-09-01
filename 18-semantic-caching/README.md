@@ -36,6 +36,26 @@ every number in that table is one traffic draw, seed 20260828. that is fine for 
 
 cost is measurable off one replay, wrong answers are not. what does survive the resample is direction: char serves more wrong answers than word at 0.75 on 20 of 20 seeds. the counts dont. read "zero wrong answers at 0.80" as a safety property and youre reading a single draw.
 
+## the serve margin, measured
+
+one of the open questions below used to ask whether a serve margin, best minus second-best similarity must clear a gap or the cache refuses and pays for a model call, would refuse exactly the near-miss serves. its measured now. mostly yes, and the two catches are worth more than the yes.
+
+first the signal check. at margin 0 every semantic serve records the gap between its best entry and the closest entry carrying a different stored answer. right serves sit on wide gaps and wrong serves on narrow ones: word at threshold 0.50 has right-serve gaps at median 0.400 against wrong-serve gaps at median 0.109, roc-auc 0.894. char at 0.75 separates hardest, auc 0.963 with wrong gaps at median 0.049, because its wrong serves are exactly the sibling near-misses and the sibling answer is right there in the store, barely behind. the runner-up is a real signal, so a margin has something to work with.
+
+second, scope decides everything. the literal rule, gap over every other entry, is ruinous: phrasings of one intent crowd each other, so word at 0.75 with margin 0.05 refuses 177 serves, 176 of which were right, and savings fall 86.4% to 78.6% to fix a single wrong serve. scoping the runner-up to entries whose stored answer differs fixes that; the same threshold and margin then refuses 4 serves total. a real cache can compute this scope, answers are stored even though intents are not, but it leans on one intent producing one answer text. a live model paraphrasing its own answers across phrasings would blur the scope back toward the ruinous one, and thats now an open question below.
+
+the trade at the risky operating points, differing-answer scope, single draw:
+
+- word 0.50: margin 0.10 cuts wrong serves 93 to 13 and costs 1.5 points of savings, 94.4% to 92.9%
+- char 0.75: margin 0.10 cuts 34 to 0 for 2.1 points, 91.0% to 88.9%
+- word 0.75: the residual wrong serve survives every margin up to 0.20. the margin sees crowding, not wrongness, so a wrong entry with no close competitor is served confidently at any margin. store-side signals end where that serve begins
+
+refusals still land mostly on right serves even in the differing-answer scope, 26 of the 35 at word 0.50 margin 0.10, but the asymmetry carries the policy: a refused right serve costs one model call, a served wrong answer costs trust. and a refusal isnt pure waste, it inserts the phrasing it refused, so later repeats of it become exact hits; the margined run at word 0.75 ends with more exact hits than the bare run, which is why the savings barely move.
+
+across the 20 seeds the margin beats the threshold as a knob outright: word at 0.75 with margin 0.10 averages 1.00 wrong serves and saves 84.6% to 86.6%, while bare word at 0.80 averages 1.15 wrong and saves 79.1% to 82.4%. less risk and two to four points more savings at once, the whole savings range above the bare one, pinned by a test. char at 0.75 with margin 0.10 goes from a 3 to 57 wrong-serve spread to 0 to 13, median 12.5 to 1.0. thats a different regime, not a safety property; the worst seed still serves 13.
+
+the monotonicity story got sharper too. the original sweep found wrong serves non-monotone in the threshold, char serving 44 at 0.50 but 85 at 0.70, because the store is policy-dependent. margin 0.10 restores the monotone story for char, its sweep runs 25 22 21 10 1 0 0 0 0 0 with zero rises, but hands word a small rise of its own at 0.55 to 0.60, and the margin knob inherits the disease outright: char at 0.50 serves 11 wrong at margin 0.15 and 22 at margin 0.20. a bigger margin refuses more, refusals insert more phrasings, and every stored phrasing is a fresh near-miss chance for later traffic. the general lesson is that any serve policy reshapes the store it will later be judged by, so no store-touching knob tunes cleanly from pair statistics or from a capture at another setting. its also why every margin row here is a live replay: a margin-0 capture cannot project a margined run, the way a refusal floor can be projected offline, because a refusal changes what gets stored and a floor only gates what gets said.
+
 ## running it
 
 ```
@@ -45,7 +65,7 @@ npm test
 npm start
 ```
 
-node 20+, no network, no api key. `npm start` prints the pair-class tables, the operating points, the replay sweep, the 20-seed spread and the typo comparison; every number above is copied from that output. tests run the same replays, so the readme claims are pinned: the inversion rate above 0.9, paraphrase recall at zero, char beating word on typos, and the whole seed spread — including that word at 0.80 is zero-wrong on 12 seeds of 20 and not the rest. the seed sweep is 60 replays on top of the main one, so `npm start` takes about 20s and the suite about 13s.
+node 20+, no network, no api key. `npm start` prints the pair-class tables, the operating points, the replay sweep, the 20-seed spread, the typo comparison, and the margin study: the serve-gap table, the live margin sweep at 0.50 and 0.75 in both scopes, the threshold sweeps under margin with their rise counts, and the margin operating points across the 20 seeds. every number above is copied from that output. tests run the same replays, so the readme claims are pinned: the inversion rate above 0.9, paraphrase recall at zero, char beating word on typos, the whole seed spread including that word at 0.80 is zero-wrong on 12 seeds of 20 and not the rest, the gap auc, the ruinous all scope, char 0.75 going 34 to 0 wrong under margin 0.10, the margin non-monotonicity at char 0.50, and the margined 0.75 dominating bare 0.80 across every seed. the margin study is about 190 live replays on top of the originals, so `npm start` takes about 90s and the suite about 30s.
 
 ## why typescript
 
@@ -65,7 +85,8 @@ response caching lives in the serving path, which is typescript territory in my 
 ## open questions
 
 - the real-embedder version: same dataset, same sweep, precomputed neural embeddings committed to the repo. does paraphrase recall finally separate from near-miss fpr, and does the inversion rate actually drop below coin-flip? the entire verdict on semantic caching hangs on that curve, and lexical features cant draw it.
-- non-monotone wrong serves mean threshold tuning on pair statistics is unsafe. is there a store-admission policy (only cache canonical-looking queries, or require a margin between best and second-best entry) that restores monotonicity?
-- a margin rule (serve only if best minus second-best similarity clears a gap) might refuse exactly the near-miss serves, since siblings crowd each other. unmeasured.
+- the differing-answer scope leans on one intent producing one answer text, which this simulation guarantees and a live model would not. regenerate the store with per-phrasing answer variants and the scope decays toward the ruinous all scope; where on that curve a real cache sits, and whether normalizing answers before comparing recovers it, is unmeasured.
+- the serve margin fixed most of the wrong serves and inherited the non-monotonicity, because refusals insert. is there a store-admission policy (dont insert what you refused, or only cache canonical-looking queries) that makes any serving knob monotone, or is policy-dependence just what a self-filling store is?
+- the residual word 0.75 wrong serve is invisible to every store-side signal here: the wrong entry wins with no close competitor. the only thing left to check is the served answer itself against the query, a groundedness-shaped check on the way out, at the cost of running one on every semantic serve.
 - staleness: give answers a ttl and replay traffic where some intents answers change mid-stream. what does a stale serve cost vs a wrong-intent serve?
 - the zipf exponent controls how much an exact cache already captures. at what skew does the semantic layers marginal value stop paying for its risk?

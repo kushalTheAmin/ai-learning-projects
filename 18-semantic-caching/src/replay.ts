@@ -8,7 +8,7 @@
  */
 
 import { costUsd, estimateTokens } from "../../08-agent-tool-loop/src/messages.js";
-import { SemanticCache } from "./cache.js";
+import { SemanticCache, type MarginPolicy } from "./cache.js";
 import { answerFor, SYSTEM_PROMPT } from "./dataset.js";
 import { FEATURIZERS, type Featurizer } from "./features.js";
 import { DEFAULT_TRAFFIC, generateTraffic, type TrafficConfig, type TrafficRequest } from "./traffic.js";
@@ -28,6 +28,20 @@ export interface ReplayResult {
   savedVsNoCache: number;
   /** Semantic hits (right or wrong) on requests the typo pass altered. */
   semanticHitsOnTypoed: number;
+  /** Serves the margin rule refused; each one became a paid model call. */
+  marginRefusals: number;
+  /** Refusals whose best entry matched the request intent — right serves given up. */
+  refusedRight: number;
+  /** Refusals whose best entry was another intent — wrong serves avoided. */
+  refusedWrong: number;
+}
+
+/** One semantic serve as the margin-0 cache saw it, for the gap study. */
+export interface ServeRecord {
+  right: boolean;
+  similarity: number;
+  competitorAll: number | undefined;
+  competitorDiffering: number | undefined;
 }
 
 function callCost(query: string, answer: string): number {
@@ -45,15 +59,22 @@ export function noCacheCost(traffic: readonly TrafficRequest[]): number {
 
 /**
  * Replay the traffic through a fresh cache. `threshold: Infinity` disables
- * the semantic layer entirely, leaving the exact-match baseline.
+ * the semantic layer entirely, leaving the exact-match baseline. A margin
+ * policy must run live like this — a refusal turns into a model call and an
+ * insert, so the store a margined cache builds diverges from the margin-0
+ * store, and no offline projection over a margin-0 capture can price it.
+ * `onServe` observes each semantic serve (margin-0 runs only, for the gap
+ * study).
  */
 export function runReplay(
   traffic: readonly TrafficRequest[],
   featurizer: Featurizer,
   threshold: number,
   label: string,
+  marginPolicy?: MarginPolicy,
+  onServe?: (record: ServeRecord) => void,
 ): ReplayResult {
-  const cache = new SemanticCache(featurizer, threshold);
+  const cache = new SemanticCache(featurizer, threshold, marginPolicy);
   const result: ReplayResult = {
     label,
     threshold,
@@ -66,6 +87,9 @@ export function runReplay(
     costUsd: 0,
     savedVsNoCache: 0,
     semanticHitsOnTypoed: 0,
+    marginRefusals: 0,
+    refusedRight: 0,
+    refusedWrong: 0,
   };
   for (const request of traffic) {
     const decision = cache.lookup(request.text);
@@ -74,10 +98,24 @@ export function runReplay(
       continue;
     }
     if (decision.kind === "semantic") {
-      if (decision.entry.intentId === request.intentId) result.semanticCorrect++;
+      const right = decision.entry.intentId === request.intentId;
+      if (right) result.semanticCorrect++;
       else result.semanticWrong++;
       if (request.typoed) result.semanticHitsOnTypoed++;
+      if (onServe !== undefined) {
+        onServe({
+          right,
+          similarity: decision.similarity,
+          competitorAll: decision.competitorAll,
+          competitorDiffering: decision.competitorDiffering,
+        });
+      }
       continue;
+    }
+    if (decision.kind === "margin-refused") {
+      result.marginRefusals++;
+      if (decision.entry.intentId === request.intentId) result.refusedRight++;
+      else result.refusedWrong++;
     }
     const answer = answerFor(request.intentId);
     result.llmCalls++;
@@ -90,10 +128,13 @@ export function runReplay(
   return result;
 }
 
-/** One (featurizer, threshold) operating point, run across many seeds. */
+/** One (featurizer, threshold, optional margin) operating point, run across many seeds. */
 export interface SpreadConfig {
   featurizer: Featurizer;
   threshold: number;
+  marginPolicy?: MarginPolicy;
+  /** Row label; defaults to the featurizer name. */
+  label?: string;
 }
 
 export interface SeedSpread {
@@ -151,7 +192,7 @@ export function seedSpread(
   configs: readonly SpreadConfig[],
 ): SeedSpread[] {
   const spreads: SeedSpread[] = configs.map((config) => ({
-    label: config.featurizer.name,
+    label: config.label ?? config.featurizer.name,
     threshold: config.threshold,
     perSeedWrong: [],
     wrongMin: 0,
@@ -170,7 +211,13 @@ export function seedSpread(
       const spread = spreads[i];
       const saved = savedByConfig[i];
       if (config === undefined || spread === undefined || saved === undefined) continue;
-      const result = runReplay(traffic, config.featurizer, config.threshold, config.featurizer.name);
+      const result = runReplay(
+        traffic,
+        config.featurizer,
+        config.threshold,
+        config.label ?? config.featurizer.name,
+        config.marginPolicy,
+      );
       spread.perSeedWrong.push(result.semanticWrong);
       saved.push(result.savedVsNoCache);
     }

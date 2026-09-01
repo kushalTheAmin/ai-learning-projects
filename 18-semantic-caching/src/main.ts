@@ -6,6 +6,12 @@
 
 import { INTENTS, validateDataset } from "./dataset.js";
 import { FEATURIZERS } from "./features.js";
+import {
+  gapStudy,
+  marginSweep,
+  monotonicityViolations,
+  thresholdSweepUnderMargin,
+} from "./margin.js";
 import { buildPairs, classStats, inversionRate, operatingTable, similarities } from "./pairs.js";
 import {
   noCacheCost,
@@ -125,6 +131,115 @@ function main(): void {
     console.log(
       `${featurizer.name}: ${result.semanticHitsOnTypoed} semantic hits on the ${typoedCount} typoed requests ` +
         `(${result.semanticWrong} wrong serves overall)`,
+    );
+  }
+
+  console.log("\n== serve-gap study at margin 0: the runner-up as a signal ==");
+  console.log(
+    "gap = best cosine minus best differing-answer cosine at serve time; no-comp serves have no differing-answer entry stored",
+  );
+  console.log("label  thresh  right(no-comp)  gap-med  gap-min   wrong(no-comp)  gap-med  gap-min     auc");
+  for (const featurizer of FEATURIZERS) {
+    for (const threshold of [0.5, 0.75]) {
+      const study = gapStudy(traffic, featurizer, threshold);
+      console.log(
+        [
+          study.label.padEnd(5),
+          pad(threshold.toFixed(2), 6),
+          pad(`${study.right.serves}(${study.right.noCompetitor})`, 14),
+          pad(study.right.gapMedian.toFixed(3), 8),
+          pad(study.right.gapMin.toFixed(3), 8),
+          pad(`${study.wrong.serves}(${study.wrong.noCompetitor})`, 15),
+          pad(study.wrong.gapMedian.toFixed(3), 8),
+          pad(study.wrong.gapMin.toFixed(3), 8),
+          pad(study.auc.toFixed(3), 8),
+        ].join(" "),
+      );
+    }
+  }
+
+  console.log("\n== margin sweep, live replays (refusals become model calls and inserts) ==");
+  const MARGINS = [0.02, 0.05, 0.1, 0.15, 0.2] as const;
+  console.log(
+    "label  thresh  scope             margin  wrong  refused  ref-right  ref-wrong  saved%",
+  );
+  for (const featurizer of FEATURIZERS) {
+    for (const threshold of [0.5, 0.75]) {
+      const rows = marginSweep(traffic, featurizer, threshold, MARGINS, ["all", "differing-answer"]);
+      for (const row of rows) {
+        console.log(
+          [
+            row.label.padEnd(5),
+            pad(row.threshold.toFixed(2), 6),
+            `  ${row.scope.padEnd(16)}`,
+            pad(row.margin.toFixed(2), 6),
+            pad(String(row.result.semanticWrong), 6),
+            pad(String(row.result.marginRefusals), 8),
+            pad(String(row.result.refusedRight), 10),
+            pad(String(row.result.refusedWrong), 10),
+            pad(pct(row.result.savedVsNoCache), 7),
+          ].join(" "),
+        );
+      }
+    }
+  }
+
+  console.log("\n== wrong serves across the threshold sweep, by margin (differing-answer) ==");
+  console.log(`thresholds: ${THRESHOLDS.map((threshold) => threshold.toFixed(2)).join(" ")}`);
+  for (const featurizer of FEATURIZERS) {
+    for (const margin of [0, 0.05, 0.1]) {
+      const policy = margin === 0 ? undefined : { margin, scope: "differing-answer" as const };
+      const sweep = thresholdSweepUnderMargin(traffic, featurizer, THRESHOLDS, policy);
+      const wrongs = sweep.map((result) => result.semanticWrong);
+      console.log(
+        `${featurizer.name} margin ${margin.toFixed(2)}: ` +
+          `${wrongs.map((wrong) => pad(String(wrong), 4)).join(" ")}  ` +
+          `rises=${monotonicityViolations(wrongs)}`,
+      );
+    }
+  }
+
+  const marginSpreadConfigs = [
+    {
+      featurizer: FEATURIZERS[0]!,
+      threshold: 0.75,
+      marginPolicy: { margin: 0.05, scope: "differing-answer" as const },
+      label: "word m.05",
+    },
+    {
+      featurizer: FEATURIZERS[0]!,
+      threshold: 0.75,
+      marginPolicy: { margin: 0.1, scope: "differing-answer" as const },
+      label: "word m.10",
+    },
+    {
+      featurizer: FEATURIZERS[1]!,
+      threshold: 0.75,
+      marginPolicy: { margin: 0.1, scope: "differing-answer" as const },
+      label: "char m.10",
+    },
+    {
+      featurizer: FEATURIZERS[0]!,
+      threshold: 0.5,
+      marginPolicy: { margin: 0.1, scope: "differing-answer" as const },
+      label: "word m.10",
+    },
+  ];
+  console.log(
+    `\n== margin operating points across ${SPREAD_SEEDS.length} seeds (differing-answer scope) ==`,
+  );
+  console.log("config          wrong-min  wrong-med  wrong-max  wrong-mean  zero-seeds       saved%");
+  for (const spread of seedSpread(DEFAULT_TRAFFIC, SPREAD_SEEDS, marginSpreadConfigs)) {
+    console.log(
+      [
+        `${spread.label} ${spread.threshold.toFixed(2)}`.padEnd(15),
+        pad(String(spread.wrongMin), 9),
+        pad(spread.wrongMedian.toFixed(1), 10),
+        pad(String(spread.wrongMax), 10),
+        pad(spread.wrongMean.toFixed(2), 11),
+        pad(`${spread.zeroWrongSeeds}/${SPREAD_SEEDS.length}`, 11),
+        pad(`${pct(spread.savedMin)}-${pct(spread.savedMax)}`, 12),
+      ].join("  "),
     );
   }
 }
