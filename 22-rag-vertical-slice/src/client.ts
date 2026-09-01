@@ -37,6 +37,10 @@ export interface AskResult {
   /** The best sentence's overlap score the server made the refusal call on. */
   bestOverlap?: number;
   usage?: Usage;
+  /** Present only when the server runs an escalation policy. */
+  escalated?: boolean;
+  firstOverlap?: number;
+  kUsed?: number;
   /** Bytes received off the socket, summed over network chunks. */
   totalBytes: number;
   /** The same total re-encoded from parsed events; must equal totalBytes. */
@@ -71,10 +75,20 @@ export async function ask(baseUrl: string, body: unknown): Promise<AskResult> {
       result.tokenEvents++;
       if (result.bytesAtFirstToken === undefined) result.bytesAtFirstToken = result.wireBytes;
     } else if (event.event === "done") {
-      const done = JSON.parse(event.data) as { outcome: "answered" | "refused"; bestOverlap: number; usage: Usage };
+      const done = JSON.parse(event.data) as {
+        outcome: "answered" | "refused";
+        bestOverlap: number;
+        usage: Usage;
+        escalated?: boolean;
+        firstOverlap?: number;
+        kUsed?: number;
+      };
       result.outcome = done.outcome;
       result.bestOverlap = done.bestOverlap;
       result.usage = done.usage;
+      if (done.escalated !== undefined) result.escalated = done.escalated;
+      if (done.firstOverlap !== undefined) result.firstOverlap = done.firstOverlap;
+      if (done.kUsed !== undefined) result.kUsed = done.kUsed;
     }
   };
 

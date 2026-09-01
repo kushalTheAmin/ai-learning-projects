@@ -11,7 +11,15 @@ import type { AddressInfo } from "node:net";
 import { loadDocs, loadQueries } from "./data.js";
 import { createRagServer, QUEUE_CAPACITY } from "./server.js";
 import { DocIndex } from "./retrieval.js";
-import { answerPieces, answerText } from "./model.js";
+import { answerPieces, answerText, MIN_OVERLAP } from "./model.js";
+import {
+  captureKFacts,
+  livePolicyRow,
+  oracleRow,
+  projectPolicyRow,
+  type KCapture,
+  type PolicyRow,
+} from "./escalate.js";
 import { ask } from "./client.js";
 import { evalGolden, type EvalRow } from "./eval.js";
 import {
@@ -125,10 +133,8 @@ async function main(): Promise<void> {
       }
     };
 
-    const scored: ScoredQuery[] = await withFloorServer(0, async (url) => {
-      const { outcomes } = await evalGolden(url, queries, 3);
-      return captureScores(outcomes);
-    });
+    const floor0K3 = await withFloorServer(0, async (url) => (await evalGolden(url, queries, 3)).outcomes);
+    const scored: ScoredQuery[] = captureScores(floor0K3);
     const positives = correctScores(scored);
     const negatives = wrongScores(scored);
     const posStats = scoreStats(positives);
@@ -170,6 +176,114 @@ async function main(): Promise<void> {
       );
     }
     console.log("every live row above equals its floor-0 projection exactly (checked per floor)");
+    console.log();
+
+    // --- score-gated escalation ---
+    console.log("--- score-gated escalation: retry retrieval at a wider k only where the k=3 score is low ---");
+    const capK3: KCapture[] = captureKFacts(floor0K3);
+    const capByK2 = new Map<number, KCapture[]>();
+    for (const k2 of [5, 10]) {
+      capByK2.set(
+        k2,
+        captureKFacts(await withFloorServer(0, async (url) => (await evalGolden(url, queries, k2)).outcomes)),
+      );
+    }
+
+    const pool = capK3.filter((c) => c.bestOverlap < MIN_OVERLAP);
+    const poolMisses = pool.filter((c) => !c.hit);
+    console.log(
+      `escalation pool at trigger ${fmt(MIN_OVERLAP, 2)} (the shipped floor): ${pool.length} of ${capK3.length} queries score under it at k=3, split ${poolMisses.length} retrieval misses (the only class a wider k can convert) and ${pool.length - poolMisses.length} with the gold doc already in context, where widening cannot move the gold sentence's score`,
+    );
+    const convertible = (k2: number): number => {
+      const byId = new Map((capByK2.get(k2) as KCapture[]).map((c) => [c.queryId, c]));
+      return poolMisses.filter((c) => {
+        const c2 = byId.get(c.queryId) as KCapture;
+        return c2.bestOverlap >= MIN_OVERLAP && c2.wouldCorrect;
+      }).length;
+    };
+    console.log(
+      `of the ${poolMisses.length} misses, a wider context actually converts ${convertible(5)} at k2=5 and ${convertible(10)} at k2=10 (gold doc arrives AND its sentence wins AND clears the floor)`,
+    );
+    console.log();
+
+    const fixedRows = new Map<number, EvalRow>([[3, k3]]);
+    const k5Row = rows[3];
+    if (k5Row === undefined) throw new Error("missing k=5 eval row");
+    fixedRows.set(5, k5Row);
+    fixedRows.set(10, (await evalGolden(baseUrl, queries, 10)).row);
+
+    console.log("policy               escal helped hurt  answrd  answer  mean in    cost/40  vs fixed");
+    console.log("                                        nogold     acc      tok             k2 cost");
+    const policyLine = (label: string, row: PolicyRow, fixedCost: number): string =>
+      [
+        label.padEnd(20),
+        pad(row.escalated, 6),
+        pad(row.helped, 6),
+        pad(row.hurt, 5),
+        pad(row.answeredWithoutGold, 7),
+        pad(fmt(row.answerAccuracy, 3), 8),
+        pad(fmt(row.meanTokensIn, 1), 9),
+        pad(`$${fmt(row.totalCostUsd, 4)}`, 10),
+        pad(`${fmt((100 * row.totalCostUsd) / fixedCost, 1)}%`, 9),
+      ].join(" ");
+    const fixedLine = (k: number): string => {
+      const row = fixedRows.get(k) as EvalRow;
+      return [
+        `fixed k=${k}`.padEnd(20),
+        pad(0, 6),
+        pad("-", 6),
+        pad("-", 5),
+        pad(row.answeredWithoutGold, 7),
+        pad(fmt(row.answerAccuracy, 3), 8),
+        pad(fmt(row.meanTokensIn, 1), 9),
+        pad(`$${fmt(row.totalCostUsd, 4)}`, 10),
+        pad("-", 9),
+      ].join(" ");
+    };
+    console.log(fixedLine(3));
+    for (const k2 of [5, 10]) {
+      const capK2 = capByK2.get(k2) as KCapture[];
+      const fixedCost = (fixedRows.get(k2) as EvalRow).totalCostUsd;
+      console.log(fixedLine(k2));
+      for (const trigger of [0.35, 0.45, 0.55, 0.75, Infinity]) {
+        const row = projectPolicyRow(capK3, capK2, MIN_OVERLAP, { trigger, k2 });
+        const label = trigger === Infinity ? `  k2=${k2} always` : `  k2=${k2} trig ${fmt(trigger, 2)}`;
+        console.log(policyLine(label, row, fixedCost));
+      }
+      console.log(policyLine(`  k2=${k2} oracle`, oracleRow(capK3, capK2, MIN_OVERLAP, k2), fixedCost));
+    }
+    console.log();
+
+    const pinned: { policy: { trigger: number; k2: number }; label: string }[] = [
+      { policy: { trigger: 0.35, k2: 10 }, label: "trigger 0.35, k2=10" },
+      { policy: { trigger: 0.45, k2: 5 }, label: "trigger 0.45, k2=5" },
+    ];
+    for (const { policy, label } of pinned) {
+      const capK2 = capByK2.get(policy.k2) as KCapture[];
+      const projected = projectPolicyRow(capK3, capK2, MIN_OVERLAP, policy);
+      const escalationRag = createRagServer(docs, { escalation: policy });
+      await new Promise<void>((resolve) => escalationRag.server.listen(0, "127.0.0.1", resolve));
+      const escalationUrl = `http://127.0.0.1:${(escalationRag.server.address() as AddressInfo).port}`;
+      try {
+        const { outcomes } = await evalGolden(escalationUrl, queries, 3);
+        const live = livePolicyRow(outcomes, capK3, MIN_OVERLAP, policy);
+        if (JSON.stringify(live) !== JSON.stringify(projected)) {
+          throw new Error(`escalation policy ${label}: live endpoint row diverges from the projection`);
+        }
+      } finally {
+        escalationRag.server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          escalationRag.server.close((err) => (err ? reject(err) : resolve())),
+        );
+      }
+    }
+    console.log(`live escalation servers reproduce their projected rows exactly (checked: ${pinned.map((p) => p.label).join("; ")})`);
+
+    const escalate10 = projectPolicyRow(capK3, capByK2.get(10) as KCapture[], MIN_OVERLAP, { trigger: 0.35, k2: 10 });
+    const fixed10 = fixedRows.get(10) as EvalRow;
+    console.log(
+      `headline: trigger ${fmt(MIN_OVERLAP, 2)} escalation to k=10 reaches accuracy ${fmt(escalate10.answerAccuracy, 3)} vs fixed k=10's ${fmt(fixed10.answerAccuracy, 3)} at ${fmt((100 * escalate10.totalCostUsd) / fixed10.totalCostUsd, 1)}% of its cost ($${fmt(escalate10.totalCostUsd, 4)} vs $${fmt(fixed10.totalCostUsd, 4)} per 40), but ${escalate10.escalated - escalate10.helped} of its ${escalate10.escalated} escalations buy nothing, which is the gap the oracle row prices`,
+    );
     console.log();
 
     // --- streaming payoff in bytes ---

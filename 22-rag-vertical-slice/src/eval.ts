@@ -25,6 +25,8 @@ export interface QueryOutcome {
   usage: Usage;
   wireBytes: number;
   bytesAtFirstToken: number | undefined;
+  /** Present only when the server runs an escalation policy. */
+  escalated?: boolean;
 }
 
 export interface EvalRow {
@@ -63,7 +65,7 @@ export async function evalGolden(
     ) {
       throw new Error(`eval: ${query.id} failed with status ${result.status}${result.error === undefined ? "" : `: ${result.error}`}`);
     }
-    outcomes.push({
+    const outcome: QueryOutcome = {
       queryId: query.id,
       category: query.category,
       hit: result.meta.retrieved.some((r) => r.docId === query.docId),
@@ -73,7 +75,9 @@ export async function evalGolden(
       usage: result.usage,
       wireBytes: result.wireBytes,
       bytesAtFirstToken: result.bytesAtFirstToken,
-    });
+    };
+    if (result.escalated !== undefined) outcome.escalated = result.escalated;
+    outcomes.push(outcome);
   }
 
   const n = outcomes.length;

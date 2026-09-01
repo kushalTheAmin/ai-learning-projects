@@ -16,7 +16,7 @@ a vertical slice is the argument that composition is where production behavior l
 
 ```
 npm ci
-npm test          # 84 tests: unit + integration over a live server
+npm test          # 106 tests: unit + integration over a live server
 npm run typecheck
 npm start
 ```
@@ -63,9 +63,41 @@ the table says three things. first, the floor is a precision knob, not an accura
 
 youdens j over the observed scores picks 0.429 (keeps 0.778 of the correct answers and 0.182 of the wrong ones), but j weighs dropping a wrong answer the same as keeping a correct one, and whether that is the right exchange rate depends on what a wrong answer costs downstream, which is exactly what this pipeline cannot know. the sweep prices the options; it does not pick one.
 
+score-gated escalation. the floor sweep left one policy unbuilt: the overlap score is on the wire before anything streams, so a low score at k=3 could trigger a retry at a wider k instead of a refusal, spending the big context only on the queries the score flags. this extension builds it as a server option (`escalation: {trigger, k2}`, escalate iff the first pass scores under the trigger and k2 widens the request) and prices the whole policy plane. billing is two model calls, not one repriced call: with a real model the first draft has to exist before anything can score it, so an escalated query pays the first call in full, input and suppressed draft output, then the second call on the wider context. this server knows the score before streaming and could skip the draft; it bills as if it couldnt, to keep the cost model honest for the production shape.
+
+before the table, the anatomy that decides everything: 12 of 40 queries score under 0.35 at k=3, and they split 4 retrieval misses against 8 queries whose gold doc is already in context. widening k is a superset operation on this retriever (top-5 starts with top-3, a test holds it), so the gold sentences score never moves for those 8; more retrieval can only ever convert the 4 misses. and of those 4, exactly 1 converts even at k=10, where the context holds the entire corpus: the other 3 are paraphrase-bound, the gold doc arrives and its sentence still loses or stays under the floor. the score can say an answer is weak; it cannot say why, and only one of the two whys is fixable with more retrieval.
+
+```
+policy               escal helped hurt  answrd  answer  mean in    cost/40  vs fixed
+                                        nogold     acc      tok             k2 cost
+fixed k=3                 0      -     -       0    0.450    2554.3    $0.3239         -
+fixed k=5                 0      -     -       0    0.475    4229.2    $0.5255         -
+  k2=5 trig 0.35         12      1     0       0    0.475    3838.6    $0.4808     91.5%
+  k2=5 trig 0.45         23      1     0       0    0.475    4992.8    $0.6258    119.1%
+  k2=5 trig 0.55         26      1     0       0    0.475    5307.0    $0.6650    126.5%
+  k2=5 trig 0.75         37      1     0       0    0.475    6463.0    $0.8093    154.0%
+  k2=5 always            40      1     0       0    0.475    6783.5    $0.8494    161.6%
+  k2=5 oracle             1      1     0       0    0.475    2655.3    $0.3368     64.1%
+fixed k=10                0      -     -       0    0.475    8339.8    $1.0191         -
+  k2=10 trig 0.35        12      1     0       0    0.475    5056.3    $0.6272     61.5%
+  k2=10 trig 0.45        23      1     0       0    0.475    7349.4    $0.9089     89.2%
+  k2=10 trig 0.55        26      1     0       0    0.475    7975.0    $0.9855     96.7%
+  k2=10 trig 0.75        37      1     0       0    0.475   10268.6    $1.2662    124.3%
+  k2=10 always           40      1     0       0    0.475   10894.1    $1.3430    131.8%
+  k2=10 oracle            1      1     0       0    0.475    2762.8    $0.3497     34.3%
+```
+
+the headline row is trigger 0.35 to k2=10: accuracy 0.475, exactly fixed k=10s, at 61.5% of its cost ($0.6272 vs $1.0191 per 40). that equality is not luck, its the free window again: any query a wider k can fix was a retrieval miss, every retrieval miss scores at most 0.333 at k=3, and 0.333 sits under the 0.35 trigger, so the trigger catches every fixable query by construction. the same argument caps what raising the trigger can buy at exactly nothing: every row above 0.35 escalates more queries (23 at 0.45, 40 at always) and converts the same 1, because the extra escalations are all queries whose gold doc is already in context. on this corpus the trigger belongs at the floor and not one point higher, and always-escalate is strictly worse than fixed k2 (131.8% of its cost) because it pays the k=3 draft on top of every wide call.
+
+the hurt column is 0 everywhere, and thats measured, not assumed: a wider context can only add competitor sentences, so a correct answer could in principle get outvoted after escalation, but on these 40 queries the gold sentence keeps winning every wider contest it was already winning. answered-without-gold also stays 0: no escalated refusal picks up a confident wrong-doc quote from the wider context.
+
+the oracle rows price what the trigger cannot see. an oracle that escalates only the 1 query escalation actually converts spends $0.3497 at k2=10 against the triggers $0.6272: the 11 pointless escalations, 8 unfixable-by-construction plus 3 where the gold doc arrives and still loses, are 44% of the policys bill. the score is a good refusal signal (roc-auc 0.903) and a weak routing signal, because routing needs to know why the score is low, and that distinction (gold missing vs gold present but paraphrase-bound) is exactly what a single scalar cannot carry.
+
+every policy row is a projection over two floor-0 captures (per-query score, would-be correctness, gold hit, and token counts at k=3 and at each k2), same discipline as the floor sweep, and live escalation servers at two grid points reproduce their projected rows exactly, checked field by field including the dollar totals.
+
 streaming: the first token completes at a mean 22.6% of the response bytes at k=3, computed from the wire encoding itself, so its exact and deterministic. a buffering client waits for 100% on all 40. (this number was 23.3% before the floor extension: the done event now carries the refusal score, so every response is a few bytes longer and the first tokens share of them smaller.)
 
-backpressure against a deliberately slow client (every write blocks one macrotask): on the worst case, the model dumping a whole 466-piece doc, an unbounded queue buffers 465 events / 17668 bytes at peak, the bounded(8) queue holds 8 events / 322 bytes with 457 stalled pushes, meaning generation itself was paced by the client 457 times. same shape 05 measured, now sitting where it belongs, between a server's generator and its socket. with a fast local client the queue never buffers at all (high-water 0 across all 162 logged requests): backpressure machinery is invisible until the client is slow, which is exactly the property you want.
+backpressure against a deliberately slow client (every write blocks one macrotask): on the worst case, the model dumping a whole 466-piece doc, an unbounded queue buffers 465 events / 17668 bytes at peak, the bounded(8) queue holds 8 events / 322 bytes with 457 stalled pushes, meaning generation itself was paced by the client 457 times. same shape 05 measured, now sitting where it belongs, between a server's generator and its socket. with a fast local client the queue never buffers at all (high-water 0 across all 202 logged requests): backpressure machinery is invisible until the client is slow, which is exactly the property you want.
 
 validation is a table of exact rejections: empty or non-string question 400, k outside 1..10 400, question over 500 chars 413, body over 16 KB 413, non-json body 400, GET /ask 405, unknown path 404, unicode question streams fine. every rejection names what was wrong.
 
@@ -87,5 +119,7 @@ this is the applied-ai shape typescript actually ships: an http endpoint, stream
 - compose 11s prefix cache into the request path: system prompt and doc renderings are stable prefixes, so what does the k sweep's cost column look like with cache-billed tokens
 - the queue caps events; a byte-budgeted capacity (05s open thread, now with a server attached) is what a real memory ceiling wants
 - the floor is global while the score distribution is per category (keyword correct answers score high, paraphrase ones hug the floor), so a per-category floor or a score normalized by question length might reopen the free window on harder traffic; needs a corpus where the current window is closed
-- the overlap score prices its own retrieval: a low best-sentence score at k=3 could trigger retry-at-higher-k instead of refusal, spending tokens only on the queries that need them. the k sweep and the score are both already in hand, the policy is unbuilt
+- the trigger sees that a score is low, never why: a second signal that separates gold-missing from paraphrase-bound (the retrieval score margin between the top docs is already computed and on the wire) could route only the fixable misses and close part of the 61.5%-vs-34.3% oracle gap
+- escalation here widens k on the same retriever, so the 8 paraphrase-bound refusals are unreachable by construction; retrying with a different retriever instead (a stemmer, 03s fusion, 25s hyde rewrite) is the escalation that could reach them, and this harness prices it the same way
+- hurt = 0 is this corpus being kind: the gold sentence wins every wider contest it was winning at k=3. a corpus where a distractor sentence outvotes a gold answer only once the context is wide enough would put a real number in the hurt column and make the trigger a two-sided risk
 - put the endpoint under a request herd with 06s limiter and 09s pools composed in front, and measure whether per-request cost logging survives concurrency accounting-clean
