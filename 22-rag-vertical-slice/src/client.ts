@@ -34,6 +34,8 @@ export interface AskResult {
   answer: string;
   tokenEvents: number;
   outcome?: "answered" | "refused";
+  /** The best sentence's overlap score the server made the refusal call on. */
+  bestOverlap?: number;
   usage?: Usage;
   /** Bytes received off the socket, summed over network chunks. */
   totalBytes: number;
@@ -69,8 +71,9 @@ export async function ask(baseUrl: string, body: unknown): Promise<AskResult> {
       result.tokenEvents++;
       if (result.bytesAtFirstToken === undefined) result.bytesAtFirstToken = result.wireBytes;
     } else if (event.event === "done") {
-      const done = JSON.parse(event.data) as { outcome: "answered" | "refused"; usage: Usage };
+      const done = JSON.parse(event.data) as { outcome: "answered" | "refused"; bestOverlap: number; usage: Usage };
       result.outcome = done.outcome;
+      result.bestOverlap = done.bestOverlap;
       result.usage = done.usage;
     }
   };

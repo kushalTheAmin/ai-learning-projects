@@ -61,11 +61,29 @@ export function bestSentence(question: string, context: readonly Doc[]): Sentenc
   return best;
 }
 
-/** The full answer text the stream will carry, decided before streaming. */
-export function answerText(question: string, context: readonly Doc[]): string {
+export interface ScoredAnswer {
+  answer: string;
+  /** The winning sentence's overlap score; 0 when the context held no sentence at all. */
+  bestOverlap: number;
+}
+
+/**
+ * The answer plus the score the refusal decision was made on. The best
+ * sentence does not depend on the floor — the floor only decides whether
+ * that sentence is served or swapped for the refusal — so sweeping the
+ * floor changes who answers, never what an answer says.
+ */
+export function scoredAnswer(question: string, context: readonly Doc[], minOverlap = MIN_OVERLAP): ScoredAnswer {
   const best = bestSentence(question, context);
-  if (best === undefined || best.overlap < MIN_OVERLAP) return REFUSAL;
-  return best.sentence;
+  if (best === undefined || best.overlap < minOverlap) {
+    return { answer: REFUSAL, bestOverlap: best?.overlap ?? 0 };
+  }
+  return { answer: best.sentence, bestOverlap: best.overlap };
+}
+
+/** The full answer text the stream will carry, decided before streaming. */
+export function answerText(question: string, context: readonly Doc[], minOverlap = MIN_OVERLAP): string {
+  return scoredAnswer(question, context, minOverlap).answer;
 }
 
 /**

@@ -14,6 +14,19 @@ import { DocIndex } from "./retrieval.js";
 import { answerPieces, answerText } from "./model.js";
 import { ask } from "./client.js";
 import { evalGolden, type EvalRow } from "./eval.js";
+import {
+  captureScores,
+  correctScores,
+  liveFloorRow,
+  projectFloorRow,
+  rocAuc,
+  scoreStats,
+  sweepThresholds,
+  wrongScores,
+  youdenBest,
+  type FloorRow,
+  type ScoredQuery,
+} from "./floorsweep.js";
 import { runSlowClient } from "./backpressure.js";
 import type { WireEvent } from "./stream.js";
 
@@ -96,6 +109,67 @@ async function main(): Promise<void> {
     console.log(
       `k=1 -> k=3 buys ${fmt(k3.answerAccuracy - k1.answerAccuracy, 3)} answer accuracy for ${fmt(k3.meanTokensIn / k1.meanTokensIn, 2)}x input tokens ($${fmt(k1.totalCostUsd, 4)} -> $${fmt(k3.totalCostUsd, 4)} per 40 questions)`,
     );
+    console.log();
+
+    // --- refusal floor sweep ---
+    console.log("--- refusal floor sweep at k=3: what the 0.35 overlap floor buys and costs ---");
+    const withFloorServer = async <T>(floor: number, run: (url: string) => Promise<T>): Promise<T> => {
+      const floorRag = createRagServer(docs, { minOverlap: floor });
+      await new Promise<void>((resolve) => floorRag.server.listen(0, "127.0.0.1", resolve));
+      const floorUrl = `http://127.0.0.1:${(floorRag.server.address() as AddressInfo).port}`;
+      try {
+        return await run(floorUrl);
+      } finally {
+        floorRag.server.closeAllConnections();
+        await new Promise<void>((resolve, reject) => floorRag.server.close((err) => (err ? reject(err) : resolve())));
+      }
+    };
+
+    const scored: ScoredQuery[] = await withFloorServer(0, async (url) => {
+      const { outcomes } = await evalGolden(url, queries, 3);
+      return captureScores(outcomes);
+    });
+    const positives = correctScores(scored);
+    const negatives = wrongScores(scored);
+    const posStats = scoreStats(positives);
+    const negStats = scoreStats(negatives);
+    console.log(
+      `overlap score as a confidence signal: correct answers ${posStats.count} (score min ${fmt(posStats.min, 3)} mean ${fmt(posStats.mean, 3)} max ${fmt(posStats.max, 3)}), wrong answers ${negStats.count} (min ${fmt(negStats.min, 3)} mean ${fmt(negStats.mean, 3)} max ${fmt(negStats.max, 3)})`,
+    );
+    console.log(`roc-auc (correct vs wrong, mann-whitney with ties at half credit): ${fmt(rocAuc(positives, negatives), 3)}`);
+    const noGoldMax = Math.max(...scored.filter((s) => !s.hit).map((s) => s.bestOverlap));
+    console.log(`highest score among wrong-doc best sentences: ${fmt(noGoldMax, 3)} (any floor above it keeps answered-without-gold at 0)`);
+    const best = youdenBest(sweepThresholds(positives, negatives));
+    console.log(
+      `youden-best floor over observed scores: ${fmt(best.threshold, 3)} (keeps ${fmt(best.recall, 3)} of correct answers, ${fmt(best.fpr, 3)} of wrong ones, precision ${fmt(best.precision, 3)})`,
+    );
+    console.log();
+    console.log("floor  answrd refusd  answer     acc|  wrong  answrd refused");
+    console.log("                         acc  answrd    ans  nogold correct");
+    const floors = [0, 0.15, 0.25, 0.35, 0.45, 0.5, 0.55, 0.65, 0.75, 1.0];
+    for (const floor of floors) {
+      const live: FloorRow = await withFloorServer(floor, async (url) => {
+        const { outcomes } = await evalGolden(url, queries, 3);
+        return liveFloorRow(outcomes, scored, floor);
+      });
+      const projected = projectFloorRow(scored, floor);
+      if (JSON.stringify(live) !== JSON.stringify(projected)) {
+        throw new Error(`floor ${floor}: live endpoint row diverges from the floor-0 projection`);
+      }
+      console.log(
+        [
+          pad(fmt(floor, 2), 5),
+          pad(live.answered, 7),
+          pad(live.refused, 6),
+          pad(fmt(live.answerAccuracy, 3), 8),
+          pad(fmt(live.accuracyAmongAnswered, 3), 8),
+          pad(live.wrongAnswered, 7),
+          pad(live.answeredWithoutGold, 7),
+          pad(live.refusedWouldBeCorrect, 7),
+        ].join(""),
+      );
+    }
+    console.log("every live row above equals its floor-0 projection exactly (checked per floor)");
     console.log();
 
     // --- streaming payoff in bytes ---

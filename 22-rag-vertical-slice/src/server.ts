@@ -10,7 +10,7 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { costUsd, estimateTokens } from "../../08-agent-tool-loop/src/messages.js";
 import type { Doc } from "./data.js";
-import { answerPieces, answerText, REFUSAL, SYSTEM_PROMPT } from "./model.js";
+import { answerPieces, MIN_OVERLAP, REFUSAL, scoredAnswer, SYSTEM_PROMPT } from "./model.js";
 import { DocIndex } from "./retrieval.js";
 import { streamEvents, type StreamSink, type WireEvent } from "./stream.js";
 
@@ -35,6 +35,7 @@ export interface RequestLogEntry {
   k: number;
   retrieved: string[];
   outcome: "answered" | "refused";
+  bestOverlap: number;
   usage: Usage;
   events: number;
   bytes: number;
@@ -44,6 +45,11 @@ export interface RequestLogEntry {
 export interface RagServer {
   server: Server;
   log: RequestLogEntry[];
+}
+
+export interface RagServerOptions {
+  /** Refusal floor on the best sentence's overlap score. */
+  minOverlap?: number;
 }
 
 /** The prompt-shaped rendering of a doc that the token accounting prices. */
@@ -107,7 +113,8 @@ function sinkFor(res: ServerResponse): StreamSink {
   };
 }
 
-export function createRagServer(docs: readonly Doc[]): RagServer {
+export function createRagServer(docs: readonly Doc[], options: RagServerOptions = {}): RagServer {
+  const minOverlap = options.minOverlap ?? MIN_OVERLAP;
   const index = new DocIndex(docs);
   const log: RequestLogEntry[] = [];
   let requestCounter = 0;
@@ -157,7 +164,7 @@ export function createRagServer(docs: readonly Doc[]): RagServer {
     const requestId = `r${String(++requestCounter).padStart(4, "0")}`;
     const retrieved = index.topK(ask.question, ask.k);
     const context = retrieved.map((r) => r.doc);
-    const answer = answerText(ask.question, context);
+    const { answer, bestOverlap } = scoredAnswer(ask.question, context, minOverlap);
     const usage = computeUsage(ask.question, context, answer);
     const outcome = answer === REFUSAL ? "refused" : "answered";
 
@@ -171,7 +178,7 @@ export function createRagServer(docs: readonly Doc[]): RagServer {
         }),
       },
       ...answerPieces(answer).map((piece) => ({ event: "token", data: JSON.stringify({ text: piece }) })),
-      { event: "done", data: JSON.stringify({ outcome, usage }) },
+      { event: "done", data: JSON.stringify({ outcome, bestOverlap, usage }) },
     ];
 
     res.writeHead(200, {
@@ -187,6 +194,7 @@ export function createRagServer(docs: readonly Doc[]): RagServer {
       k: ask.k,
       retrieved: retrieved.map((r) => r.doc.id),
       outcome,
+      bestOverlap,
       usage,
       events: result.events,
       bytes: result.bytes,

@@ -20,6 +20,8 @@ export interface QueryOutcome {
   /** Streamed answer contains the gold answer sentence. */
   correct: boolean;
   served: "answered" | "refused";
+  /** The overlap score the server's refusal decision was made on. */
+  bestOverlap: number;
   usage: Usage;
   wireBytes: number;
   bytesAtFirstToken: number | undefined;
@@ -52,7 +54,13 @@ export async function evalGolden(
   const outcomes: QueryOutcome[] = [];
   for (const query of queries) {
     const result = await ask(baseUrl, { question: query.query, k });
-    if (result.status !== 200 || result.meta === undefined || result.usage === undefined || result.outcome === undefined) {
+    if (
+      result.status !== 200 ||
+      result.meta === undefined ||
+      result.usage === undefined ||
+      result.outcome === undefined ||
+      result.bestOverlap === undefined
+    ) {
       throw new Error(`eval: ${query.id} failed with status ${result.status}${result.error === undefined ? "" : `: ${result.error}`}`);
     }
     outcomes.push({
@@ -61,6 +69,7 @@ export async function evalGolden(
       hit: result.meta.retrieved.some((r) => r.docId === query.docId),
       correct: result.answer.includes(query.answer),
       served: result.outcome,
+      bestOverlap: result.bestOverlap,
       usage: result.usage,
       wireBytes: result.wireBytes,
       bytesAtFirstToken: result.bytesAtFirstToken,
