@@ -26,7 +26,7 @@ OPEN THREADS for the questions worth answering next.
 | 24-extraction-metrics | 2026-08-29 | typescript | json leaf flattening with generic (index-collapsed) paths + field-level extraction scoring (every gold leaf correct/wrong/missing, every predicted leaf correct/wrong/spurious, precision over predicted leaves, recall over gold) + value-normalization ladder L0-L3 (strict, nfkc/casefold/whitespace fold, currency/thousands numeric parse with tolerance, multi-format date to iso refusing ambiguous slash dates) + greedy order-insensitive array alignment scored by per-pair field f1 with deterministic tie-break + per-generic-path tally tables and macro f1 over gold paths + strict deep-equal exact-match accuracy + seeded structured-record flaw family (format drift, leaf dropper, hallucinator, shuffler, lazy truncation, typed corruptor, single-field bungler); imports 05's rng; measured on 12 authored invoices, 224 gold leaves — exact match scores format-drift, tax-bungler, and corruptor identically 0.000 while semantic field F1 reads 1.000/0.946/0.728, the ladder rescues format drift stepwise 0.219→0.397→0.946→1.000 and never moves the corruptor (0.728 flat, the safety check that no layer forgives real errors), alignment recovers the shuffler 0.647→1.000 with delta 0.000 on every other extractor, micro 0.946 hides a 0.000 totals.tax row only the per-path table names, and macro-over-gold-paths is blind to hallucinated structure (hallucinator macro 0.947 above its own micro 0.799 because invented paths have no gold row) |
 | 23-multi-hop-retrieval | 2026-08-29 | python | iterative two-hop retrieval (retrieve, extract bridge terms from the top doc, requery, round-robin merge with dedup) + tf*idf novel-term bridge extraction with question-term exclusion and deterministic (-score, term) tie-break + oracle-bridge ablation splitting extraction failure from hop-2 ranking failure + append vs focus hop-2 query modes + three-bucket hop-1 drift accounting (gold / answer-leak / true drift) + pair@5 both-gold-docs metric; imports 02's bm25/tokenizer/metrics/paired bootstrap; authored 28-doc two-docs-per-service ops corpus (capability doc and infra doc joined only by a service name) with 24 two-hop queries, 8 single-hop blind controls, and trap distractors; measured — answer recall@5 0.667 single vs 0.958 append and 1.000 focus at exactly 2.00 searches per query, paired bootstrap mrr diff +0.080 [+0.043, +0.119] excluding zero, bridge coverage 0.958, focus beats append because question terms re-admit distractors, the one drift firing was a df=1 vocabulary-island echo the interleave dedups away, recall@1 pinned at 0.083 for every system including oracle by the hop1-first merge, controls undamaged at 2x cost |
 | 22-rag-vertical-slice | 2026-08-29 | typescript | vertical rag slice as one live service: node http POST /ask endpoint with strict validation (400 empty/non-string question or bad k, 413 past 500 question chars or 16 KB body, 405/404, unicode fine) + doc-level retrieval over 18's hashed word-feature cosine (one vector per doc, score-desc id-asc ties, all-zero rankings returned and the reader left to refuse) + scripted extractive reader (14's splitter and stopwords, best sentence by fraction of question content words, 0.35 refusal floor, verbatim quote or fixed refusal) + sse server-side event serialization and drain-aware socket writes with 05's bounded AsyncQueue between generation and delivery (wire format roundtrip-pinned against 05's parser over 30 seeded chunkings) + per-request token/cost log via 08's estimator and pricing with a system/question/context split + live-endpoint eval hook over real http (containment against 10's 40 golden queries, misses attributed retrieval-miss vs wrong-sentence vs refusal, keyword/paraphrase split, k sweep) + deterministic first-token byte fraction (client re-encodes parsed events with the server's own serializer, chunk-summed and wire-summed bytes asserted equal) + slow-client backpressure harness (every write blocks one macrotask); data is 10's corpus, no new dataset; measured — hit@k climbs 0.650/0.800/0.900/0.950 across k 1/2/3/5 while answer accuracy crawls 0.350/0.400/0.450/0.475 because extraction among retrieved-gold sits at 0.500 and slips as every extra doc adds distractor sentences, k=1 -> 3 buys 0.100 accuracy for 2.85x input tokens ($0.1228 -> $0.3239 per 40 questions), keyword 0.700 vs paraphrase 0.200 at k=3 with the same lexical machinery failing on both sides of the pipeline, answered-without-gold is 0 in every row (the floor turns misses into refusals, never confident wrong-doc quotes), context is 2318 of 2367 traced input tokens, the first token completes at a mean 23.3% of response bytes, and a 466-piece worst-case dump buffers 465 events / 17668 bytes unbounded vs 8 / 322 bounded(8) with 457 paced pushes, while all 162 fast-client requests hold queue high-water at 0 |
-| 21-vector-store-persistence | 2026-08-29 | python | vector store persistence and mutation over 13's unchanged hnsw (MutableHnswIndex subclasses it, search runs 13's code path): binary file format with length-prefixed sections (json header, raw float64 vectors, u32-framed link lists) and a sha256 trailer verified before any parsing, atomic temp-write-fsync-rename saves + full-state serialization including the rng state (level draws consume it, so growth after load equals growth without a save) + corruption refusal (bit flips, truncation, bad magic, bad version, self-consistent-but-invalid state) + tombstone deletes with over-fetch-and-filter live search + batch hard unlink with one-pass graph-wide edge stripping and entry reassignment + compaction rebuild with id remapping + exact-over-live ground truth + live-from-entry reachability + hub-targeted removal by descending layer-0 degree; measured — a 2000-vector store is 738027 bytes (links are 44% on top of the 512000-byte vectors), roundtrip search identity 150/150 with link-identical continued growth while a reset rng diverges the graph on 12 of 100 new nodes' levels, incremental insert is bit-identical to fresh build at the same order (150/150) and costs 8500499 cumulative dists vs 26299226 rebuild-per-batch (3.09x) with insertion-order recall spread only 0.993-1.000 over 5 shuffles, tombstones hold recall at 0.997+ with zero short results even 70% dead but freeze cost at 304.9 dists/query where a compacted store pays 212.7-291.9 (waste 1.04x-1.43x, break-even 349558 queries at 10% dead collapsing to 18770 at 70%), and hard-unlinking 30% of nodes (even hub-first) leaves the heuristic-built graph at 0.994+ recall and full reachability while the same hub attack on a naive M-closest build collapses reachability to 0.638 after 100 removals and recall to 0.703, the build-time edge-diversity heuristic re-read as delete tolerance |
+| 21-vector-store-persistence | 2026-08-29 | python | vector store persistence and mutation over 13's unchanged hnsw (MutableHnswIndex subclasses it, search runs 13's code path): binary file format with length-prefixed sections (json header, raw float64 vectors, u32-framed link lists) and a sha256 trailer verified before any parsing, atomic temp-write-fsync-rename saves + full-state serialization including the rng state (level draws consume it, so growth after load equals growth without a save) + corruption refusal (bit flips, truncation, bad magic, bad version, self-consistent-but-invalid state) + tombstone deletes with over-fetch-and-filter live search + batch hard unlink with one-pass graph-wide edge stripping and entry reassignment + compaction rebuild with id remapping + exact-over-live ground truth + live-from-entry reachability + hub-targeted removal by descending layer-0 degree; measured — a 2000-vector store is 738027 bytes (links are 44% on top of the 512000-byte vectors), roundtrip search identity 150/150 with link-identical continued growth while a reset rng diverges the graph on 12 of 100 new nodes' levels, incremental insert is bit-identical to fresh build at the same order (150/150) and costs 8500499 cumulative dists vs 26299226 rebuild-per-batch (3.09x) with insertion-order recall spread only 0.993-1.000 over 5 shuffles, tombstones hold recall at 0.997+ with zero short results even 70% dead but freeze cost at 304.9 dists/query where a compacted store pays 212.7-291.9 (waste 1.04x-1.43x, break-even 349558 queries at 10% dead collapsing to 18770 at 70%), and hard-unlinking 30% of nodes (even hub-first, degree ties drawn from a seed and swept over five draws) leaves the heuristic-built graph at 0.980-0.999 recall and full reachability while the same hub attack on a naive M-closest build shrugs off 10% and then goes, 0.758 reachability / 0.724 recall at 20% removed and 0.633 / 0.597 at 30%, the build-time edge-diversity heuristic re-read as delete tolerance |
 | 20-guardrails | 2026-08-28 | typescript | input/output llm guardrails measured for what each check buys and where it goes blind: rule-based pii span detection (regex candidates behind validators, exact [start,end) spans) with a luhn checksum gating card candidates by brand prefix, an empirical shannon-entropy gate separating high-entropy secrets from placeholders, known-secret-prefix rules, dash-formatted ssn field validation, formatted-phone-only scope, ipv4 octet bounds + greedy earliest/longest/priority overlap resolution + typed-placeholder redaction (stable per value) + de-obfuscation normalization (nfkc, zero-width strip, cyrillic/greek homoglyph fold, in-word leetspeak fold, letter-spacing collapse) + weighted-rule prompt-injection scoring (override/exfiltration/hijack/smuggling/encoding rules, distinct-weight sum) with base64 decode-and-rescan + exact mann-whitney roc-auc (half-credit ties) and threshold sweep + a layered pipeline (input score gate -> scripted canary-carrying model -> canary substring check + output pii redaction) + authored 26-message/31-span pii corpus with luhn-fail and low-entropy hard negatives, and a 14-attack/12-benign prompt set with per-attack scripted compliance/leak-style labels; measured — pii detection P/R/F1 1.000/1.000/1.000 on the authored corpus where dropping luhn or the entropy gate each costs one false positive (P 1.000 -> 0.969), injection roc-auc 0.729 raw text -> 0.890 with de-obfuscation entirely from the four obfuscation categories (spacing/leet/homoglyph/base64) going 0% -> 100% detection while plain-text categories are identical in both, one benign message false-flags in both configs on jailbreak-vocabulary collision, and the pipeline's undetected leaks drop 2 -> 1 with the residual being the paraphrased system-prompt leak that carries no canary token, the documented limit of string-level output filtering |
 | 19-eval-regression | 2026-08-28 | python | eval harness with regression gating: templated 6-category golden set (240 committed items, per-item authored distractor and difficulty offset, committed file pinned equal to the builder output by a test) + scripted bernoulli model versions over per-category skill tables (baseline, aggregate-masked slice regression, 3-point uniform drift, uniform improvement; outcomes deterministic per (version, item id, eval seed) via sha256-derived rngs) + persisted run records with a dataset sha256 fingerprint and load-time self-consistency recompute (tampered or truncated artifacts rejected, fingerprint mismatch refuses to compare) + paired run comparison (flip table, per-category deltas, 02's paired bootstrap imported for aggregate and per-slice intervals) + gate policies (naive threshold, aggregate ci, per-slice ci, combined) + gate error rates over 50 seed pairs per scenario against known ground truth + ci-gate power curve over template-generated golden sets; measured — same-model reruns swing up to 7 points on 240 items so a 1-point threshold gate false-alarms 40.0% while the ci gate holds 2.0%, the aggregate-masked regression (date -24pts, five slices +4.8) passes the ci gate in 96% of pairs while the slice gate catches 68.0% at a 16.0% noise false-alarm price (six uncorrected 95% intervals), a real 3-point uniform drift is nearly invisible at this size (ci detection 6.0%), and the power curve says why: 23.3% detection at 240 items, 46.7% at 960, 93.3% at 3840 — a 240-item eval is an alarm for catastrophes, not a caliper for drift |
 | 18-semantic-caching | 2026-08-28 | typescript | two-layer semantic response cache (exact map on normalized text + nearest-neighbor cosine serve at a threshold, earliest-entry tie-break, one entry per normalized key, intent labels carried for the evaluator only, no eviction) + hashed lexical feature embeddings as l2-normalized sparse vectors via the hashing trick (word unigram+bigram and boundary-marked char trigram featurizers, fnv1a mod 2^20, cosine as a sparse dot product over the smaller map) + authored 20-intent / 10-family support dataset whose sibling intents differ in one critical slot (reset password vs api key, enable vs disable 2fa) with filler-wrapped trivial variants, low-overlap paraphrases, and normalized-uniqueness validation + pair-class analysis (trivial/paraphrase/near-miss/unrelated pair sets, per-class similarity stats, threshold operating table, inversion rate = fraction of paraphrase x near-miss comparisons ranking the near-miss higher) + seeded zipf-popularity traffic with greeting/tail filler wrapping and adjacent-letter typo injection + replay accounting that prices misses and counts wrong-intent serves against no-cache and exact-only baselines; imports 05's rng, 08's token estimator and pricing, 16's fnv1a; measured — word-feature class means trivial 0.702 / near-miss 0.372 / paraphrase 0.026 with inversion rate 99.2% (char 98.7%), paraphrase recall 0.0% at every threshold 0.50-0.95 while near-miss fpr only dies at 0.80, so the lexical cache is a fuzzy-exact cache, not a semantic one; replay of 2000 zipf requests: no cache $1.7102, exact-only saves 47.1% at zero risk, word@0.80 saves 81.4% with 0 wrong serves, word@0.50 saves 94.4% at 46.5 wrong answers per 1k, char wrong serves are non-monotone in the threshold (44 at 0.50, 85 at 0.70) because the cache's contents are policy-dependent, and char trigrams serve 233 of 287 typoed requests vs word's 157 at 0.75 while scoring enable-vs-disable 2fa at 0.892 (34 vs 2 wrong serves) |
@@ -125,6 +125,79 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-01] 21 — section 5's hub attack was not selecting hubs. the
+  attack ranks live nodes by layer-0 degree and takes the top `count`, but
+  layer-0 degree is capped at m0 = 32 and 675 of the 2000 heuristic nodes
+  (630 of the naive ones) already sit exactly at the cap, so the ranking
+  leaves a tie group larger than any removal batch in the experiment. the
+  tie broke on `key=lambda pair: (-pair[0], pair[1])` — node id — so the
+  first batch was ids 0 through 100, the 100 earliest vectors inserted, and
+  the later batches stayed mostly inside the same id-ordered cap group. the
+  published number that rested on it was the naive build's live reachability
+  "0.638 after just 100 removals", quoted in the root index table too: no
+  fair tie draw reproduces it (0.751 to 1.000 over five seeds) and removing
+  the 100 earliest inserts by id with the degree term dropped entirely gives
+  0.639, so that cell was measuring insertion order and the readme read it
+  as hub concentration. the fix is `highest_degree_live(count, rng)` on
+  MutableHnswIndex, which draws degree ties from a passed generator, plus
+  `hub_attack_rows` in main.py running both hub columns over five tie seeds
+  and printing the min-max under the table — one arbitrary draw is one draw,
+  the 18 lesson. eleven tests: six on the selection in `tests/test_mutable.py`
+  (including the one that pins what the old tie-break returned: exactly the
+  lowest-id prefix of the cap group), five in a new `tests/test_claims.py`
+  holding the entry point and the readme to it. the revert check splits in
+  two — reverting the source breaks the three tie-break tests and leaves the
+  prose tests green, reverting only the readme breaks exactly the three prose
+  tests. the conclusion survives and lands later than it did: the naive graph
+  shrugs off 10% removed, then falls to 0.758 reachability / 0.724 recall at
+  20% and 0.633 / 0.597 at 30%, where the heuristic graph holds reachability
+  1.000 and recall 0.983. numbers that moved, all in section 5 and the root
+  index row: the heuristic recall band 0.994-0.999 -> 0.980-0.999, the naive
+  30% row 0.703 recall -> 0.597 and reachability -> 0.633, and the retired
+  0.638-at-100-removals headline. sections 1-4 unchanged, `main.py` 2m08s.
+  found and fixed 2026-09-01
+- [medium] 21 — `delete` and `unlink_many` accept numpy integer node ids that
+  the store cannot then serialize. `_check_id` explicitly allows `np.integer`,
+  the id goes into `_deleted` as an `np.int64`, `export_state` hands it to
+  the header as `sorted(self._deleted)`, and `store_to_bytes` dies on
+  `json.dumps` with "Object of type int64 is not JSON serializable". it is a
+  loud failure, not a silent one, and nothing published is affected because
+  `main.py` converts with `int(...)` at every call site — but an index that
+  takes an id class it cannot save is holding a landmine for the first caller
+  who passes ids straight out of a numpy permutation, which is exactly what
+  the delete-order code next door does. either `_check_id` narrows to python
+  ints or `delete`/`unlink_many` coerce. found 2026-09-01
+- [medium] 21 — section 4's causal sentence is refuted by its own last row.
+  "the more you have deleted, the cheaper the rebuild AND the bigger the
+  per-query saving, so the break-even collapses by 19x" — but the per-query
+  saving peaks in the middle and falls off: 304.9 minus the compacted cost
+  gives 13.0, 61.9, 92.2, 60.5 dists at 10/30/50/70% deleted, and the printed
+  waste column says the same thing out loud, 1.04x, 1.25x, 1.43x, 1.25x. the
+  break-even really does collapse 19x, but at 70% that is the cheaper rebuild
+  alone doing the work against a saving that shrank. the readme names the
+  non-monotonicity two sentences later ("one oddity worth naming: the
+  compacted 600-vector store costs 244.4 dists/query, more than the
+  1000-vector one at 212.7") so it contradicts itself in one paragraph rather
+  than hiding anything — same clause-level shape as the 18 finding, a
+  sentence claiming a monotone story the table underneath refuses.
+  found 2026-09-01
+- [low] 21 — the recall helpers die on a fully deleted index where the index
+  itself handles it. `search_live` and `exact_live_topk` both return `[]`
+  when nothing is live, and `test_delete_everything_yields_empty_results`
+  pins that, but `main.py`'s `live_recall` then calls 02's `recall_at_k` with
+  an empty relevant set and gets `ValueError: relevant_ids must be
+  non-empty`, and the reachability cell divides by `live_count` for a
+  `ZeroDivisionError`. unreachable from the entry point (the deepest sweep is
+  70% deleted) and it is the measuring code rather than the store, but the
+  empty-live-set case is handled one layer down and dropped one layer up.
+  found 2026-09-01
+- [low] 21 — section 1's "save 7.9 ms, load 14.5 ms" are pinned values with
+  an "(approximate)" tag rather than a labelled column. three runs on one
+  machine gave 12.9/13.4, 9.6/15.3 and 8.8/13.1, so the quoted pair is one
+  draw of a number that moves tens of percent. this is the same shape as the
+  05 timing finding, which was resolved by labelling the columns as wall
+  clock instead of quoting fixed measurements; the section already carries
+  the words, it just also carries the digits. found 2026-09-01
 - [fixed 2026-08-31] 20 — section 2 explained the 25% exfiltration row with
   two prompts when the row is three misses. the readme said "two of the four
   exfiltration attacks are soft ... they carry no injection keywords at all,
@@ -1037,6 +1110,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 21-vector-store-persistence | 2026-09-01 |
 | 20-guardrails | 2026-08-31 |
 | 18-semantic-caching | 2026-08-31 |
 | 17-confidence-calibration | 2026-08-31 |
@@ -1474,6 +1548,35 @@ and are completely different findings — one is the limit of the method, one is
 a knob set wrong — so a detection column that does not separate them is hiding
 the more actionable half. `missedAtThreshold` exists to print that split.
 
+21 came back clean on the format and the graph and dirty on the attack that
+generates its headline. read the byte layout against the parser field by field
+(the section-size arithmetic closes: 8 magic + 4 version + 4 header length + 8
+vectors length + 8 links length + 32 checksum = the 64 the run prints), the
+checksum is verified before any parsing so no corruption path reaches the graph
+builder, and the refusal tests already fuzz every byte position and every
+truncation cut. the deletes are right: a tombstone leaves the node routing and
+only filters results, `unlink_many` strips in-edges by scanning because layer-0
+edges are genuinely one-way after shrink, entry reassignment picks the
+highest-level live node, and `exact_live_topk` is a real brute-force scan that
+does not touch the distance counter. the cost accounting is honest — every
+cell of experiment 4 runs the same beam width, so the frozen 304.9 is the
+graph's size and nothing else, and the incremental-vs-rebuild comparison is a
+tautology the readme states as one ("incremental insert IS the build path")
+rather than sells as a discovery. sections 1 through 4 all reproduce.
+
+the defect was one layer up, in how experiment 5 chose its victims, and the
+review move that found it was checking the tie-break rather than the metric.
+"highest layer-0 degree" is a sound ranking and a useless one on hnsw, because
+m0 caps the degree and a third of the graph is pinned at the cap — so the
+sort's second key decides the entire experiment, and it was node id. the
+general lesson: a ranked selection over a capped quantity is a tie-break in
+disguise, and the tie-break is the thing to read. the counterfactual is what
+turned it from a smell into a finding — dropping the degree term entirely and
+removing the 100 lowest ids reproduced the published 0.638 to within 0.001,
+which no hub story can explain. two more findings came out of the same read
+(a numpy id class the store cannot serialize, and a monotone claim in section
+4 that the printed waste column contradicts) and are listed open.
+
 ## MECHANISMS
 
 Every algorithm, metric, data structure, and technique implemented somewhere
@@ -1661,7 +1764,7 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - compaction rebuild from live vectors with old-to-new id mapping (21)
 - exact-over-live ground truth scan with (distance, id) ordering, uncounted (21; 13's ExactIndex semantics restricted to the live subset of a mutable store)
 - live reachability from the entry point over layer-0 links (21; 13's reachable_on_layer0 counts from node 0 over all nodes, this one follows routing from the entry and counts live nodes only)
-- hub-targeted delete attack: remove live nodes by descending layer-0 degree (21)
+- hub-targeted delete attack: remove live nodes by descending layer-0 degree, degree ties drawn from a seeded generator and swept over five draws (21; the tie-break is load-bearing, m0 pins a third of the graph at the cap and an id tie-break turns the attack into an insertion-order one)
 - insertion-order recall variance over seeded shuffled builds (21)
 - compaction break-even accounting: rebuild cost divided by per-query distance-computation saving (21)
 - sse server-side event serialization with drain-aware sink writes (22, typescript; the producer half of 05's parser, roundtrip-pinned against it byte for byte)
@@ -1861,6 +1964,7 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - 21: append-only persistence — a snapshot plus a replayed add/delete log; at what mutation rate does replay-on-load beat rewriting the snapshot, and what does the log cost at query time?
 - 21: the compaction break-even treats the store as frozen while queries arrive — with continuous inserts and deletes it becomes a scheduling policy, the same shape as lsm compaction, unmeasured
 - 21: per-query cost is non-monotone in index size at fixed ef (212.7 dists at 1000 vectors vs 244.4 at 600) — mapping the ef-vs-n cost surface would say when shrinking the store stops paying at fixed beam width
+- 21: insertion order turned out to be its own removal attack, and a sharper one than a fair hub attack at small batches (naive live reachability 0.639 after removing the 100 earliest inserts vs 0.751-1.000 for five fair degree draws) — early nodes are what a small graph had to route everything through, so an age column beside the degree one would say whether age or degree better predicts what a graph cannot lose, and whether the two even pick different nodes once a build is large
 
 - 22: a real model behind the same harness — does answer accuracy finally track hit@k once extraction stops being lexical, and is a better reader or a better retriever the cheaper fix for the 0.200 paraphrase column
 - 22: compose 11's prefix cache into the request path — system prompt and doc renderings are stable prefixes, so what does the k sweep's cost column become with cache-billed tokens
