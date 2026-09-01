@@ -191,6 +191,26 @@ class MutableHnswIndex(HnswIndex):
         self._check_id(node)
         return len(self._links[node][0])
 
+    def highest_degree_live(self, count: int, rng: np.random.Generator) -> list[int]:
+        """The count most connected live nodes on layer 0, ties drawn from rng.
+
+        The tie-break is the whole reason this takes an rng. Layer-0 degree
+        is capped at m0 and a large share of a built graph sits exactly at
+        the cap, so ranking by degree leaves hundreds of nodes level with
+        each other. Breaking that tie by node id would return the lowest ids,
+        which are the earliest inserts, and an insertion-order removal is a
+        different attack with a different answer.
+        """
+        if count < 0:
+            raise ValueError(f"count must be >= 0, got {count}")
+        live = self.live_ids()
+        draws = rng.permutation(len(live))
+        ranked = sorted(
+            zip((self.layer0_degree(node) for node in live), draws, live),
+            key=lambda triple: (-triple[0], triple[1]),
+        )
+        return [node for _, _, node in ranked[:count]]
+
     def node_level(self, node: int) -> int:
         """Top layer this node exists on."""
         self._check_id(node)

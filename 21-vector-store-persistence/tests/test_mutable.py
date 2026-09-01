@@ -145,6 +145,70 @@ class TestUnlink:
         assert index.reachable_live_from_entry() <= index.live_count
 
 
+class TestHighestDegreeLive:
+    """The hub attack has to pick hubs.
+
+    Layer-0 degree is capped at m0 and a large share of any built graph sits
+    exactly at the cap, so "highest layer-0 degree" leaves a big tie group.
+    Resolving that group by node id is not a hub attack, it is an
+    insertion-order attack: the lowest ids are the earliest inserts.
+    """
+
+    def saturated(self, n: int = 300) -> MutableHnswIndex:
+        index = small_index(n=n)
+        cap_nodes = [i for i in index.live_ids() if index.layer0_degree(i) == index.m0]
+        assert len(cap_nodes) > 40, "fixture must leave a real tie group at the cap"
+        return index
+
+    def test_picks_the_most_connected_first(self):
+        index = self.saturated()
+        picked = index.highest_degree_live(40, np.random.default_rng(0))
+        assert len(picked) == len(set(picked)) == 40
+        skipped = set(index.live_ids()) - set(picked)
+        assert min(index.layer0_degree(n) for n in picked) >= max(
+            index.layer0_degree(n) for n in skipped
+        )
+
+    def test_ties_are_not_broken_by_insertion_order(self):
+        index = self.saturated()
+        cap = index.m0
+        tied = sorted(n for n in index.live_ids() if index.layer0_degree(n) == cap)
+        # what breaking the tie by node id picks: the earliest 40 inserts
+        by_id = sorted(
+            ((index.layer0_degree(n), n) for n in index.live_ids()),
+            key=lambda pair: (-pair[0], pair[1]),
+        )[:40]
+        assert [n for _, n in by_id] == tied[:40]
+        assert set(index.highest_degree_live(40, np.random.default_rng(0))) != set(tied[:40])
+
+    def test_different_tie_seeds_pick_different_nodes(self):
+        index = self.saturated()
+        a = index.highest_degree_live(40, np.random.default_rng(0))
+        b = index.highest_degree_live(40, np.random.default_rng(1))
+        assert set(a) != set(b)
+        assert all(index.layer0_degree(n) == index.m0 for n in a + b)
+
+    def test_same_seed_repeats(self):
+        index = self.saturated()
+        first = index.highest_degree_live(40, np.random.default_rng(0))
+        assert first == index.highest_degree_live(40, np.random.default_rng(0))
+
+    def test_skips_deleted_and_returns_plain_ints(self):
+        index = self.saturated()
+        gone = index.highest_degree_live(5, np.random.default_rng(0))
+        index.unlink_many(gone)
+        picked = index.highest_degree_live(20, np.random.default_rng(0))
+        assert not set(picked) & set(gone)
+        assert all(type(node) is int for node in picked)
+
+    def test_count_edges(self):
+        index = small_index(n=30)
+        assert index.highest_degree_live(0, np.random.default_rng(0)) == []
+        assert len(index.highest_degree_live(999, np.random.default_rng(0))) == 30
+        with pytest.raises(ValueError, match="count"):
+            index.highest_degree_live(-1, np.random.default_rng(0))
+
+
 class TestCompact:
     def test_compact_keeps_exactly_live_vectors(self):
         index = small_index()

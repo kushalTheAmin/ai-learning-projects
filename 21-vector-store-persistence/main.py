@@ -10,7 +10,7 @@ Five experiments on one seeded clustered dataset:
 4. tombstone deletes: recall, result shortfall, wasted distance
    computations, and the compaction break-even.
 5. unlinking hubs vs random nodes: how much graph damage hard deletes do,
-   with tombstones as the control.
+   with tombstones as the control, over five draws of the degree tie-break.
 
 Everything is deterministic except wall-clock lines, which are labelled.
 Distance computations are the portable cost unit, as in 13.
@@ -45,6 +45,8 @@ EF = 80
 M = 16
 EF_CONSTRUCTION = 100
 DELETE_ORDER_SEED = 7
+UNLINK_STEPS = (100, 200, 400, 600)
+HUB_TIE_SEEDS = (0, 1, 2, 3, 4)
 
 
 def build_index(vectors: np.ndarray, seed: int = SEED) -> MutableHnswIndex:
@@ -280,6 +282,26 @@ def experiment_tombstones(base: MutableHnswIndex, queries: np.ndarray) -> None:
     print()
 
 
+def hub_attack_rows(
+    source: MutableHnswIndex,
+    queries: np.ndarray,
+    tie_seed: int,
+    steps: tuple[int, ...] = UNLINK_STEPS,
+) -> list[tuple[float, float]]:
+    """(recall, live reachability) after each cumulative batch of the
+    highest-layer-0-degree attack, degree ties drawn from tie_seed. Works on
+    a clone; the source index is left alone."""
+    index = source.clone()
+    rng = np.random.default_rng(tie_seed)
+    rows, done = [], 0
+    for count in steps:
+        index.unlink_many(index.highest_degree_live(count - done, rng))
+        done = count
+        recall, _, _ = live_recall(index, queries)
+        rows.append((recall, index.reachable_live_from_entry() / index.live_count))
+    return rows
+
+
 def experiment_unlink(
     base: MutableHnswIndex, vectors: np.ndarray, queries: np.ndarray
 ) -> None:
@@ -287,7 +309,7 @@ def experiment_unlink(
     print(
         "the fourth column is the same hub attack on a graph built with naive "
         "M-closest selection instead of the paper's heuristic (13's ablation): "
-        "same vectors, same removals, different edges"
+        "same vectors, same attack, different edges"
     )
     order = np.random.default_rng(DELETE_ORDER_SEED).permutation(len(base))
     naive_base = MutableHnswIndex(
@@ -295,42 +317,62 @@ def experiment_unlink(
     )
     for row in vectors[: len(base)]:
         naive_base.add(row)
-    tomb, rand, hub, naive = base.clone(), base.clone(), base.clone(), naive_base
+    tomb, rand = base.clone(), base.clone()
 
-    def hub_batch(index: MutableHnswIndex, count: int) -> list[int]:
-        degrees = sorted(
-            ((index.layer0_degree(node), node) for node in index.live_ids()),
-            key=lambda pair: (-pair[0], pair[1]),
-        )
-        return [node for _, node in degrees[:count]]
+    def at_cap(index: MutableHnswIndex) -> int:
+        return sum(1 for node in range(len(index)) if index.layer0_degree(node) == index.m0)
 
-    def cells(indexes: list[MutableHnswIndex]) -> list[str]:
-        out = []
-        for index in indexes:
-            recall, _, _ = live_recall(index, queries)
-            reach = index.reachable_live_from_entry() / index.live_count
-            out.append(f"{recall:.3f} / {reach:.3f}")
-        return out
+    print(
+        f"layer-0 degree caps at {base.m0}, where {at_cap(base)} of {len(base)} "
+        f"heuristic nodes and {at_cap(naive_base)} of {len(naive_base)} naive nodes "
+        f"already sit, so ranking by degree leaves a tie group bigger than any "
+        f"batch below: the hub columns break those ties on a seed, because "
+        f"breaking them on the node id would remove the earliest inserts instead"
+    )
 
+    heuristic_runs = [hub_attack_rows(base, queries, seed) for seed in HUB_TIE_SEEDS]
+    naive_runs = [hub_attack_rows(naive_base, queries, seed) for seed in HUB_TIE_SEEDS]
+
+    def cell(index: MutableHnswIndex) -> str:
+        recall, _, _ = live_recall(index, queries)
+        return f"{recall:.3f} / {index.reachable_live_from_entry() / index.live_count:.3f}"
+
+    print(
+        f"recall / live reachability, hub columns at tie seed {HUB_TIE_SEEDS[0]}"
+    )
     print(
         "removed | tombstone      | random unlink  | hub unlink     | "
         "hub unlink on naive build"
     )
-    row = cells([tomb, rand, hub, naive])
-    print(f"   0 (  0%) | {row[0]} | {row[1]} | {row[2]} | {row[3]}")
+    start, naive_start = cell(tomb), cell(naive_base)
+    print(f"   0 (  0%) | {start} | {start} | {start} | {naive_start}")
     done = 0
-    for count in (100, 200, 400, 600):
+    for step, count in enumerate(UNLINK_STEPS):
         batch = [int(node) for node in order[done:count]]
         for node in batch:
             tomb.delete(node)
         rand.unlink_many(batch)
-        hub.unlink_many(hub_batch(hub, count - done))
-        naive.unlink_many(hub_batch(naive, count - done))
         done = count
-        row = cells([tomb, rand, hub, naive])
+        hub_recall, hub_reach = heuristic_runs[0][step]
+        naive_recall, naive_reach = naive_runs[0][step]
         print(
-            f"{count:4d} ({count / len(base):4.0%}) | {row[0]} | {row[1]} | "
-            f"{row[2]} | {row[3]}"
+            f"{count:4d} ({count / len(base):4.0%}) | {cell(tomb)} | {cell(rand)} | "
+            f"{hub_recall:.3f} / {hub_reach:.3f} | {naive_recall:.3f} / {naive_reach:.3f}"
+        )
+
+    print(
+        f"the tie draw is arbitrary, so both hub columns over tie seeds "
+        f"{HUB_TIE_SEEDS[0]}..{HUB_TIE_SEEDS[-1]} (min-max):"
+    )
+    print("removed | hub recall    | hub reach     | naive recall  | naive reach")
+    for step, count in enumerate(UNLINK_STEPS):
+        def span(runs: list[list[tuple[float, float]]], column: int) -> str:
+            values = [run[step][column] for run in runs]
+            return f"{min(values):.3f}-{max(values):.3f}"
+
+        print(
+            f"{count:7d} | {span(heuristic_runs, 0)} | {span(heuristic_runs, 1)} | "
+            f"{span(naive_runs, 0)} | {span(naive_runs, 1)}"
         )
     print()
 

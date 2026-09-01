@@ -98,16 +98,25 @@ everything, so per-query cost is not monotone in index size.
 
 **5. hard deletes need graph diversity to survive.** unlinking up to 30% of
 the heuristic-built graph, chosen either at random or by highest layer-0
-degree (a deliberate hub attack), recall never leaves the 0.994 to 0.999
-band and every
-live node stays reachable. the same hub attack on a graph built with naive
-M-closest selection (13's ablation, same vectors, same removals) collapses
-live reachability to 0.638 after just 100 removals and drags recall from an
-already-worse 0.844 down to 0.703 at 30%. the heuristic's job in 13 was
-keeping rare cross-cluster edges at build time; this is the same property
-read as redundancy under damage. naive graphs concentrate connectivity in
-hubs, so the hubs are single points of failure. tombstones, the control
-column, sit at 0.997 throughout because they dont touch the graph at all.
+degree (a deliberate hub attack), recall never leaves the 0.980 to 0.999
+band and every live node stays reachable from the entry point. layer-0
+degree caps at 32 and 675 of the 2000 heuristic nodes already sit there (630
+of the naive ones), so "highest degree" leaves a tie group bigger than any
+batch here, and the tie has to be broken on something: a seed, redrawn five
+times, since breaking it on the node id would quietly remove the earliest
+inserts instead of the hubs. the same attack on a graph built with naive
+M-closest selection (13's ablation, same vectors, same attack, different
+edges) shrugs off 10% and then goes: at 20% removed live reachability falls
+to 0.758 and recall to 0.724, at 30% to 0.633 and 0.597, against an already-
+worse 0.844 start. across the five tie draws that is 0.621 to 0.743
+reachability and 0.597 to 0.723 recall at 30%, where the heuristic graph
+holds reachability 1.000 and recall 0.980 to 0.999, so the gap is much
+wider than the draw. the heuristic's job in 13 was keeping rare
+cross-cluster edges at build time; this is the same property read as
+redundancy under damage. naive graphs route through fewer, more loaded
+nodes, so taking the loaded ones out cuts the graph in pieces. tombstones,
+the control column, sit at 0.997 throughout because they dont touch the
+graph at all.
 
 ## tradeoffs and where it breaks down
 
@@ -134,6 +143,21 @@ plus numpy buffers, all boring on purpose. a typescript port would have
 rebuilt the index first, and one implementation per language per mechanism
 is a repo rule.
 
+## fixes
+
+- 2026-09-01 — section 5's hub attack was not picking hubs. layer-0 degree
+  caps at 32 and 675 of the 2000 nodes sit exactly there, so ranking by
+  degree left a tie group larger than any batch and the tie broke on node
+  id — the first batch was ids 0 through 100, the earliest inserts. degree
+  ties are drawn from a seed now, five of them, and both hub columns publish
+  the min-max. the number that came out was the naive graph's live
+  reachability "0.638 after just 100 removals": no fair draw reproduces it
+  (0.751 to 1.000) and removing the 100 earliest inserts by id alone gives
+  0.639, so that cell was measuring insertion order. the conclusion holds
+  and arrives later — the naive graph shrugs off 10%, then falls to 0.633
+  reachability and 0.597 recall at 30% removed, where the heuristic graph
+  holds 1.000 and 0.983
+
 ## open questions
 
 - unlink-with-repair: reconnect each removed node's in-neighbors to its
@@ -152,3 +176,9 @@ is a repo rule.
 - per-query cost was non-monotone in index size at fixed ef (212.7 at 1000
   vectors, 244.4 at 600); mapping the ef-vs-n cost surface would say when
   shrinking the store stops paying at fixed beam width.
+- removing the earliest-inserted nodes turned out to be its own attack, and a
+  sharper one than a fair hub attack at small batch sizes (naive live
+  reachability 0.639 vs 0.751-1.000 after 100 removals); early inserts are
+  the nodes a small graph had to route everything through, so an
+  insertion-order column beside the degree one would say whether age or
+  degree is the better predictor of what a graph cannot lose.
