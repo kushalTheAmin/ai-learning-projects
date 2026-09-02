@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "tsx src/main.ts",
+    "start:irreversible": "tsx src/irreversible.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

@@ -48,13 +48,20 @@ export interface AssembledContext {
   keptTurns: Turn[];
   /** Sentences of evicted turns that survived into the summary block (summarize-evicted only). */
   summarySentences: string[];
+  /**
+   * Tokens of the sentences handed to the salience scorer on this call, set
+   * only on calls where a summary was (re)built. For summarize-evicted that
+   * pool is every evicted sentence, every time — the re-read bill an
+   * incremental summarizer exists to avoid.
+   */
+  summaryWorkTokens?: number;
 }
 
 export function renderTurn(turn: Turn): string {
   return `${turn.role}: ${turn.text}`;
 }
 
-const SUMMARY_HEADER = "summary of earlier turns:";
+export const SUMMARY_HEADER = "summary of earlier turns:";
 
 function baseParts(system: string, currentUser: Turn): { parts: string[]; tokens: number } {
   const parts = [system, renderTurn(currentUser)];
@@ -62,7 +69,7 @@ function baseParts(system: string, currentUser: Turn): { parts: string[]; tokens
 }
 
 /** Newest-first greedy fill: keep whole recent turns while they fit. */
-function fillTail(history: readonly Turn[], room: number): { kept: Turn[]; used: number } {
+export function fillTail(history: readonly Turn[], room: number): { kept: Turn[]; used: number } {
   const kept: Turn[] = [];
   let used = 0;
   for (let i = history.length - 1; i >= 0; i--) {
@@ -75,7 +82,7 @@ function fillTail(history: readonly Turn[], room: number): { kept: Turn[]; used:
   return { kept, used };
 }
 
-function finish(system: string, summaryBlock: string | null, kept: Turn[], currentUser: Turn, overBudget: boolean, summarySentences: string[]): AssembledContext {
+export function finish(system: string, summaryBlock: string | null, kept: Turn[], currentUser: Turn, overBudget: boolean, summarySentences: string[]): AssembledContext {
   const parts: string[] = [system];
   if (summaryBlock !== null) parts.push(summaryBlock);
   for (const t of kept) parts.push(renderTurn(t));
@@ -139,13 +146,17 @@ export function assembleContext(
   const evicted = history.slice(0, history.length - kept.length);
   let summaryBlock: string | null = null;
   let summarySentences: string[] = [];
+  let workTokens: number | undefined;
   if (evicted.length > 0 && summaryBudget > headerCost) {
     const evictedSentences = evicted.flatMap((t) => sentences(t.text));
     const scorer = (config.summarizer ?? "luhn") === "luhn" ? luhnScorer() : rarityScorer();
+    workTokens = evictedSentences.reduce((n, s) => n + estimateTokens(s), 0);
     summarySentences = summarize(evictedSentences, summaryBudget - headerCost, scorer);
     if (summarySentences.length > 0) {
       summaryBlock = `${SUMMARY_HEADER} ${summarySentences.join(" ")}`;
     }
   }
-  return finish(system, summaryBlock, kept, currentUser, false, summarySentences);
+  const ctx = finish(system, summaryBlock, kept, currentUser, false, summarySentences);
+  if (workTokens !== undefined) ctx.summaryWorkTokens = workTokens;
+  return ctx;
 }

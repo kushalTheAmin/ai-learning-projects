@@ -107,14 +107,72 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
   around what the sweep shows — no gap in it clears two standard errors at 120
   probes a side — and pinned by a test. no measured number moved
 
+## extension: the incremental summary, and what irreversibility costs
+
+the summarize policy above is stateless: every call it re-reads every evicted turn and packs a fresh summary. that makes it an upper bound in two directions at once. it pays a re-read bill that grows with the whole conversation, and it can resurrect a sentence an earlier packing dropped, because next call the full evicted text is back on the table. no production summarizer works like that. the production shape folds turns into a running summary once, and each compaction sees only the previous summary plus the newly evicted turns. a sentence the packer drops is gone for good.
+
+`src/incremental.ts` is that shape, built on the same fillTail, packing, and rendering arithmetic as the stateless policy, so on its very first compaction the two produce byte-identical contexts (pinned by a test). after that they diverge, and the divergence is the measurement. two regimes: the original 30-exchange conversations, and a 60-exchange long regime where far more text passes through the summary. same 240 probes each.
+
+```
+npm run start:irreversible
+```
+
+what came out, share 25%, both regimes (work/conv is tokens handed to the sentence ranker per conversation, the stand-in for what an llm summarizer would have to re-read; drop/conv is sentences discarded per conversation; sum-tok is the running summary size after the last call):
+
+```
+=== standard regime (30 exchanges): recompute vs incremental at summary share 25% ===
+policy              budget   overall    short   medium     long   work/conv   cmp/conv   drop/conv   sum-tok
+recompute-luhn-25%     400     42.1%   100.0%    26.3%     0.0%       21297       25.0           -         -
+increm-luhn-25%        400     42.1%   100.0%    26.3%     0.0%        3038       23.4        68.5      71.1
+recompute-luhn-25%     800     71.3%   100.0%    98.8%    15.0%       14231       19.1           -         -
+increm-luhn-25%        800     69.6%   100.0%    98.8%    10.0%        4017       17.6        48.6     171.0
+recompute-luhn-25%    1600     99.6%   100.0%   100.0%    98.8%        3121        5.8           -         -
+increm-luhn-25%       1600     99.6%   100.0%   100.0%    98.8%        2195        5.2        13.1     370.4
+recompute-rarity-25%     400     60.0%   100.0%    53.8%    26.3%       21297       25.0           -         -
+increm-rarity-25%      400     53.3%   100.0%    53.8%     6.3%        3031       23.3        67.8      72.1
+recompute-rarity-25%     800     85.8%   100.0%   100.0%    57.5%       14231       19.1           -         -
+increm-rarity-25%      800     82.1%   100.0%   100.0%    46.3%        3992       17.5        49.9     167.8
+recompute-rarity-25%    1600    100.0%   100.0%   100.0%   100.0%        3121        5.8           -         -
+increm-rarity-25%     1600    100.0%   100.0%   100.0%   100.0%        2186        5.2        13.3     368.2
+
+=== long regime (60 exchanges): recompute vs incremental at summary share 25% ===
+policy              budget   overall    short   medium     long   work/conv   cmp/conv   drop/conv   sum-tok
+recompute-luhn-25%     400     40.8%   100.0%    22.5%     0.0%       91255       54.3           -         -
+increm-luhn-25%        400     40.8%   100.0%    22.5%     0.0%        6754       52.9       157.9      66.8
+recompute-luhn-25%     800     70.8%   100.0%    98.8%    13.8%       76056       48.2           -         -
+increm-luhn-25%        800     70.8%   100.0%    98.8%    13.8%       10667       46.8       137.9     170.4
+recompute-luhn-25%    1600     97.5%   100.0%   100.0%    92.5%       48979       35.2           -         -
+increm-luhn-25%       1600     96.7%   100.0%   100.0%    90.0%       14600       34.2        98.8     369.8
+recompute-rarity-25%     400     66.3%   100.0%    58.8%    40.0%       91255       54.3           -         -
+increm-rarity-25%      400     51.7%   100.0%    51.2%     3.8%        6767       52.9       157.6      67.8
+recompute-rarity-25%     800     92.9%   100.0%   100.0%    78.8%       76056       48.2           -         -
+increm-rarity-25%      800     87.5%   100.0%    98.8%    63.7%       10614       46.9       139.2     167.4
+recompute-rarity-25%    1600    100.0%   100.0%   100.0%   100.0%       48979       35.2           -         -
+increm-rarity-25%     1600     99.6%   100.0%   100.0%    98.8%       14563       34.2       100.8     368.9
+```
+
+reading it:
+
+- **irreversibility is priced in long-lag retention, and only where the summary was earning anything.** rarity at budget 400 in the long regime loses 14.6 points overall (66.3% recompute vs 51.7% incremental), and the whole loss is the long-lag column collapsing from 40.0% to 3.8%. same cell under luhn: gap 0.0 points, because luhn's summary was keeping repeated chatter rather than facts, so there was nothing to lose. a policy has to be good before irreversibility can hurt it
+- **the gap grows with pressure and shrinks with slack.** rarity gaps run 6.7 / 3.7 / 0.0 points across budgets 400 / 800 / 1600 in the standard regime, and 14.6 / 5.4 / 0.4 in the long one. at 1600 nearly everything survives in the raw tail anyway, so the summary is decoration and both shapes agree
+- **what recompute pays for those points is the actual story.** at budget 400 in the long regime it re-reads 13.5x the tokens (91255 vs 6767 per conversation), at 800 it is 7.2x, at 1600 3.4x. and recompute's bill grows with conversation length while incremental's per-call bill is bounded by summary size plus newly evicted text: the standard regime costs recompute 21297 work tokens per conversation, the long regime 91255, 4.3x for 2x the exchanges. that superlinear growth is exactly why nobody ships the recompute shape, and now the retention it buys has a number attached
+- **a transiently long user turn permanently shrinks the summary.** when a call arrives with less room and nothing new to fold, the running summary must repack itself down to the smaller block, and the sentences it sheds do not come back when the next call has normal room again (2 to 3 such shrink repacks per 20-conversation cell here, pinned by a test). the stateless policy just repacks bigger next call and never notices
+
+the share sweep at budget 800 in the long regime sharpens the first point. under rarity the recompute advantage grows with the share, because a bigger summary block is a bigger fraction of retention riding on the summarizer: recompute-rarity-50% holds 98.8% overall while increm-rarity-50% holds 89.6%, a 9.2-point gap at the same budget. and in the one corner where the summary holds nearly nothing (luhn at share 10%), incremental actually wins by half a point, 76.3% vs 75.8%: a fact sentence that survives an early packing is locked in for good, while recompute re-ranks the whole pool every call and can drop it later. irreversibility cuts both ways, it just cuts against you far more often
+
+sum-tok says the discards are real: at share 25% the running summary ends within a few tokens of its block budget (167 to 171 at budget 800, against a block of roughly 180), so the packer is dropping sentences because it must, not because they scored zero
+
 ## why typescript
 
 this is the day-job shape of the problem: a chat backend deciding what to send on every request, in the stack where those backends actually get written. it also composes with the ts projects already here, 08's token estimator and pricing are imported directly rather than reimplemented, and the summarizers only needed maps and regexes, nothing from the python ecosystem
 
 ## open questions
 
-- an incremental running summary (summarize once, carry forward, never revisit) against this recompute-from-scratch upper bound: how much retention does the irreversibility actually cost?
 - assistant answers that restate facts would refresh them into a sliding window. how much of rarity-summarization's edge survives a workload where re-mention is common?
 - every standalone vs buried gap here sits inside noise at 120 probes a side. does the effect exist at all — more conversations, or the same fact planted at a controlled sentence length — and if it does, is it mean-based scoring diluting the nonce or just the extra tokens a buried turn costs a window?
 - retention here is binary presence. wiring these contexts into a scripted answerer (08's pattern) would price what a *missing* fact costs in wrong answers, not just percentage points
-- the budgets sweep 400 to 3200 on 30-exchange conversations. the interesting production regime is the 200-exchange support thread, where even rarity-50% must eventually saturate its summary block. where does it bend?
+- the extension took the regime from 30 to 60 exchanges and the irreversibility gap widened (3.7 to 5.4 points for rarity-25% at 800). the 200-exchange support thread is still unrun, and the gap there is not obviously a straight extrapolation: the summary block saturates and every compaction past that point is zero-sum
+- summary sentences carry no age. once the block saturates, each compaction competes newly folded sentences against ancient ones on salience alone, so a conversation's early facts can squat in the block forever. an age-decayed score, or a reserved share for recent folds, changes what irreversibility deletes, and neither is measured
+- the shrink repack means one long user turn permanently costs summary sentences. packing to a floor below the block budget, or deferring the repack one call, would absorb transients; what either buys back is unmeasured
+- increm-luhn-10% beating its own recompute row by half a point says lock-in can protect a fact from later re-ranking. one cell is an anecdote; whether small-share incremental summaries systematically benefit from lock-in is a sweep away
+- both summarizers here select sentences verbatim. a real llm summarizer rewrites, so its irreversibility compounds through paraphrase drift (the summary of a summary of a summary), which extractive selection structurally cannot show. that measurement needs a model
