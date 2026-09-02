@@ -52,18 +52,32 @@ def test_lsa_first_stage_published_number(evaluator):
     assert evaluation.mrr_by_category["keyword"] == pytest.approx(0.95, abs=1e-9)
 
 
-def test_maxsim_reranking_hurts_on_this_corpus(evaluator):
-    """Same space, finer interaction, worse ranking: the negative result."""
+def test_maxsim_buys_an_unestablished_gain_at_two_orders_of_magnitude(evaluator):
+    """The published maxsim result: over the same untrained term vectors it
+    lands nominally above the stage it reranks, the bootstrap cannot separate
+    that from zero, and it costs ~95x the pooled scorer to get there."""
     bm25 = evaluator.run_first_stage("bm25")
-    for depth in (10, 20, 100):
-        maxsim = evaluator.run_reranked("bm25", "maxsim", depth)
-        assert maxsim.system.mrr < bm25.mrr
-        assert maxsim.demoted > maxsim.promoted
-        # every doc it demotes is a paraphrase query: exact-match cosine 1.0
-        # plus the stable sort keeps keyword rankings intact
-        assert maxsim.system.mrr_by_category["keyword"] == pytest.approx(
-            bm25.mrr_by_category["keyword"], abs=1e-12
-        )
+    maxsim = evaluator.run_reranked("bm25", "maxsim", 20)
+    pooled = evaluator.run_reranked("bm25", "pooled-lsa", 20)
+    assert maxsim.system.mrr > bm25.mrr
+    gap = evaluator.compare(maxsim.system, bm25)
+    assert gap.ci.lo < 0.0 < gap.ci.hi, "the gain must not be sold as established"
+    assert (
+        maxsim.system.latent_dots_per_query
+        > 90 * pooled.system.latent_dots_per_query
+    )
+    # it still demotes queries the first stage had right
+    assert maxsim.demoted > 0
+
+
+def test_maxsim_is_non_monotone_in_shortlist_depth(evaluator):
+    """More candidates is not better for it: past depth 20 the extra docs
+    cost mrr, unlike the pooled scorer which flattens out."""
+    at_20 = evaluator.run_reranked("bm25", "maxsim", 20).system.mrr
+    at_50 = evaluator.run_reranked("bm25", "maxsim", 50).system.mrr
+    at_100 = evaluator.run_reranked("bm25", "maxsim", 100).system.mrr
+    assert at_20 > at_50
+    assert at_50 == pytest.approx(at_100, abs=1e-12)
 
 
 def test_depth_sweep_published_numbers(evaluator):
@@ -71,10 +85,10 @@ def test_depth_sweep_published_numbers(evaluator):
         0.858, abs=5e-4
     )
     assert evaluator.run_reranked("bm25", "maxsim", 20).system.mrr == pytest.approx(
-        0.838, abs=5e-4
+        0.867, abs=5e-4
     )
     assert evaluator.run_reranked("bm25", "maxsim", 100).system.mrr == pytest.approx(
-        0.825, abs=5e-4
+        0.854, abs=5e-4
     )
 
 

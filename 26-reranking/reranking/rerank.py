@@ -43,13 +43,19 @@ class Scorer(Protocol):
 
 
 class MaxSimScorer:
-    """Idf-weighted mean over query terms of max cosine to any doc term.
+    """Sum over query terms of max cosine to any doc term.
+
+    This is ColBERT's late interaction as defined, S(q,d) = sum over query
+    terms of the best cosine that term finds in the document: every query
+    term contributes its own max with weight 1. Weighting the terms makes
+    it a different scorer, so anything measured here about late interaction
+    has to come out of the unweighted sum.
 
     A query with no in-vocabulary terms, or a doc with no in-vocabulary
     terms, scores 0.0 at zero cost: the space knows nothing about either
     side, so the scorer must not reorder on it. An exact term match
     contributes cosine 1.0, so a doc containing every query term scores
-    exactly 1.0.
+    exactly |query terms|, the ceiling for that query.
     """
 
     name = "maxsim"
@@ -70,10 +76,7 @@ class MaxSimScorer:
                 scores[doc_id] = 0.0
                 continue
             sims = space.term_vectors[query_indices] @ space.term_vectors[doc_indices].T
-            weights = space.idf[query_indices]
-            scores[doc_id] = float(
-                (weights * sims.max(axis=1)).sum() / weights.sum()
-            )
+            scores[doc_id] = float(sims.max(axis=1).sum())
             total_dots += sims.size
         return scores, total_dots
 

@@ -31,18 +31,24 @@ def bm25_scorer(evaluator):
     return Bm25Scorer(evaluator.bm25, evaluator.doc_ids)
 
 
-def test_maxsim_scores_a_doc_against_its_own_text_at_one(evaluator, maxsim, docs):
+def test_maxsim_scores_a_doc_against_its_own_text_at_its_term_count(
+    evaluator, maxsim, docs
+):
     doc = docs[0]
+    n_terms = len(evaluator.space.term_indices(doc.text))
     scores, _ = maxsim.score(make_query(doc.text), [doc.doc_id])
-    assert scores[doc.doc_id] == pytest.approx(1.0, abs=1e-9)
+    assert scores[doc.doc_id] == pytest.approx(float(n_terms), abs=1e-9)
 
 
-def test_maxsim_full_term_match_scores_exactly_one(evaluator, maxsim, docs):
-    # a query made of terms the doc contains hits cosine 1.0 on every term
+def test_maxsim_full_term_match_scores_the_query_term_count(evaluator, maxsim, docs):
+    # a query made of terms the doc contains hits cosine 1.0 on every term,
+    # so the sum lands on the number of query terms
     doc = docs[0]
     words = [w for w in doc.text.split() if w.isalpha()][:3]
-    scores, _ = maxsim.score(make_query(" ".join(words)), [doc.doc_id])
-    assert scores[doc.doc_id] == pytest.approx(1.0, abs=1e-9)
+    text = " ".join(words)
+    n_terms = len(evaluator.space.term_indices(text))
+    scores, _ = maxsim.score(make_query(text), [doc.doc_id])
+    assert scores[doc.doc_id] == pytest.approx(float(n_terms), abs=1e-9)
 
 
 def test_maxsim_out_of_vocabulary_query_scores_zero_at_zero_cost(maxsim, docs):
@@ -67,11 +73,12 @@ def test_maxsim_dot_accounting_is_query_terms_times_doc_terms(evaluator, maxsim,
     assert dots == expected
 
 
-def test_maxsim_scores_are_bounded_by_cosine(maxsim, docs):
-    scores, _ = maxsim.score(
-        make_query("delete remote branch commit"), [d.doc_id for d in docs]
-    )
-    assert all(-1.0 - 1e-9 <= s <= 1.0 + 1e-9 for s in scores.values())
+def test_maxsim_scores_are_bounded_by_the_query_term_count(evaluator, maxsim, docs):
+    # each of the n query terms contributes a cosine in [-1, 1]
+    text = "delete remote branch commit"
+    n_terms = len(evaluator.space.term_indices(text))
+    scores, _ = maxsim.score(make_query(text), [d.doc_id for d in docs])
+    assert all(-n_terms - 1e-9 <= s <= n_terms + 1e-9 for s in scores.values())
 
 
 def test_pooled_scorer_matches_dense_lsa_scores(evaluator, pooled, queries):
