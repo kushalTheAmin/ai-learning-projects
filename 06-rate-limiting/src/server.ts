@@ -11,10 +11,22 @@ import { TokenBucket } from "./bucket.js";
 import type { VirtualClock } from "./clock.js";
 import { randInt, type Rng } from "../../05-token-streaming/src/rng.js";
 
+/**
+ * Rate-limit headers, the shape real providers attach to every response that
+ * reached the application: the advertised refill rate and the whole tokens
+ * left in the bucket at the instant the response was written. For admitted
+ * requests that instant is after processing latency, so under concurrency the
+ * numbers are already stale by the time a client reads them.
+ */
+export interface RateLimitHeaders {
+  limitPerSec: number;
+  remaining: number;
+}
+
 export type ApiResponse =
-  | { status: 200 }
-  | { status: 429; retryAfterMs?: number }
-  | { status: 503; retryAfterMs?: number };
+  | { status: 200; headers?: RateLimitHeaders }
+  | { status: 429; retryAfterMs?: number; headers?: RateLimitHeaders }
+  | { status: 503; retryAfterMs?: number; headers?: RateLimitHeaders };
 
 export interface OutageOptions {
   /**
@@ -45,6 +57,12 @@ export interface ServerOptions {
    * stream untouched.
    */
   hintJitterMs?: number;
+  /**
+   * Whether responses carry RateLimit headers (limit + remaining). Outage
+   * 503s never do: a dependency that dies before admission control tells the
+   * client nothing about its rate budget.
+   */
+  advertiseRateHeaders?: boolean;
   outage?: OutageOptions;
 }
 
@@ -124,17 +142,36 @@ export class SimulatedApi {
       this.rejection429Ms.push(this.clock.now());
       if (!isRetry) this.count429OnFirstAttempt++;
       if (this.opts.advertiseRetryAfter) {
-        return { status: 429, retryAfterMs: this.jitteredHint(this.bucket.msUntilNextToken()) };
+        return {
+          status: 429,
+          retryAfterMs: this.jitteredHint(this.bucket.msUntilNextToken()),
+          ...this.rateHeaders(),
+        };
       }
-      return { status: 429 };
+      return { status: 429, ...this.rateHeaders() };
     }
     await this.clock.sleep(randInt(this.rng, this.opts.latencyMsMin, this.opts.latencyMsMax));
     if (this.rng() < this.opts.faultRate) {
       this.count503++;
-      return { status: 503 };
+      return { status: 503, ...this.rateHeaders() };
     }
     this.count200++;
-    return { status: 200 };
+    return { status: 200, ...this.rateHeaders() };
+  }
+
+  /**
+   * Header snapshot at response-write time. Remaining is floored to whole
+   * tokens the way real headers quantize, so a client summing deltas loses
+   * the fractional part at each endpoint.
+   */
+  private rateHeaders(): { headers?: RateLimitHeaders } {
+    if (!this.opts.advertiseRateHeaders) return {};
+    return {
+      headers: {
+        limitPerSec: this.bucket.currentRatePerSec(),
+        remaining: Math.floor(this.bucket.availableTokens()),
+      },
+    };
   }
 
   private jitteredHint(exactMs: number): number {

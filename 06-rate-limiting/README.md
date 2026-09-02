@@ -471,6 +471,132 @@ on the success side, so a fixed pacer should stand at 95%, and when the
 budget is unknown or moving, aimd buys convergence within seconds for a
 ~11% makespan tax and a 429 bill an order of magnitude under unpaced
 
+## the header extension: reading the budget off the wire
+
+the pacing extension left a thread open: the 429 is one bit of feedback, but
+real apis also send RateLimit headers. so the server now optionally attaches
+`limitPerSec` and `remaining` (whole tokens, floored the way real headers
+quantize) to every response that reaches the application, snapshotted at
+response write time. outage 503s carry nothing, a dependency that dies before
+admission control tells you nothing about its rate. two new clients read them:
+
+- `hdr-limit` trusts the limit header: every response sets the pacing rate to
+  headroom x advertised limit
+- `hdr-remaining` trusts nothing but the remaining count. over any window
+  where the bucket never touches its cap, remaining_end minus remaining_start
+  plus admissions observed in the window is exactly the refill, whatever the
+  drain was. the regimes are asymmetric: an empty bucket is fully informative
+  (every refilled token gets taken and counted), a full bucket is censored
+  (refill discarded at the cap leaves no trace). censored windows still carry
+  one bit, capacity is at least my send rate, so they drive an additive probe
+  (2 req/s per second, same as aimd) instead of an estimate update
+
+both start blind at 4 req/s like aimd. one honesty note: turning headers on
+makes the server refill its bucket at extra instants, which changes the
+floating point accumulation path, so the aimd reference row here differs in
+its last digits from the pacing table (85.99s there, 86.06s here, 177 phase-2
+429s there, 195 here). same configuration, same dynamics, different rounding
+path; each table reproduces itself exactly.
+
+### part 1: the drop scenario, now with headers (`npm run start:headers`, seed 42)
+
+```
+strategy         success   attempts   att/ok   429 ph1   429 ph2   ok/s ph1   ok/s ph2   makespan
+-------------------------------------------------------------------------------------------------
+unpaced            96.2%       3280     3.41      1281      1023      20.23       7.56     76.94s
+oracle             98.9%       1088     1.10        71        17      20.33       7.97     77.54s
+aimd              100.0%       1207     1.21         4       195      18.30       8.05     86.06s
+hdr-limit         100.0%       1011     1.01         0         0      20.10       8.03     79.47s
+hdr-remaining      99.1%       1269     1.28         0       269      18.03       8.10     85.57s
+hdr-remain-95     100.0%       1011     1.01         0         0      17.57       7.99     89.23s
+```
+
+- trusting the limit header cuts aimds 11.0% makespan tax over the oracle to
+  2.5% and its 199 429s to zero. one response converts the unknown-budget
+  problem into the oracles problem. the residual 2.5% is the blind 4 req/s
+  start before the first response lands
+- the estimator at full throttle was the surprise. it recovers almost none of
+  the makespan tax (10.4%, 85.57s) and takes 269 429s, more than aimds 199.
+  the makespan cost is the discovery ramp both share, but the 429s are a
+  different mechanism: aimds sawtooth spends most of its time below the
+  budget and pays in bursts at the peaks, while an estimator that locks onto
+  exactly 8 req/s and paces at 100% of it grazes the limit continuously. its
+  trace sits at 7.7 to 8.4 for the whole second phase, and every wobble above
+  8.0 is a 429
+- the production shape is estimator plus margin: `hdr-remain-95` paces at 95%
+  of the estimate and takes zero 429s, the entire sawtooth skipped, at 89.23s
+  (3.7% over aimd). so the thread's answer is: remaining alone recovers the
+  429 bill entirely, recovers none of the makespan tax, and the two answers
+  point in opposite directions. which one you want depends on what a 429
+  costs upstream of you
+
+### part 2: pricing the margin
+
+oracle and hdr-limit swept from 85% to 100% headroom on the same drop
+scenario, plus one control row, the 100% oracle behind a burst-5 pacing
+bucket instead of burst-20:
+
+```
+strategy        headroom   success   failed    429s   att/ok   makespan
+-----------------------------------------------------------------------
+oracle-85            85%    100.0%        0       0     1.01     99.16s
+oracle-90            90%    100.0%        0       0     1.01     91.16s
+oracle-95            95%    100.0%        0       3     1.01     83.97s
+oracle-100          100%     98.9%       11      88     1.10     77.54s
+oracle-100-b5       100%    100.0%        0       0     1.01     79.42s
+hdr-limit-85         85%    100.0%        0       0     1.01    101.29s
+hdr-limit-90         90%    100.0%        0       0     1.01     93.18s
+hdr-limit-95         95%    100.0%        0       0     1.01     86.00s
+hdr-limit-100       100%    100.0%        0       0     1.01     79.47s
+```
+
+the sweep answered a different question than the one i asked it. the pacing
+study read the 100% oracles 1.1% failure rate as zero-headroom fragility, so
+the plan was to price the margin that fixes it. the control row says the
+fragility was never about the average rate: the identical informed rate
+behind a burst-5 bucket fails nothing and takes zero 429s. the knife edge
+lives in the 20-wide t=0 burst that a burst-20 pacing bucket admits all at
+once, landing the whole herd before the first fault retry has anywhere to
+go. hdr-limit-100 is clean for the same reason, its bucket bursts 5. two
+fixes, priced: 5% of margin costs 6.43s of makespan, shaping the burst costs
+1.88s. the burst is the cheaper fix, and past it, margin prices as pure
+throughput, roughly 7s per 5% step on this workload, buying nothing
+measurable
+
+### part 3: the budget rises, and nobody tells you
+
+server at 8 req/s until t=30s, then 20. a raise never sends a 429, so the
+429-driven controller and the remaining-driven one alike must probe for it:
+
+```
+strategy         success   attempts   att/ok   429 ph1   429 ph2   ok/s ph1   ok/s ph2   makespan
+-------------------------------------------------------------------------------------------------
+oracle             99.1%       1117     1.13        16        99       8.57      16.30     75.03s
+aimd              100.0%       1068     1.07        47         7       8.57      19.53     68.05s
+hdr-limit         100.0%       1014     1.01         0         0       8.13      20.00     67.81s
+hdr-remaining     100.0%       1014     1.01         0         0       8.20      19.51     68.66s
+```
+
+- hdr-limit reads the raise off the next response (67.81s); aimd (68.05s) and
+  hdr-remaining (68.66s) climb at 2 req/s per second and reach the new budget
+  about 6 seconds late, which this backlog absorbs into under a second of
+  extra makespan. the difference is what the probing spends: aimd buys its
+  ceiling with 429s (54 of them, 20 cuts), the estimator probes on censored
+  full-bucket windows and re-locks from refill arithmetic the moment the
+  bucket drains, taking zero
+- the perfectly informed oracle is the slowest row and the only one that
+  fails requests (75.03s, 9 failed). pacing at 100% of a known budget leaves
+  fault retries nowhere to land, and the retry burnout tail stretches its
+  makespan past every adaptive client whose slack is accidental headroom.
+  part 2 already named the deeper cause, the burst-20 bucket, but the lesson
+  survives: perfect information about the rate is not a strategy, its one
+  input to one
+
+one sentence: if the server tells you the limit, believe it and keep 5% or a
+demand-shaped burst in hand; if it only tells you whats left, you can recover
+the whole 429 bill but not the discovery ramp, because remaining-token
+arithmetic only teaches while the bucket is busy.
+
 ## why typescript
 
 Retry loops, rate limiters, and backoff policies are client SDK territory, and
@@ -497,8 +623,10 @@ loop under test is shaped like the retry loop youd actually ship.
 - `src/breaker-study.ts` breaker scenarios: per-client or shared scope, failure predicate
 - `src/breaker-main.ts` the three breaker studies above
 - `src/adaptive.ts` aimd pacer: additive increase over time, multiplicative cut on 429, hold-off dedupe
-- `src/pacing-study.ts` pacing scenarios: rate schedules, phase-split metrics, aimd rate trace
+- `src/pacing-study.ts` pacing scenarios: rate schedules, phase-split metrics, adaptive rate trace
 - `src/pacing-main.ts` the sweep and the mid-run drop studies above
+- `src/header-pacer.ts` header-informed pacer: trust-limit mode and the remaining-only refill estimator with cap-censoring probe
+- `src/header-main.ts` the header studies: gap recovery, headroom sweep, silent raise
 - `src/percentile.ts` linearly interpolated percentile (port of 02's, same behavior)
 
 The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
@@ -507,11 +635,12 @@ The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
 
 ```
 npm ci
-npm test               # 118 tests
+npm test               # 139 tests
 npm start              # the main table
 npm run start:outage   # the outage studies
 npm run start:breaker  # the breaker studies
 npm run start:pacing   # the rate sweep and the aimd studies
+npm run start:headers  # the header studies
 npm run typecheck
 ```
 
@@ -537,17 +666,28 @@ npm run typecheck
   ack; this pacer would balloon to max over an idle stretch and pay the whole
   rediscovery on the next burst. gating growth on traffic actually flowing is
   the fix and its cost is unmeasured
-- the 429 is one bit of feedback. real apis also send Retry-After and
-  ratelimit-remaining headers; a controller that reads the remaining budget
-  could skip most of the sawtooth, and how much of the 10.9% oracle gap that
-  recovers is measurable right here
 - increase +2 and cut x0.6 were picked once, not swept. the increase/decrease
   plane has a stability against throughput frontier and this point's position
   on it is unknown
-- the oracle failing 1.1% says the informed optimum is below 100% of the
-  advertised rate. a headroom sweep (oracle at 90/95/100%) on the drop
-  scenario would price the safety margin directly, part 1's knee measured
-  from the safe side
+- the headers here are truth from the servers own bucket, one latency stale
+  at worst. real multi-tenant apis show you a remaining that other tenants
+  drain invisibly between your responses, which turns the estimators exact
+  admission count into a lower bound. how fast the estimate degrades as the
+  invisible share grows is measurable by splitting this harness's traffic
+  into an observed and an unobserved client pool
+- the estimators headroom response is not monotonic: 95% takes 0 429s on the
+  drop scenario but 90% takes 55, because pacing lower pushes the bucket into
+  the censored cap regime more often and the probe then overshoots. the
+  probe/estimate boundary (capSlackTokens, and probe rate) has its own
+  stability frontier nobody swept
+- a server burst smaller than capSlackTokens can never be seen at its cap
+  (remaining is snapshotted after the take), so the probe never engages and
+  the estimator settles at its drain rate. an adaptive slack derived from the
+  observed remaining distribution would remove the constant
+- hdr-limit trusts the header instantly and completely. a lying or lagging
+  limit header (advertised 20, enforced 8) would make it the fixed-20 row
+  from the pacing study; a trust policy that cross-checks the limit against
+  remaining-delta arithmetic gets both signals and is unbuilt
 - cuts fire on 429s from retries of requests sent before the last cut, stale
   feedback tcp avoids by cutting once per window of its own sends. per-epoch
   attribution (only cut on 429s of attempts launched since the last cut) is

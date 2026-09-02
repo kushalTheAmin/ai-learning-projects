@@ -10,6 +10,7 @@
 
 import { AimdPacer, type AimdOptions } from "./adaptive.js";
 import { VirtualClock } from "./clock.js";
+import { HeaderPacer, type HeaderPacerOptions } from "./header-pacer.js";
 import { PacingLimiter } from "./limiter.js";
 import { requestWithRetry, type RequestOutcome, type RetryOptions } from "./retry.js";
 import { SimulatedApi } from "./server.js";
@@ -18,9 +19,15 @@ import { createRng } from "../../05-token-streaming/src/rng.js";
 export type PacerSpec =
   | { kind: "none" }
   | { kind: "fixed"; ratePerSec: number; burst: number }
-  /** Follows the server's rate schedule exactly: the perfectly informed client. */
-  | { kind: "oracle"; burst: number }
-  | { kind: "aimd"; opts: AimdOptions };
+  /**
+   * Follows the server's rate schedule exactly: the perfectly informed
+   * client. Headroom discounts the followed rate (default 1 = pace at 100%
+   * of the true budget).
+   */
+  | { kind: "oracle"; burst: number; headroom?: number }
+  | { kind: "aimd"; opts: AimdOptions }
+  /** Reads RateLimit headers; requires advertiseRateHeaders on the study. */
+  | { kind: "header"; opts: HeaderPacerOptions };
 
 export interface PacingStudyOptions {
   clients: number;
@@ -33,6 +40,8 @@ export interface PacingStudyOptions {
   latencyMsMin: number;
   latencyMsMax: number;
   advertiseRetryAfter: boolean;
+  /** Whether the server attaches RateLimit headers to every response. */
+  advertiseRateHeaders?: boolean;
   retry: RetryOptions;
   seed: number;
   /** Split per-phase metrics at this instant; omit for single-phase runs. */
@@ -58,9 +67,14 @@ export interface PacingStudyResult {
   phase2OkPerSec?: number;
   phase1Count429?: number;
   phase2Count429?: number;
-  /** AIMD only: congestion cuts taken and the sampled rate over time. */
+  /** AIMD only: congestion cuts taken. */
   cuts?: number;
+  /** Adaptive pacers (aimd, header): the sampled send rate over time. */
   rateTrace?: Array<{ atMs: number; ratePerSec: number }>;
+  /** Header pacer only: how the controller learned. */
+  headerObservations?: number;
+  estimateUpdates?: number;
+  probeUpdates?: number;
 }
 
 export async function runPacingStudy(
@@ -85,6 +99,14 @@ export async function runPacingStudy(
     }
   }
 
+  if (pacer.kind === "header" && !opts.advertiseRateHeaders) {
+    throw new Error("a header pacer needs advertiseRateHeaders: true on the study");
+  }
+  const oracleHeadroom = pacer.kind === "oracle" ? (pacer.headroom ?? 1) : 1;
+  if (!Number.isFinite(oracleHeadroom) || oracleHeadroom <= 0 || oracleHeadroom > 1) {
+    throw new Error(`oracle headroom must be in (0, 1], got ${oracleHeadroom}`);
+  }
+
   const clock = new VirtualClock();
   const api = new SimulatedApi(clock, createRng(opts.seed), {
     ratePerSec: opts.serverRatePerSec,
@@ -93,34 +115,37 @@ export async function runPacingStudy(
     latencyMsMin: opts.latencyMsMin,
     latencyMsMax: opts.latencyMsMax,
     advertiseRetryAfter: opts.advertiseRetryAfter,
+    advertiseRateHeaders: opts.advertiseRateHeaders ?? false,
   });
 
   const fixedLimiter =
     pacer.kind === "fixed"
       ? new PacingLimiter(pacer.ratePerSec, pacer.burst, clock)
       : pacer.kind === "oracle"
-        ? new PacingLimiter(opts.serverRatePerSec, pacer.burst, clock)
+        ? new PacingLimiter(opts.serverRatePerSec * oracleHeadroom, pacer.burst, clock)
         : undefined;
   const aimd = pacer.kind === "aimd" ? new AimdPacer(pacer.opts, clock) : undefined;
+  const headerPacer = pacer.kind === "header" ? new HeaderPacer(pacer.opts, clock) : undefined;
 
   // Rate changes fire at exact virtual instants, not at the next request.
   for (const entry of schedule) {
     void clock.sleep(entry.atMs).then(() => {
       api.setRate(entry.ratePerSec);
-      if (pacer.kind === "oracle") fixedLimiter!.setRate(entry.ratePerSec);
+      if (pacer.kind === "oracle") fixedLimiter!.setRate(entry.ratePerSec * oracleHeadroom);
     });
   }
 
+  const traced = aimd ?? headerPacer;
   const rateTrace: Array<{ atMs: number; ratePerSec: number }> = [];
   let running = true;
-  if (aimd && opts.traceIntervalMs !== undefined) {
+  if (traced && opts.traceIntervalMs !== undefined) {
     const interval = opts.traceIntervalMs;
     if (!Number.isFinite(interval) || interval <= 0) {
       throw new Error(`traceIntervalMs must be positive, got ${interval}`);
     }
     void (async () => {
       while (running) {
-        rateTrace.push({ atMs: clock.now(), ratePerSec: aimd.currentRatePerSec() });
+        rateTrace.push({ atMs: clock.now(), ratePerSec: traced.currentRatePerSec() });
         await clock.sleep(interval);
       }
     })();
@@ -129,6 +154,7 @@ export async function runPacingStudy(
   const send = async (attempt: number) => {
     const res = await api.request(attempt > 1);
     if (res.status === 429) aimd?.on429();
+    headerPacer?.observe(res);
     return res;
   };
 
@@ -138,6 +164,7 @@ export async function runPacingStudy(
     for (let i = 0; i < opts.requestsPerClient; i++) {
       if (fixedLimiter) await fixedLimiter.acquire();
       if (aimd) await aimd.acquire();
+      if (headerPacer) await headerPacer.acquire();
       outcomes.push(await requestWithRetry(send, clock, clientRng, opts.retry));
     }
   };
@@ -174,9 +201,12 @@ export async function runPacingStudy(
     result.phase1Count429 = api.rejection429Ms.filter((t) => t < boundary).length;
     result.phase2Count429 = api.count429 - result.phase1Count429;
   }
-  if (aimd) {
-    result.cuts = aimd.cuts;
-    if (opts.traceIntervalMs !== undefined) result.rateTrace = rateTrace;
+  if (aimd) result.cuts = aimd.cuts;
+  if (headerPacer) {
+    result.headerObservations = headerPacer.headerObservations;
+    result.estimateUpdates = headerPacer.estimateUpdates;
+    result.probeUpdates = headerPacer.probeUpdates;
   }
+  if (traced && opts.traceIntervalMs !== undefined) result.rateTrace = rateTrace;
   return result;
 }
