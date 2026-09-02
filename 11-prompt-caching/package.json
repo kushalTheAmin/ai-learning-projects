@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "tsx src/main.ts",
+    "start:volatile": "tsx src/volatile-main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

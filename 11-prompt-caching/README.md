@@ -8,7 +8,7 @@ everything here is simulated. no model is called and no api key is used. the cac
 
 prompt caching is a prefix match. the provider caches the rendered request up to each marked breakpoint, and a later request that starts with the exact same bytes reads that prefix at a tenth of the price instead of reprocessing it. the catch is the pricing is asymmetric: a write costs 1.25x normal input. caching is a bet that the prefix will be read again before its ttl runs out. every experiment here is some version of that bet paying off or not.
 
-the cache model lives in `src/cache.ts`: a hit is the longest previously cached prefix of the current request, writes bill only the delta past that hit, entries below the minimum prefix length silently dont cache, and each breakpoint only walks back 20 blocks looking for a prior entry. `src/pricing.ts` turns the billed token classes into dollars, `src/workload.ts` generates the conversations, `src/strategies.ts` places breakpoints, `src/experiment.ts` runs the five experiments.
+the cache model lives in `src/cache.ts`: a hit is the longest previously cached prefix of the current request, writes bill only the delta past that hit, entries below the minimum prefix length silently dont cache, and each breakpoint only walks back 20 blocks looking for a prior entry. `src/pricing.ts` turns the billed token classes into dollars, `src/workload.ts` generates the conversations, `src/strategies.ts` places breakpoints, `src/experiment.ts` runs the five experiments, and `src/volatile-study.ts` runs the position sweep from the extension below.
 
 ## run it
 
@@ -17,6 +17,7 @@ npm ci
 npm run typecheck
 npm test
 npm start
+npm run start:volatile
 ```
 
 node 20+. no network calls at runtime, everything is offline and deterministic (seed 20260827, pricing $2/MTok input).
@@ -32,6 +33,43 @@ node 20+. no network calls at runtime, everything is offline and deterministic (
 **4. turn gap vs ttl, 12 turns.** with 1m or 4m between turns the 5m ttl wins (0.246x vs 0.341x for the 1h ttl, whose writes cost 2x for nothing extra, since every read refreshes the timer for free and keeps the entry alive indefinitely). at 8m or 25m gaps the 5m cache expires between every turn and becomes a pure loss, exactly 1.250x, while the 1h ttl still delivers 0.341x. at 70m both expire: 1.250x and 2.000x. the ttl choice is a function of one number, the start-to-start gap between requests sharing the prefix, and picking wrong doesnt degrade gracefully, it flips the sign of the whole feature.
 
 **5. the 20-block lookback.** each breakpoint only walks back 20 content blocks to find a prior cache entry. at 10 blocks per turn the tail breakpoint always finds last turns entry and the naive and spaced strategies price identically (0.340x). at 26 blocks per turn (a tool-heavy agent turn) the tail breakpoint cant see back far enough: hit rate collapses from 77.2% to 15.5%, every turn rewrites the whole history, and the naive strategy costs 1.072x, worse than not caching, while adding one intermediate breakpoint 15 blocks before the tail restores 0.362x. same code, same traffic, $0.1291 against $0.0436, from where two markers sit.
+
+## the position extension: where the volatile block sits
+
+the volatile header experiment killed 100% of hits because the per-request line sat at block 1, in front of everything. prefix matching says placement is the whole story: a block that changes every request only invalidates the cache from its own index onward, everything in front of it is still perfectly cacheable. this extension draws that curve. one 120-token per-request state block is inserted at a swept index into a 12 turn conversation (4 history blocks a turn, 30s gaps, so ttl never interferes), and two operators replay every position: `incremental`, which places breakpoints as if the request were fully stable, and a volatile-aware strategy (`src/volatile-study.ts`) that knows where the block sits, marks the deepest stable index directly in front of it, and refuses to mark anything at or past it, since an entry containing the volatile block can never be read back.
+
+run it with `npm run start:volatile`. each position is priced against its own no-caching baseline:
+
+```
+position final idx  strategy     input     ratio    hit rate  uncached/read/write tokens
+0        0          incremental  $0.1157   1.250x     0.0%    0/0/46288
+0        0          aware        $0.0926   1.000x     0.0%    46288/0/0
+1        1          incremental  $0.1157   1.250x     0.0%    0/0/46288
+1        1          aware        $0.0926   1.000x     0.0%    46288/0/0
+2        2          incremental  $0.0820   0.886x    31.7%    0/14663/31625
+2        2          aware        $0.0668   0.722x    31.7%    30292/14663/1333
+6        6          incremental  $0.0820   0.886x    31.7%    0/14663/31625
+6        6          aware        $0.0599   0.647x    40.3%    25925/18633/1730
+14       14         incremental  $0.0820   0.886x    31.7%    0/14663/31625
+14       14         aware        $0.0483   0.522x    54.6%    18502/25271/2515
+22       22         incremental  $0.0820   0.886x    31.7%    0/14663/31625
+22       22         aware        $0.0386   0.417x    66.8%    11955/30943/3390
+30       30         incremental  $0.0820   0.886x    31.7%    0/14663/31625
+30       30         aware        $0.0316   0.341x    75.8%    6872/35097/4319
+38       38         incremental  $0.0820   0.886x    31.7%    0/14663/31625
+38       38         aware        $0.0283   0.306x    80.2%    4010/37140/5138
+tail     46         incremental  $0.0820   0.886x    31.7%    0/14663/31625
+tail     46         aware        $0.0279   0.301x    81.2%    2780/37591/5917
+stable   -          incremental  $0.0229   0.255x    86.5%    0/38802/6046
+```
+
+three findings.
+
+**the curve only exists if placement responds to it.** the oblivious incremental strategy prints the identical row at every position past the static prefix: 0.886x, hit rate 31.7%, at position 2 and at the tail alike. its breakpoints sit at the static prefix and the last block, so the only entry it can ever read back is the 1333-token static prefix, and the moving tail breakpoint writes 31625 tokens of history at 1.25x that nobody will ever read. the volatile blocks position is invisible to it because no breakpoint sits between the static prefix and the poison. and when the block leads the request (position 0 or 1) even the static hit dies and the row lands on the familiar pure-tax number, exactly 1.250x with 0 hits.
+
+**the aware curve falls monotonically toward the stable floor.** 0.722x with the block right after the system prompt, then 0.647x, 0.522x, 0.417x, 0.341x, 0.306x as it moves deeper, 0.301x at the tail, against 0.255x for the same conversation with no volatile block at all. at the tail the aware breakpoint rides just under the block: reads carry the entire history (37591 tokens) and only the volatile block plus the fresh user message bill uncached. so a per-request state block costs almost nothing if it renders last, but the same block rendered right after the system prompt costs $0.0668 against $0.0279, a 2.4x swing from nothing but assembly order. the operational rule falls straight out: render volatile content as late in the request as possible, and put a breakpoint directly in front of wherever it ends up.
+
+**the minimum cacheable prefix can eat your last stable breakpoint.** at position 1 the only stable prefix is the tools block alone, 882 tokens by this estimator, under the 1024-token minimum. the aware strategys one legal breakpoint silently doesnt cache and its row prints exactly 1.000x: placement-aware code did everything right and got nothing, with no error anywhere, because below-minimum prefixes just quietly decline to cache. aware at position 0 prints the same 1.000x for the cleaner reason that nothing stable exists at all, and that 1.000x floor is still cheaper than the oblivious 1.250x, since the worst caching strategy under total volatility is any caching at all.
 
 ## tradeoffs and where it breaks down
 
@@ -59,5 +97,7 @@ this is the day-job side of the portfolio: cache accounting is the kind of thing
 - the spaced-15 strategy spends a third breakpoint to fix the lookback miss. with only 4 slots total, whats the optimal placement policy when turns vary in block count, and can it be computed online from the observed turn shape?
 - concurrent identical requests all miss until the first response streams. the documented fix is fire one, await first token, fire the rest. what does that serialization cost in latency vs the duplicate-write cost it saves, as a function of fan-out width?
 - request-start ttl accounting means generation time silently shrinks the effective window. at what generation-time distribution does a nominal 5m ttl behave like 1m, and does that flip the ttl sweep verdict?
-- the volatile header experiment kills 100% of hits because the header sits at block 1. a volatile block at position k should kill only the cache past k. the cost-of-volatility curve as a function of position is unmeasured here.
+- the aware strategy assumes the volatile block sits at one known fixed index. real state blocks grow, shrink, and move as the conversation is re-rendered, and a block that moves from index j to j+1 poisons position j retroactively (the old volatile bytes are now baked into a different prefix). the cost of a moving volatile block, and whether tracking it online is worth a breakpoint slot, is unmeasured.
+- the oblivious strategy still saves 11.4% here because the static prefix is 1333 tokens of a growing conversation. experiment 5 already showed the same strategy at 1.072x when writes dominate harder. the static-share at which oblivious caching under mid-request volatility crosses 1.000x is a sweep this study didnt run.
+- rendering volatile content at the tail is free for the cache but moves it far from the system prompt, and whether the model attends to state differently at the tail than at the head is a behavior question a cost simulator cannot see.
 - cache hits change cost but also latency (cached prefixes skip prefill). pricing that in needs a latency model per cached vs uncached token, which this simulator doesnt have.

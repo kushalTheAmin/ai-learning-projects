@@ -6,7 +6,7 @@
 
 import { DEFAULT_CACHE_CONFIG, PrefixCache, type CacheConfig } from "./cache.js";
 import { DEFAULT_PRICING, TTL_1H_MS, TTL_5M_MS, inputCost, type Pricing } from "./pricing.js";
-import { STRATEGIES, incremental, none, spacedForLookback, type Strategy } from "./strategies.js";
+import { STRATEGIES, incremental, none, spacedForLookback } from "./strategies.js";
 import {
   exponentialArrivals,
   makeConversation,
@@ -18,8 +18,8 @@ import { createRng } from "../../05-token-streaming/src/rng.js";
 
 export const DEFAULT_SEED = 20260827;
 
-export interface ReplayEvent {
-  request: RenderedRequest;
+export interface ReplayEvent<R extends RenderedRequest = RenderedRequest> {
+  request: R;
   arrivalMs: number;
 }
 
@@ -36,9 +36,9 @@ export interface ReplayTotals {
   writeTokensPerRequest: number[];
 }
 
-export function replay(
-  events: readonly ReplayEvent[],
-  strategy: Strategy,
+export function replay<R extends RenderedRequest = RenderedRequest>(
+  events: readonly ReplayEvent<R>[],
+  strategy: (request: R) => number[],
   ttlMs: number,
   pricing: Pricing = DEFAULT_PRICING,
   cacheConfig: CacheConfig = DEFAULT_CACHE_CONFIG,
