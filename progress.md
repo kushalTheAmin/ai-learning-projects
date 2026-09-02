@@ -168,6 +168,71 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-02] 22 — the escalation section's safety claim was reading
+  structural zeros as measurements. "the hurt column is 0 everywhere, and
+  thats measured, not assumed" was published over all twelve policy rows,
+  but hurt counts escalated queries that were correct before escalating,
+  and at any trigger at or below the refusal floor that set is empty by
+  construction: `projectPolicyRow` escalates iff the k1 score is under the
+  trigger, `passOutcome` answers iff the score is at or above the floor, so
+  an escalated query at trigger 0.35 with floor 0.35 refused and a refusal
+  is never correct. that makes hurt = 0 vacuous on exactly the row the
+  section is about (trigger 0.35, the headline) and on both oracle rows,
+  which escalate only what they fix. measured: 0 queries at risk at trigger
+  0.35 and on the oracles, against 5 at 0.45, 6 at 0.55, 15 at 0.75 and 18
+  — every correct answer on the set — at always-escalate, and none of the
+  four flips. so the conclusion survives, but it was resting on the four
+  rows above the floor rather than the one quoted. the same shape sat one
+  sentence later: "answered-without-gold also stays 0" cannot read anything
+  else on the k2=10 rows, where k=10 over a 10-doc corpus puts the whole
+  corpus in context and hit@10 is 1.000, so no escalated query can be
+  missing its gold doc; k2=5 is where the column is measured, and 2 queries
+  still miss gold there and both refuse. the fix is one accumulator:
+  `PolicyRow` gains `atRisk`, the escalated queries that were correct going
+  in, incremented in `accumulateRow` and `livePolicyRow` beside hurt, and
+  main.ts prints it as an `atrisk` column so a 0 with no denominator is
+  visible as vacuous in the table itself. new tests/atrisk.test.ts: the
+  invariant that atRisk is 0 at every trigger at or below the floor however
+  the captures are built (with a query that would be hurt one point above
+  it, so the test is not vacuous either), the per-trigger counts on the
+  committed golden set, the oracle's structural 0, the live endpoint
+  reproducing the projection on the new column, and five holding the readme
+  to the corrected claims against whitespace-normalized text so a line wrap
+  cannot make them pass (23's trap). 12 of its 13 fail on the old code and
+  the revert check splits cleanly — reverting escalate.ts and main.ts fails
+  the 7 numeric tests, reverting the readme alone fails the 5 prose ones.
+  no measured value moved: the column is new, every other cell in the
+  policy table and every other table in the project is character for
+  character what it was, so the root index row needed no change. found and
+  fixed 2026-09-02
+- [medium] 22 — `parseAskBody` takes its k ceiling as
+  `Math.min(MAX_K, index.size)`, so on a corpus smaller than `DEFAULT_K` the
+  server's own default k is out of range and a caller who omits k entirely
+  gets a 400 blaming them for it: a 1-doc server answers `{"question": q,
+  "k": 1}` and rejects `{"question": q}` with `field "k" must be an integer
+  in 1..1`. on an empty doc list every request gets `field "k" must be an
+  integer in 1..0`, a validation message naming an empty range for a
+  server-side condition. latent on the shipped path — `loadDocs` rejects an
+  empty corpus and the committed one is 10 docs, so the ceiling is always
+  MAX_K — but `createRagServer` accepts any doc list and the clamp
+  contradicts the retriever it is protecting: `DocIndex.topK` already
+  returns every doc when k exceeds the corpus, with a test pinning it.
+  found 2026-09-02
+- [medium] 22 — on an escalated request the `meta` event reports
+  `k: <requested k>` next to a `retrieved` list holding `kUsed` entries,
+  because `serveAsk` reassigns `retrieved` to the k2 ranking before it
+  builds the event. a wire reader sees k=3 beside 10 docs; `done` carries
+  the honest `kUsed`, and the eval wants the served ranking so nothing
+  measured is wrong, but the two fields in the same payload disagree.
+  found 2026-09-02
+- [low] 22 — `record["k"] ?? DEFAULT_K` treats an explicit `{"k": null}` as
+  omitted and serves it at k=3, where every other bad type (`"3"`, `3.5`,
+  `true`) is a 400. found 2026-09-02
+- [low] 22 — `projectPolicyRow` does not model the server's
+  `escalation.k2 > ask.k` guard, so a projection at k2 <= k1 would escalate
+  and bill two calls where the endpoint serves one. unreachable in main.ts
+  (k2 is 5 or 10 against k1 = 3) and the server's own behaviour has a test;
+  it is the projection that is missing the condition. found 2026-09-02
 - [fixed 2026-09-02] 26 — the maxsim scorer was not maxsim. colbert defines
   late interaction as S(q,d) = sum over query terms of the best cosine that
   term finds in the doc, every term weight 1 (khattab & zaharia 2020, eq 1).
@@ -1498,6 +1563,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 22-rag-vertical-slice | 2026-09-02 |
 | 26-reranking | 2026-09-02 |
 | 25-query-rewriting | 2026-09-02 |
 | 24-extraction-metrics | 2026-09-01 |
@@ -1529,6 +1595,22 @@ so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
 the oldest instead (01, committed 17:44 UTC) rather than run a no-op. Same on
 2026-08-26 — everything was still inside 24 hours, so the oldest unreviewed
 project went first (02, committed 18:10 UTC).
+
+22 was the last project with no review at all, and it came back clean on every
+number and dirty on one claim. all 112 committed tests pass, typecheck is
+clean, the entry point is deterministic across runs, and every line of every
+readme table is character for character what `npm start` prints today —
+checked mechanically, not by eye. the pipeline itself holds up: `topK` is a
+prefix operation so widening k really is a superset, `bestSentence` breaks ties
+toward the earlier sentence, the floor-0 projection reproduces all ten live
+floor rows and both live escalation rows field by field, correct-implies-hit
+holds at every swept k (the 40 gold answers are each verbatim in exactly one
+doc), and all 10 wrong-sentence picks at k=3 really do come from the gold doc,
+which is what the readme says they are. youden's tie convention matches 12's,
+and roc-auc and the threshold sweep are imported from 20 rather than
+reimplemented, so there is no metric drift to find. what was wrong was the
+escalation section reading two structural zeros as measurements — fixed, and
+the four robustness items behind it are open above.
 
 02 came back clean on its own code: tf-idf matches sklearn's TfidfVectorizer to
 1.1e-16 on every committed query, bm25 matches the lucene formula term by term,
