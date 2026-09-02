@@ -152,6 +152,10 @@ Re-attempted 2026-09-01 (05-bytequeue run): still denied, same sideband
 disconnect on ref deletion. unchanged: nothing on those branches is
 unlanded, deletion stays a by-hand task on the github branches page. this
 run's own session branch existed only locally and was removed.
+Re-attempted 2026-09-02 (09-cancel run): still denied, same sideband
+disconnect on ref deletion. unchanged: nothing on those branches is
+unlanded, deletion stays a by-hand task on the github branches page. this
+run's own session branch existed only locally and was removed.
 
 ## FINDINGS
 
