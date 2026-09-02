@@ -23,7 +23,7 @@ OPEN THREADS for the questions worth answering next.
 | 22-rag-vertical-slice, floor-sweep extension | 2026-09-01 | typescript | refusal-floor operating study answering 22's floor-sweep thread on the unchanged retriever, reader, and wire protocol: parameterized refusal floor as a server option (shipped 0.35 stays the default) + best-sentence overlap score carried on the wire (done event, request log, eval outcomes) + floor-0 capture over the live endpoint turning each query into (score, would-be-correct, gold-retrieved) + offline floor-row projection (answered iff score >= floor, exploiting that the best sentence never depends on the floor) pinned equal to live per-floor endpoint reruns at all ten swept floors + 20's roc-auc and threshold sweep imported as is over correct-vs-wrong would-be answers + youden-best floor selection + free-window accounting (max wrong-doc score vs min correct score); measured at k=3 — the overlap score is a real confidence signal (correct answers 0.400-0.875 mean 0.594, wrong 0.143-0.600 mean 0.350, roc-auc 0.903), the floor is a precision knob and never an accuracy knob (answer accuracy holds its 0.450 ceiling through floor 0.400 and only falls past it: 0.325 at 0.45, 0.200 at 0.65, 0.000 at 1.00, since refusing converts wrong answers to refusals and never to correct ones), the shipped 0.35 sits in a free window the corpus leaves open (max wrong-doc best sentence 0.333 vs min correct answer 0.400) blocking all 4 confident wrong-doc quotes at zero correct answers eaten, which is exactly why the main table's answered-without-gold column is all zeros, wrong-sentence answers are what the floor cannot separate (10 clear 0.35 because a wrong sentence from the right doc shares the question's words nearly as well as gold; precision 1.000 costs coverage 8/40 at floor 0.65), youden's j picks 0.429 (keeps 0.778 of correct, 0.182 of wrong) but weighs a dropped wrong answer equal to a kept correct one, and the done event growing the score field moved the first-token byte fraction 23.3% -> 22.6%, the wire contract re-priced by its own instrument |
 | 19-eval-regression, correction extension | 2026-08-31 | python | multiple-comparison correction answering 19's slice-gate thread on the unchanged harness, scripted models and committed golden set: one-sided bootstrap direction fraction p_ge_zero added to 02's paired bootstrap beside p_le_zero (fraction of resamples at or above zero, ties counted on both sides so the pair can sum past 1) + benjamini-hochberg step-up over per-slice p-values (rank k spends k*q/m, adjacent ties reject together by construction because the threshold grows with rank) + bonferroni slice gate at alpha/m + bh slice gate + ci+slice-bh combined gate, all spending the plain slice gate's implied one-sided 0.025 (the upper end of its two-sided 95% interval) so the correction is the only variable; measured over the same 50-seed-pair scenario sweep — fixing the slice gate's noise false alarms 16.0% -> 4.0% costs masked-regression detection 68.0% -> 50.0% (drift 24.0% -> 14.0%, improvement false alarms 6.0% -> 0.0%), the production pair moves ci+slice 16.0% -> ci+slice-bh 6.0% on clean runs while both catch the masked regression at their slice rate, bh is identical to bonferroni in every cell because no scenario regresses several slices strongly at once (masked is one strong slice where bh's rank-1 cut IS the bonferroni cut, drift is six slices each too weak for any small p) so the fdr-vs-fwer distinction never gets to act, and the original headline catch is itself the cost made concrete: the date slice's 24-point regression lands at p=0.0052 on seed pair (11,12), above the 0.025/6 = 0.0042 cut, so both corrected gates pass the exact comparison the slice gate was built to catch |
 | 08-agent-tool-loop, caching extension | 2026-08-31 | typescript | prompt-cache repricing answering 08's caching thread with accounting only, no loop change: per-call input/output token traces recorded by the unchanged loop (append-only prefix enforced, traces sum to the published totals) + telescoping cache billing model (breakpoint after every request's input, call n reads call n-1's whole input and writes only its suffix, so writes per task telescope to the final call's input; readMult/writeMult knobs where 1x/1x reproduces the uncached bill exactly, anthropic's 0.1x/1.25x as the headline rates, always-warm within a task, nothing shared across tasks) + per-policy repricing + stubborn-burn repricing with cost composition (reads/writes/output) + read-price sweep at fixed write premium; measured — the 80.9% token saving was already 73.6% in dollars (output at 5x input is ~40% of the stubborn burn), cached pricing takes the guard's edge to 61.9% and halves its absolute saving ($0.012654 -> $0.006834 on the 3 stubborn tasks), the sweep floors at 59.7% even at free reads because output tokens and cache writes are the two things caching cannot discount (feedback's cached stubborn bill: $0.000766 reads, $0.003656 writes, $0.006615 output, replay now the smallest line item), and caching helps most exactly where the guard helps (feedback saves 18.3% of its total bill vs strict's 0.1%, whose short histories let the 1.25x write premium eat the read discount) |
-| 26-reranking | 2026-08-31 | python | two-stage retrieval over 03's unchanged corpus, retrievers and 02's metrics: per-term latent vectors read from 03's fitted TruncatedSVD (identity-transform rows of V, unit-normalized, pinned by test to what the fitted pipeline gives a one-term document) + late-interaction maxsim scorer (idf-weighted mean over query terms of max term cosine, exact-match ties at 1.0) + pooled bi-encoder scorer on candidate subsets pinned to DenseLSA.scores to float noise + bm25-as-reranker + label-reading oracle scorer pricing the shortlist ceiling + two-stage pipeline (shortlist reordered, first-stage tail appended, stable ties fall back to first-stage order) + latent-dot cost accounting per scorer + depth sweep with gold-in-shortlist ceiling and promotion/demotion accounting; measured — bm25+pooled-lsa@20 reproduces the full dense scan's rr on all 40 queries at 20 latent dots vs 100 and ties rrf fusion, but the +0.011 over plain bm25 has p_le_zero 0.1287 so only the cost saving is established, not the gain; maxsim over per-term vectors from the same LSA fit loses to the bm25 stage it reranks (0.838@20, 0.825@100, demoting 4 paraphrase queries) at 1909.5 dots/query — untrained granularity is variance, not signal; keyword mrr sits at 0.950 under every scorer because exact-match cosine ties resolve to first-stage order; and the oracle locates the headroom in the scorer, not the shortlist: gold is in bm25's top 20 for 95% of queries, oracle@20 hits 0.950, and +0.089 [+0.025, +0.160] over the best real scorer is the only gap in the table that clears zero |
+| 26-reranking | 2026-08-31 | python | two-stage retrieval over 03's unchanged corpus, retrievers and 02's metrics: per-term latent vectors read from 03's fitted TruncatedSVD (identity-transform rows of V, unit-normalized, pinned by test to what the fitted pipeline gives a one-term document) + late-interaction maxsim scorer (colbert's unweighted sum over query terms of max term cosine, full term match ties at the |query terms| ceiling) + pooled bi-encoder scorer on candidate subsets pinned to DenseLSA.scores to float noise + bm25-as-reranker + label-reading oracle scorer pricing the shortlist ceiling + two-stage pipeline (shortlist reordered, first-stage tail appended, stable ties fall back to first-stage order) + latent-dot cost accounting per scorer + depth sweep with gold-in-shortlist ceiling and promotion/demotion accounting; measured — bm25+pooled-lsa@20 reproduces the full dense scan's rr on all 40 queries at 20 latent dots vs 100 and ties rrf fusion, but the +0.011 over plain bm25 has p_le_zero 0.1287 so only the cost saving is established, not the gain; maxsim over per-term vectors from the same LSA fit is nominally the top real row (0.867@20, 0.854@100, still demoting 3 paraphrase queries) but at 1909.5 dots/query against the pooled scorer's 20.0 for a +0.016 [-0.042, +0.075] gap over bm25 that straddles zero — untrained granularity buys price, not rank; keyword mrr sits at 0.950 under every scorer because exact-match cosine ties resolve to first-stage order; and the oracle locates the headroom in the scorer, not the shortlist: gold is in bm25's top 20 for 95% of queries, oracle@20 hits 0.950, and +0.089 [+0.025, +0.160] over the pooled scorer is the only gap in the table that clears zero |
 | 06-rate-limiting, pacing extension | 2026-08-31 | typescript | pacing knee and aimd answering 06's rate-sweep/adaptive thread on the unchanged clock, bucket and retry loop: adjustable-rate token bucket (setRate accrues owed tokens at the old rate before switching, so a change never rewrites the past) + server admission-rate schedule fired at exact virtual instants + aimd pacer (additive increase clocked on virtual time, multiplicative cut on any 429 outside a hold-off window that dedupes one overshoot's 429 burst into one congestion event, min/max clamps, growth-anchor reset on cut) + pacing study runner with phase-split ok/s and 429 accounting across a mid-run rate change plus a sampled controller rate trace; measured — the sweep knee at 100% of a 20 req/s budget is sharp on both sides (80% is client-bound at 16.40 ok/s / 0 429s, 105-120% flatlines at 19.24-19.94 ok/s while 429s jump 3 → 1142-1198 and att/ok 1.02 → 2.46-2.53) and fragile to stand on (exactly 100% turns a 2% transient fault rate into 96 429s and 98.9% success via the unpaced 503-retry bypass; 95% takes 3 429s at 100.0% success, the real operating point), and under a mid-run budget drop 20 → 8 req/s aimd starting blind at 4 req/s converges within one 5s trace sample, pays a 10.9% makespan tax over the schedule-following oracle (85.99s vs 77.54s, all of it phase-1 ramp and sawtooth: 18.30 vs 20.33 ok/s; phase 2 is 8.04 vs 7.97) at a probing bill of 181 429s vs unpaced's 2304, and beats the oracle on success 99.9% vs 98.9% because the oracle stands exactly on the fragile 100% point while the sawtooth troughs are accidental headroom for the 503-retry bypass |
 | 09-concurrency, flaky extension | 2026-08-31 | typescript | flaky items answering 09's flaky-poison thread on the unchanged api and strategies: per-item per-attempt failure probability drawn from a dedicated rng (one draw per flaky item per call in call order, never short-circuited, so the seeded latency stream is bit-identical) + flake-generalized recovery runner giving every strategy the same 4-attempt singleton budget (retry-whole resends the whole batch, one-by-one retries each item, bisect retries failing singletons only and splits everything larger) + paired-seed trial harness (250 trials per cell, trial seeds shared across strategies so first calls pair exactly, healthy/flaky completion split, first-call failure rate) + bisect/one-by-one cost-ratio crossover table over the rate x count grid; measured — the thread's prediction was backwards: bisect never loses on calls anywhere in the grid (worst ratio 0.78 at 4 items flaking 0.9) because a slice passes whenever its flaky items miss their draws and retires every member while one-by-one pays a fixed ~33-call floor once the first call fails, and bisect completes more flaky items too (61.2% vs 38.8% at 1x0.9 for a third of the calls, 9.8 vs 32.1); the only crossover is tokens at 4x0.9 (1.03), the near-deterministic corner the original study already measured at p=1 (21520 vs 17040); retry-whole flips from pure waste to the cheapest full recovery at low flake (1.1 calls for 100.0% at 1x0.1, above 99% through rate 0.3) then collapses all-or-nothing (24.0% at 4x0.5, 0.0% at 4x0.9) with healthy items hostage to the flaky ones |
 | 02-retrieval-eval, block-max extension | 2026-08-31 | python | block-max wand answering 02's block-max thread over the unchanged index and pruners: fixed-size posting-list blocks storing the exact max gain and last doc index per block (directory rebuildable at any granularity, one entry per block) + wand pivoting on whole-list bounds with a shallow veto (pivot-set block maxes bisected from each cursor's current block and summed against the threshold, strict inequality so ties survive) that jumps every pivot-set cursor past min(covered block boundary + 1, next cursor's doc) without reading a posting + shallow-check/skip accounting on top of the pruning stats; exactness pinned as before (38/38 golden at top-10 and full depth, 150/150 synthetic across strata, the all-ties `<=` trap per block size including 1, a lists-ending-before-the-pivot case) ; measured — the common-heavy floor falls 29.5% -> 9.0% of the 68765-posting bill at block size 8 (6207 scored, 3.3x under plain wand, 13.1% directory overhead) and 17.6% at size 32 for 4.1%, typical 10.5% -> 6.4%, the k sweep holds the edge everywhere while decaying (23.7% -> 10.2% at k=1, 58.9% -> 47.8% at k=1000), the mechanism table says the head term gains nothing from blocks (rank-1 block max p50 0.0020 vs list bound 0.0021, idf already flattened it) and the tightening lives in mid-common ranks (rank-20 2.5039 -> 2.0512 p50, rank-5 0.6157 -> 0.5291), and the clock pays for the counts: 77667 shallow checks + 24537 probes per query to avoid scoring 56638 postings leaves bmw slower than plain wand at every block size and k (78.336ms vs 59.869ms at k=10, taat 15.820ms), the bookkeeping outnumbers the postings it saves in python where a native engine reads a block directory nearly free, the same portable-counts lesson sharpened |
@@ -168,6 +168,74 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-02] 26 — the maxsim scorer was not maxsim. colbert defines
+  late interaction as S(q,d) = sum over query terms of the best cosine that
+  term finds in the doc, every term weight 1 (khattab & zaharia 2020, eq 1).
+  `MaxSimScorer.score` computed `(idf[q] * sims.max(axis=1)).sum() /
+  idf[q].sum()` — an idf-weighted mean. the divisor is inert for ranking (a
+  per-query constant; an unweighted mean orders identically to the unweighted
+  sum on all 40 queries, checked) but the idf weighting is not: it reorders 26
+  of the 40 shortlists. and it leans hardest on exactly the terms this space
+  represents worst — 679 of the 1040 term vectors share an exact direction
+  with another term, because 64 latent dims cannot separate terms that occur
+  in one doc apiece, and those collapsed terms average idf 4.909 against 4.155
+  for the distinct ones (max idf 4.922). so the weighting put the most weight
+  on the noisiest maxes. that inverted the project's headline negative result.
+  canonical maxsim over the identical term vectors scores 0.867 at depth 20
+  where the weighted variant scored 0.838 — over bm25's 0.851 rather than
+  under it — 0.858 vs 0.829 at depth 10, 0.854 vs 0.825 at full depth, and the
+  bm25+maxsim@20 vs bm25 bootstrap moves -0.013 [-0.079, +0.048] to +0.016
+  [-0.042, +0.075]. the readme's load-bearing sentence, "the interaction
+  granularity was never the bottleneck, the representation was ... granularity
+  without training just adds variance", was reading the weighting, not the
+  representation: it was the one conclusion the project drew about late
+  interaction as an architecture and it came out of a formula that is not the
+  architecture. the fix is two lines in rerank.py — drop the weights, sum the
+  maxima. the mean-normalization went with them, so a full term match now
+  scores |query terms| rather than 1.0; that is still the ceiling (every
+  per-term max is a cosine <= 1), so the keyword-immunity tie argument
+  survives intact and the keyword column stays 0.950 at every depth. the
+  rewritten bullet claims only what the bootstrap supports: nominally the best
+  real row, at ~95x the pooled scorer's latent dots, for a gap that straddles
+  zero — a cost verdict, not a quality one. new tests/test_maxsim_canonical.py
+  pins the formula term by term against a reference written straight from the
+  definition, plus additivity across query terms (dropping a term moves the
+  score by exactly that term's own max, which no weighting scheme can satisfy),
+  the |query terms| ceiling, and the corrected direction at three depths. four
+  of its seven fail on the old code and the revert check splits cleanly. three
+  tests that had pinned the old formula's outputs were rewritten with it.
+- [medium] 26 — `MaxSimScorer` gives a doc with no in-vocabulary terms 0.0 and
+  calls that "the scorer must not reorder on it", but maxsim scores go
+  negative (8 of 4000 query-doc pairs on this corpus, min -0.0262), so the
+  0.0 default is a better score than a genuinely dissimilar doc earns and
+  would float an unrepresented doc above one the space actually judged. latent
+  here — the vectorizer is fit on these very docs, so no doc has an empty
+  profile — but it bites the moment the space is fit on anything but the
+  corpus it scores. the query-side branch is fine: all candidates get 0.0 and
+  the stable sort holds. found 2026-09-02
+- [medium] 26 — the readme reads cosine 1.0 as the signature of an exact term
+  match ("an exact term match has cosine 1.0 in maxsim"). it is not
+  distinguishing: 679 of 1040 terms share an exact direction with another
+  term, so a doc that does not contain a query term can still hit max cosine
+  1.0 on it through a collapsed neighbour. the immunity argument survives
+  because reaching the ceiling only ties and ties keep first-stage order, but
+  the sentence describes a signature the space does not have. found 2026-09-02
+- [low] 26 — `Bm25Scorer.score` runs `self._bm25.scores(query.text)` over all
+  100 docs and then keeps the shortlist, so a scorer whose whole definition is
+  "too expensive to run over the corpus, applied to a shortlist" pays a full
+  corpus scan per query. it reports 0 latent dots, which is honest about the
+  currency but hides that the work is not shortlist-shaped. direction check
+  only. found 2026-09-02
+- [low] 26 — `Evaluator.run_reranked` recomputes `run_first_stage(stage)`, and
+  with it every per-query rr and category mean, on each of its 17 calls from
+  main.py; `__init__` also calls `bm25.rank`/`lsa.rank` a second time per
+  query to build the rrf fusion it already has both rankings for. found
+  2026-09-02
+- [low] 26 — main.py's headroom comparison is `oracle@20 vs pooled-lsa@20`,
+  which was "the oracle against the best real scorer" until this fix; maxsim@20
+  is now the top real row at 0.867. the readme sentence was corrected to name
+  the pooled scorer, but the printed comparison no longer prices the headroom
+  above the best scorer in the table. found 2026-09-02
 - [fixed 2026-09-02] 25 — the hallucination sweep's x-axis was not the rate it
   was labelled with. `ScriptedHyde.generate` drew an independent coin per query
   (`_unit_draw(seed, query_id) < hallucination_rate`), so the `rate` column was
@@ -1430,6 +1498,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 26-reranking | 2026-09-02 |
 | 25-query-rewriting | 2026-09-02 |
 | 24-extraction-metrics | 2026-09-01 |
 | 23-multi-hop-retrieval | 2026-09-01 |
@@ -2023,6 +2092,29 @@ gives you the rate in expectation and expectation is not what a reader reads
 off a curve. three smaller findings came out of the same read and are listed
 open.
 
+26 came back clean on everything it measures and dirty on the one formula it
+names. checked the reuse first, since the project is glue: the term vectors
+really are what DenseLSA gives one-term inputs (identity rows of V, verified
+against `_svd.transform` on real words), the pooled path matches 03's full
+scan to 1e-12, bm25 rescoring matches 03's postings exactly, the oracle rows
+equal first-stage recall@depth, reciprocal rank is 1-indexed, recall@k slices
+k, the SVD and the bootstrap are both seeded and reruns are identical, and
+every published number matched what main.py printed, line for line. the shortlist-ceiling
+mechanic is sound and well tested — a gold below the cutoff keeps its
+first-stage rank under the oracle, pinned. the defect was that the scorer
+called "maxsim" was not maxsim: an idf-weighted mean where colbert's MaxSim is
+an unweighted sum of per-term maxima, which flipped the sign of the only
+conclusion the project drew about late interaction as an architecture. the
+general lesson to carry: when a project names a published algorithm and then
+publishes a verdict on that algorithm, the formula is the thing to check first
+and the docstring is not a check — this one described its own deviation
+accurately ("idf-weighted mean over query terms") and nobody read it against
+the reference. a negative result about a named method deserves more suspicion
+than a positive one, because a bug in the method is the cheapest way to get
+one. the tell was that the deviation up-weighted precisely the rare terms a
+64-dim space cannot represent, so the scorer was being handed its own worst
+inputs. five smaller findings came out of the same read and are listed open.
+
 ## MECHANISMS
 
 Every algorithm, metric, data structure, and technique implemented somewhere
@@ -2283,7 +2375,7 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - cancellable simulated-api call: signal passed through to slot acquisition, a call cancelled while queued is never admitted, served, or charged and throws ApiError kind cancelled; cancelled-in-queue and max-queue-depth counters in api stats (09, typescript)
 - cancel-on-timeout storm mode: per-attempt AbortController aborted at the client timeout, abandoned attempts decomposed into cancelled-in-queue vs wasted completions, in-service work unkillable by construction (09, typescript)
 - per-term latent vectors from a fitted truncated svd: identity-transform rows of V, unit-normalized, same space as the pooled doc vectors (26, python)
-- late-interaction maxsim scoring: idf-weighted mean over query terms of max term cosine, exact-match ties at 1.0, per-pair cost |query terms| x |doc terms| (26, python)
+- late-interaction maxsim scoring: colbert's unweighted sum over query terms of max term cosine, full term match ties at |query terms|, per-pair cost |query terms| x |doc terms| (26, python)
 - two-stage rerank pipeline: shortlist reorder with first-stage tail appended, stable ties falling back to first-stage order (26, python)
 - oracle reranker: label-reading upper bound separating the shortlist ceiling from scorer headroom (26, python)
 - latent-dot-product cost accounting per scorer, bm25 postings reported as a different currency (26, python)
@@ -2497,7 +2589,7 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - 25: append weights query and answer equally because bm25 counts each distinct term once — score-level interpolation between a raw-query search and a hypothetical-only search (03's fusion machinery applies as is) might keep the anchor while shrinking honest-answer regressions like p07's 1.000 → 0.333
 - 26: the oracle leaves +0.089 mrr between pooled-lsa and perfect at depth 20 — could a pair scorer trained on the features already computed there (bm25 score, pooled cosine, maxsim) capture part of it with 17's logistic regression, and does a 40-query set even support the held-out split that requires?
 - 26: the rerank knee was measured over an exact first stage — with 13's hnsw as the stage, ann recall@depth is below 1.0 by construction, so shortlist depth and the ef knob should trade against each other measurably
-- 26: maxsim spends 1909.5 dots/query at depth 20, mostly on low-idf doc terms that cannot win a weighted max — how much of that does idf-pruning the doc profiles recover before mrr moves?
+- 26: maxsim spends 1909.5 dots/query at depth 20, mostly on low-idf doc terms that cannot win a max — how much of that does idf-pruning the doc profiles recover before mrr moves?
 - 25: prf had nothing to do because 32 of 40 first-search top docs were already gold — whether multi-doc extraction or a deliberately weakened first-pass retriever gives it room to act is unmeasured (23's multi-doc extraction thread, one hop down)
 - 25: real hyde samples several hypotheticals and pools them — whether three authored paraphrases of one answer beat one, or just widen the drift surface, is testable in this harness at the cost of more authoring
 
