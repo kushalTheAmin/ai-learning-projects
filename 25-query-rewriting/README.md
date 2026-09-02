@@ -48,19 +48,19 @@ three results worth stating plainly.
 
 ## the hallucination sweep
 
-each query has a fixed wrong answer (the next query's authored answer, so its confidently on the wrong subject) and a seeded nested draw decides whether it fires, so sweeping the rate moves one variable:
+each query has a fixed wrong answer (the next query's authored answer, so its confidently on the wrong subject) and a seeded nested draw decides whether it fires, so sweeping the rate moves one variable. the draw is the rate-quantile of the per-query scores, not a coin per query, so n_halluc is exactly the rate — a coin gives it in expectation and 40 queries is not enough for that to be the same thing:
 
 ```
   rate  n_halluc  append mrr  replace mrr  append mrr (halluc only)
   0.00         0       0.983        0.981                        --
-  0.10         7       0.866        0.822                     0.330
+  0.10         4       0.919        0.897                     0.361
   0.25        10       0.818        0.747                     0.339
-  0.50        15       0.762        0.634                     0.410
+  0.50        20       0.652        0.509                     0.338
   1.00        40       0.367        0.057                     0.367
   (raw mrr@10 for reference: 0.830)
 ```
 
-append and replace are near-identical when the generator is honest (0.983 vs 0.981) and pull apart the moment it isnt. at a 10% hallucination rate replace is already below the raw query, 0.822 vs 0.830, one wrong answer in ten erases the entire benefit. append still holds 0.866 there and only falls under raw somewhere between 10% and 25%. at full hallucination the anchor is everything: append keeps the original query terms voting and lands at 0.367, replace searches for the wrong answer alone and lands at 0.057. so "should i search with the query plus the rewrite, or the rewrite alone" is really a bet on your generator's error rate, and the append anchor is cheap insurance. 23 found the mirror image on hop-2 queries (focus beat append because question terms re-admitted distractors); the difference is that here the query names the right doc's topic, there hop 1's question named the wrong one.
+append and replace are near-identical when the generator is honest (0.983 vs 0.981) and pull apart the moment it isnt. at 10% both still clear the raw query — replace 0.897, append 0.919 — so a rewrite survives the occasional confident wrong answer. replace crosses under raw between 15% and 17.5%, append between 22.5% and 25%, and the gap between those two brackets is the whole value of keeping the original query in the search string. at full hallucination the anchor is everything: append keeps the original query terms voting and lands at 0.367, replace searches for the wrong answer alone and lands at 0.057. so "should i search with the query plus the rewrite, or the rewrite alone" is really a bet on your generator's error rate, and the append anchor buys another 5 to 10 points of that rate before the rewrite stops paying at all. 23 found the mirror image on hop-2 queries (focus beat append because question terms re-admitted distractors); the difference is that here the query names the right doc's topic, there hop 1's question named the wrong one.
 
 honest hyde is not free of regressions either: p07 (request waits forever, server never answers) falls from rr 1.000 to 0.333 under hyde-append at rate 0, because a correct answer about timeouts votes for every doc that discusses timeouts, not just the gold one. the biggest-moves table in the output shows both tails.
 
@@ -82,3 +82,7 @@ python, because the entire stack it composes with lives there: 02's bm25 and boo
 - append weights query and answer equally because bm25 counts each distinct term once; interpolating scores between a raw-query search and a hypothetical search (03's fusion machinery applies as is) might keep the anchor while shrinking honest-answer regressions like p07
 - prf extracted from the top-1 doc only, and 32 of 40 top docs were already gold, leaving it nothing to do; whether multi-doc extraction or a worse first-pass retriever changes its value is unmeasured here
 - real hyde samples several hypotheticals and averages; whether three authored paraphrases of the same answer beat one, or just widen the drift surface, is testable in this harness with more authoring
+
+## fixes
+
+- 2026-09-02 — the hallucination sweep drew an independent coin per query, so the column labelled `rate` was nominal and the row measured whatever 40 draws gave: 0.10 fired 7 (17.5%), 0.50 fired 15 (37.5%). the readme read its conclusion off the label — "one wrong answer in ten erases the entire benefit" — when at a real 10% replace scores 0.897, above raw's 0.830. the draw is now the rate-quantile of the same per-query scores, still nested, still seeded, and exactly round(rate * n) queries fire. rate 0.10 moved 0.866/0.822 → 0.919/0.897 and rate 0.50 moved 0.762/0.634 → 0.652/0.509; the crossing points are 15-17.5% for replace and 22.5-25% for append, not 10% and "somewhere between 10% and 25%". rate 0, 0.25 and 1.00 are unchanged and no other table moved.

@@ -148,6 +148,70 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-02] 25 — the hallucination sweep's x-axis was not the rate it
+  was labelled with. `ScriptedHyde.generate` drew an independent coin per query
+  (`_unit_draw(seed, query_id) < hallucination_rate`), so the `rate` column was
+  a nominal probability and each row measured whatever the 40 draws happened to
+  give: 0.10 fired 7 of 40 (17.5%), 0.50 fired 15 (37.5%), only 0.25 and the
+  two endpoints landed on their label. n_halluc was printed honestly next to it
+  and the readme still read its conclusion off the label — "at a 10%
+  hallucination rate replace is already below the raw query, 0.822 vs 0.830,
+  one wrong answer in ten erases the entire benefit", the load-bearing sentence
+  of the section and the answer to the project's own append-vs-replace
+  question. at a real 10% replace scores 0.897, 0.067 *above* raw's 0.830. the
+  0.822 the sentence quoted is the 17.5% row, and 17.5% is exactly where
+  replace crosses under raw — so the published tolerance was off by nearly a
+  factor of two, in the direction that makes the mechanism look more fragile
+  than it is. the neighbouring claim, that append "only falls under raw
+  somewhere between 10% and 25%", was a bracket 2.5x too wide on the low side:
+  it is 22.5% to 25%. the fix is five lines in generator.py — order the queries
+  by their fixed `_unit_draw` score (tie-broken by id) and fire the first
+  `floor(rate * n + 0.5)` of them, so the count is exactly the rate. every
+  stated design property survives: still nested (a prefix of one fixed order is
+  a prefix of the next), still seeded, still deterministic, the wrong answer is
+  still the next id's. round-half-up rather than `round()` so a bank of 3 at
+  0.5 gives 2 and not banker's 1. twenty-nine tests in a new
+  tests/test_sweep_rate.py: nominal count realized at every swept rate and
+  across five seeds (the old draw gave 7 at seed 7 and 12 at seed 21, so the
+  rate a reader sees depended on the seed), nesting held at single-query
+  granularity, both crossing points bracketed, the corrected sweep table
+  pinned, the entry point held to printing an n_halluc that matches its own
+  rate column, and four holding the readme to the corrected claims. 18 of the
+  29 fail on the old code and the revert check splits cleanly — reverting
+  generator.py alone fails 14, reverting the readme alone fails the 4 prose
+  tests, and the prose tests match against whitespace-normalized text so a
+  line wrap cannot make them vacuous (23's trap). rate 0.10 moved 0.866/0.822
+  -> 0.919/0.897 and rate 0.50 moved 0.762/0.634 -> 0.652/0.509; rate 0.00,
+  0.25 and 1.00 are unchanged, and every other table in the project — the
+  headline systems table, the paired bootstrap, the prf depth sweep, the prf
+  split, the biggest-moves table — is character for character what it was,
+  because all of them run at rate 0. the root index row carried the same
+  wrong claim and is corrected. found and fixed 2026-09-02
+- [medium] 25 — `hyde-replace`'s `+terms` column reports 23.3, identical to
+  append's, but replace does not add 23.3 terms to the query — it deletes the
+  query and substitutes the answer. `_score` computes `added` as
+  `set(tokenize(search_text)) - set(tokenize(query.text))`, a set difference
+  that can only count additions, so the terms replace *drops* are invisible in
+  the one column that describes what the rewrite did to the search string. two
+  rows that differ in kind read as differing in nothing, and the anchor the
+  whole append-vs-replace section turns on is exactly what the column cannot
+  show. nothing published is wrong — no prose reasons from +terms — but a
+  reader comparing the two rows on that column learns the opposite of the
+  point. found 2026-09-02
+- [low] 25 — the "biggest per-query moves" table pads its bottom tail with
+  non-moves. `moves[:3]` takes the three smallest deltas whether or not they
+  are negative, and honest hyde-append regresses exactly one query (p07,
+  -0.667), so the bottom three are p07 followed by k01 and k02 at +0.000. the
+  readme says the table "shows both tails"; the lower tail is one query deep
+  and the two rows under it are ties printed as if they were the next worst.
+  found 2026-09-02
+- [low] 25 — `run_hyde` calls `hyde.generate(query.query_id)` twice per query,
+  once inside the rewriter and once for the `hallucinated` flag. harmless
+  today — generation is a dict lookup and a frozenset membership test, and
+  both calls are deterministic so they cannot disagree — but the flag is
+  recovered by re-running the generator rather than by the rewriter returning
+  what it used, which is the shape that goes wrong the moment generation stops
+  being pure. found 2026-09-02
 - [fixed 2026-09-01] 24 — `compareInto` decided field presence with `key in
   pred` and `key in gold`, and `in` walks the prototype chain. every object in
   the project comes from `structuredClone` or `JSON.parse`, so all of them
@@ -1346,6 +1410,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 25-query-rewriting | 2026-09-02 |
 | 24-extraction-metrics | 2026-09-01 |
 | 23-multi-hop-retrieval | 2026-09-01 |
 | 19-eval-regression | 2026-09-01 |
@@ -1908,6 +1973,35 @@ review move on a comparator is to hand it the field names the language
 already owns. four smaller findings came out of the same read, three of them
 the same prototype-shaped root cause or the same free-pass shape, and are
 listed open.
+
+25 came back clean on every mechanism and dirty on the axis it swept along.
+the reuse is real reuse and all of it checked: 02's bm25 dedupes query terms
+before scoring and ties break on doc id so `search` is a total order,
+reciprocal_rank is 1-indexed and cut at MRR_K=10, recall_at_k is the
+fraction of the gold set inside k, the paired bootstrap is seeded and
+`paired_rrs` refuses two runs over different query sets rather than zipping
+them, and nothing is fitted anywhere so nothing can leak. the data layer
+holds — the hypotheticals cover the query set exactly, none copies a corpus
+doc verbatim, and the swapped "wrong" answer never belongs to a query that
+shares a gold doc with its victim, so the hallucination really is off-subject
+in all 40 cases rather than accidentally on-topic in some. every one of the
+five tables reproduced character for character before the fix, and the run
+is deterministic across reruns.
+
+the defect was that the sweep's x-axis was a label rather than a measurement.
+each query flipped its own coin against the rate, so "rate 0.10" was a
+nominal probability that happened to fire 7 of 40, and the readme's
+conclusion was read off the label — at a real 10% the mode the sentence
+condemns is comfortably above the baseline it was said to have sunk below.
+the tell was arithmetic sitting in plain sight: the table prints n_halluc
+right next to rate, 7 next to 0.10 and 15 next to 0.50, and the prose walked
+past both. the general lesson to carry, and it is the 19 lesson one level
+over: when a document prints the realized quantity beside the nominal one and
+then reasons from the nominal one, the two columns are the finding. a knob
+you control on 40 items should be set, not sampled — an independent draw
+gives you the rate in expectation and expectation is not what a reader reads
+off a curve. three smaller findings came out of the same read and are listed
+open.
 
 ## MECHANISMS
 

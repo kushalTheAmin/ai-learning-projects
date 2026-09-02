@@ -12,9 +12,17 @@ Draws are per-query and nested: a query that hallucinates at rate 0.1
 still hallucinates at 0.5, so sweeping the rate moves one variable. The
 wrong answer is the next query's in sorted-id order, fixed across rates,
 so a query's failure text never changes, only whether it fires.
+
+Which queries fire is the rate-quantile of the per-query scores rather than
+an independent coin per query: exactly round(rate * n) of them hallucinate,
+so a sweep point sits at the rate it is labelled with. An independent coin
+gives the rate only in expectation, and on 40 queries that is not close
+enough to reason from — rate 0.1 fired 7 and rate 0.5 fired 15. Ordering by
+score keeps the nesting; the seed still picks which queries fire.
 """
 
 import hashlib
+import math
 from dataclasses import dataclass
 
 GENERIC_ANSWER = (
@@ -58,11 +66,14 @@ class ScriptedHyde:
             query_id: ordered[(i + 1) % len(ordered)]
             for i, query_id in enumerate(ordered)
         }
+        by_draw = sorted(ordered, key=lambda query_id: (_unit_draw(seed, query_id), query_id))
+        count = math.floor(hallucination_rate * len(ordered) + 0.5)  # half up, not banker's
+        self._hallucinating = frozenset(by_draw[:count])
 
     def generate(self, query_id: str) -> Hypothetical:
         if query_id not in self.hypotheticals:
             raise KeyError(f"no authored hypothetical for query {query_id!r}")
-        hallucinated = _unit_draw(self.seed, query_id) < self.hallucination_rate
+        hallucinated = query_id in self._hallucinating
         source = self._wrong_source[query_id] if hallucinated else query_id
         return Hypothetical(
             text=self.hypotheticals[source],
