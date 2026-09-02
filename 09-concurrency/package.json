@@ -9,6 +9,7 @@
   "scripts": {
     "start": "tsx src/main.ts",
     "start:flaky": "tsx src/flaky-main.ts",
+    "start:storm": "tsx src/storm-main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

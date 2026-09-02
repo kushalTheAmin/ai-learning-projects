@@ -35,6 +35,17 @@ export interface ItemResult {
   finishedAtMs: number;
 }
 
+export interface SlowdownOptions {
+  /**
+   * Degraded window [startMs, endMs): calls whose processing starts inside it
+   * pay `factor` times the usual latency (failure path included). Capacity is
+   * concurrency over service time, so a factor of 5 is a 5x capacity dip.
+   */
+  startMs: number;
+  endMs: number;
+  factor: number;
+}
+
 export interface ApiOptions {
   /** Per-call latency floor, ms. */
   baseLatencyMs: number;
@@ -52,6 +63,8 @@ export interface ApiOptions {
   perItemOutputTokens: number;
   inputPricePerMTok: number;
   outputPricePerMTok: number;
+  /** Optional degraded-latency window; absent means steady capacity. */
+  slowdown?: SlowdownOptions;
 }
 
 export const DEFAULT_API_OPTIONS: ApiOptions = {
@@ -106,7 +119,26 @@ export class SimulatedApi {
     private readonly flakeRng?: Rng,
   ) {
     this.opts = { ...DEFAULT_API_OPTIONS, ...opts };
+    const slow = this.opts.slowdown;
+    if (slow) {
+      if (!Number.isFinite(slow.startMs) || slow.startMs < 0 || slow.endMs < slow.startMs) {
+        throw new Error(
+          `slowdown window must satisfy 0 <= startMs <= endMs, got [${slow.startMs}, ${slow.endMs})`,
+        );
+      }
+      if (!Number.isFinite(slow.factor) || slow.factor < 1) {
+        throw new Error(`slowdown factor must be a finite number >= 1, got ${slow.factor}`);
+      }
+    }
     this.slots = new Semaphore(this.opts.maxConcurrent);
+  }
+
+  /** Latency multiplier for a call starting service at the current instant. */
+  private slowFactor(): number {
+    const slow = this.opts.slowdown;
+    if (!slow) return 1;
+    const t = this.clock.now();
+    return t >= slow.startMs && t < slow.endMs ? slow.factor : 1;
   }
 
   async call(items: readonly WorkItem[]): Promise<ItemResult[]> {
@@ -127,13 +159,14 @@ export class SimulatedApi {
       this.opts.promptOverheadTokens + items.length * this.opts.perItemInputTokens;
     try {
       const jitter = 1 - this.opts.latencyJitter + 2 * this.opts.latencyJitter * this.rng();
+      const slow = this.slowFactor();
       if (items.some((item) => item.poisoned) || this.drawFlakes(items)) {
-        await this.clock.sleep(this.opts.baseLatencyMs * jitter);
+        await this.clock.sleep(this.opts.baseLatencyMs * jitter * slow);
         this.stats.failedCalls++;
         throw new ApiError("validation", "batch rejected: one or more items failed validation");
       }
       const serviceMs =
-        (this.opts.baseLatencyMs + items.length * this.opts.perItemLatencyMs) * jitter;
+        (this.opts.baseLatencyMs + items.length * this.opts.perItemLatencyMs) * jitter * slow;
       await this.clock.sleep(serviceMs);
       this.stats.outputTokens += items.length * this.opts.perItemOutputTokens;
       this.stats.itemsCompleted += items.length;
