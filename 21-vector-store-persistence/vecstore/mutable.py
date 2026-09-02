@@ -10,8 +10,12 @@ costs and the difference is what main.py measures:
 - unlink (hard removal): the node's edges are removed from the whole
   graph. Queries stop paying for it, but the graph loses whatever
   connectivity those edges provided, and nothing repairs the hole.
+- unlink_with_repair: the same removal plus a local patch reconnecting
+  each removed node's in-neighbors into its surviving out-neighborhood,
+  either by filling the freed slots (fill, the additive patch) or by
+  re-selecting the whole link list under the cap (reselect).
 
-compact() is the third option: rebuild a fresh index from the live
+compact() is the fourth option: rebuild a fresh index from the live
 vectors, paying full build cost to get a clean graph back.
 
 export_state()/restore() give persistence (and cloning) a single, complete
@@ -106,6 +110,105 @@ class MutableHnswIndex(HnswIndex):
                     layers[layer] = [x for x in ids if x not in doomed]
         if self._entry in doomed:
             self._reset_entry()
+
+    def unlink_with_repair(
+        self,
+        nodes: Iterable[int],
+        heuristic: bool | None = None,
+        reselect: bool = False,
+    ) -> dict[str, int]:
+        """Hard removal with a local patch: every survivor that pointed at a
+        removed node gains links into the removed nodes' surviving
+        out-neighborhoods. In-neighbors are found by the same full scan
+        unlink_many needs (edges are not symmetric), and the bridge
+        candidates are captured before any edges are stripped, so a batch
+        whose members point at each other still bridges through them.
+
+        Two repair policies:
+
+        - fill (default): keep every surviving edge and select bridge
+          candidates only into the slots the removal freed. The patched
+          graph's edges are a superset of what plain unlinking leaves.
+        - reselect: re-run neighbor selection over surviving neighbors and
+          bridge candidates together, under the degree cap. This can drop
+          surviving edges in favor of closer bridge candidates.
+
+        heuristic overrides the selection rule for the repair only (None
+        keeps the index's build-time rule; in fill mode the heuristic's
+        diversity test sees only the additions). Distance computations
+        spent ranking and selecting land in distance_count like any other
+        graph work.
+
+        Returns {"edges_lost", "edges_added", "edges_dropped",
+        "reselections"}: out-edges into the batch, new out-edges the patch
+        created, surviving out-edges the patch removed (always 0 in fill
+        mode), and how many (survivor, layer) link lists ran selection.
+        """
+        doomed: set[int] = set()
+        for node in nodes:
+            self._check_id(node)
+            if node in self._deleted:
+                raise ValueError(f"node {node} is already deleted")
+            if node in doomed:
+                raise ValueError(f"node {node} appears twice in one unlink batch")
+            doomed.add(node)
+        stats = {"edges_lost": 0, "edges_added": 0, "edges_dropped": 0, "reselections": 0}
+        if not doomed:
+            return stats
+        use_heuristic = self.heuristic if heuristic is None else heuristic
+        bridges = {
+            node: [[x for x in ids if x not in doomed] for ids in self._links[node]]
+            for node in doomed
+        }
+        self._deleted |= doomed
+        for node in doomed:
+            self._links[node] = [[] for _ in self._links[node]]
+        for survivor in range(len(self)):
+            if survivor in doomed:
+                continue
+            layers = self._links[survivor]
+            for layer, ids in enumerate(layers):
+                lost = [x for x in ids if x in doomed]
+                if not lost:
+                    continue
+                stats["edges_lost"] += len(lost)
+                remaining = [x for x in ids if x not in doomed]
+                fresh: set[int] = set()
+                for gone in lost:
+                    if layer < len(bridges[gone]):
+                        fresh.update(bridges[gone][layer])
+                fresh.difference_update(remaining)
+                fresh.discard(survivor)
+                cap = self.m0 if layer == 0 else self.m
+                spare = cap - len(remaining)
+                if not fresh or (not reselect and spare <= 0):
+                    layers[layer] = remaining
+                    continue
+                vec = self._store[survivor]
+                candidates = sorted(fresh) if not reselect else sorted(fresh | set(remaining))
+                ranked = sorted(
+                    zip(self._dists(vec, candidates), candidates),
+                    key=lambda pair: (pair[0], pair[1]),
+                )
+                saved = self.heuristic
+                self.heuristic = use_heuristic
+                try:
+                    selected = self._select_neighbors(
+                        vec, ranked, cap if reselect else spare
+                    )
+                finally:
+                    self.heuristic = saved
+                if reselect:
+                    layers[layer] = selected
+                    stats["edges_dropped"] += len(set(remaining) - set(selected))
+                    stats["edges_added"] += len(set(selected) - set(remaining))
+                else:
+                    layers[layer] = remaining + selected
+                    stats["edges_added"] += len(selected)
+                stats["reselections"] += 1
+        if self._entry in doomed:
+            self._reset_entry()
+        return stats
 
     def _reset_entry(self) -> None:
         """Point the entry at the highest-level live node, lowest id on ties."""

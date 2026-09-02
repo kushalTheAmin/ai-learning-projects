@@ -24,6 +24,10 @@ builds on 13-ann-hnsw by import, not copy. `MutableHnswIndex` subclasses 13's
 - `unlink` (hard removal): strips the node's edges out of the whole graph,
   no repair. what production systems mostly refuse to do, measured here so
   you can see why.
+- `unlink_with_repair`: hard removal plus the local patch, reconnecting
+  each removed node's in-neighbors into its surviving out-neighborhood.
+  two policies, fill (additive, default) and reselect; measured in
+  repair_main.py, see the repair extension section.
 - `compact`: rebuild a fresh index from the live vectors, full build cost,
   clean graph.
 - `export_state` / `restore`: the complete index as data, including the rng
@@ -40,6 +44,7 @@ leaves the old store intact instead of a torn file.
 ```
 pip install -r requirements.txt
 python3 main.py
+python3 repair_main.py
 python3 -m pytest tests/ -q
 ```
 
@@ -118,6 +123,66 @@ nodes, so taking the loaded ones out cuts the graph in pieces. tombstones,
 the control column, sit at 0.997 throughout because they dont touch the
 graph at all.
 
+## the repair extension
+
+main.py measured hard deletes with nobody patching the hole. repair_main.py
+turns the standard local patch on and prices it: when a node is removed,
+every survivor that pointed at it gains links into the removed node's
+surviving out-neighborhood. two patch policies, and the difference between
+them turned out to be the whole result:
+
+- fill: keep every surviving edge, select bridge candidates only into the
+  slots the removal freed. strictly additive over plain unlinking, and the
+  tests hold it to that.
+- reselect: re-run neighbor selection over survivors and bridge candidates
+  together under the degree cap, which can drop surviving edges.
+
+runs offline like everything else, `python3 repair_main.py`, about 35
+seconds. the attacks and the tie-break seeds are exactly section 5's.
+
+**repair works, if it never subtracts.** on the naive build's hub attack,
+fill with heuristic selection holds live reachability at 1.000 through 30%
+removed where bare unlinking falls to 0.633, and recall ends at 0.774 vs
+0.597. across five degree tie draws its reachability never leaves 0.999-1.000,
+so the answer survives the draw. fill with naive selection adds
+almost exactly the same number of edges (34106 vs 34117) and still lets
+reachability slide to 0.770 at 30% removed: the patch's selection rule
+matters more than how many edges it adds. the diversity heuristic keeps
+bridge edges that point somewhere new, nearest-only fill spends the freed
+slots on redundant close edges. thats 13's build ablation appearing a third
+time, now inside the delete path, and it means a naive-built graph can be
+kept alive by a heuristic patch.
+
+**reselect is worse than doing nothing.** re-selecting whole link lists
+under the cap drops 11137 surviving edges over the attack and ends at
+reachability 0.135, far below the 0.633 of never repairing at all. any
+distance-ranked selection prefers a close bridge candidate over a far
+surviving edge, and the far edges are exactly what the damaged graph cannot
+afford to lose. a repair that is allowed to subtract connectivity is an
+attack with good intentions.
+
+**the patch is one hop, and the sharper attack walks through it.** removing
+the 100 earliest inserts cut naive reachability to 0.639 bare; with fill
+repair it is 0.639 again, unchanged to three decimals, despite 15012 added
+edges. a bridge routes around a single removed node, but each doomed node's
+bridge set excludes the rest of the batch, so a path through two removed
+nodes in a row is not patched. the earliest inserts are a dense mutually
+linked core, which is why this attack was sharper than the hub attack in
+the first place, and the region behind that core stays dark no matter how
+many edges the patch adds elsewhere. test_the_patch_is_one_hop_only pins
+the mechanism on a four-node line.
+
+**what it costs.** heuristic fill spends 1234 distance computations per
+removed node, 740641 over the whole 600-removal attack, which is 129.8% of
+the 570472 one compact() rebuild costs at that point, and the rebuild comes
+back better anyway (recall 0.952 vs 0.774, both at reachability 1.000). so
+at 2000 vectors, batch repair loses to rebuild outright. what repair
+actually sells is incrementality: 1234 dists after each delete keeps the
+graph whole continuously, where the rebuild is 570472 in one lump every
+time you need a clean graph right now. naive fill is 483 per removal and
+buys less; reselect with heuristic selection is 5442 per removal, 572.4%
+of the rebuild bill, for a graph worse than bare unlinking.
+
 ## tradeoffs and where it breaks down
 
 - the whole store serializes and loads in one piece. fine at 738KB, wrong
@@ -133,7 +198,12 @@ graph at all.
 - unlink does no repair. real systems that hard-delete (hnswlib's
   markDelete stays tombstone-style for exactly this reason) either keep the
   node or patch the hole by relinking neighbors; the naive-build column
-  shows the worst case when nobody patches.
+  shows the worst case when nobody patches, and the repair extension above
+  measures the patch, including the policy that makes things worse.
+- the repair extension's patch is one hop by construction. it prices the
+  standard local patch honestly, but a batch that removes a connected core
+  defeats it entirely, and nothing here implements the transitive version
+  that would route through the batch.
 - the checksum protects the file at rest, not the write path end to end. a
   buggy writer that produces a self-consistent wrong file passes.
 
@@ -160,10 +230,20 @@ is a repo rule.
 
 ## open questions
 
-- unlink-with-repair: reconnect each removed node's in-neighbors to its
-  out-neighbors (the standard patch), then re-run the hub attack on the
-  naive graph; how much of the 0.638 reachability collapse does local
-  repair buy back, and at what edge-update cost?
+- the one-hop patch dies on the earliest-inserts attack because bridges
+  exclude the rest of the batch; a transitive patch that routes through the
+  doomed set's closure (follow removed-to-removed edges until a survivor
+  turns up) should crack it, at a cost that grows with how interlinked the
+  batch is, unmeasured.
+- fill-heuristic holds reachability at 1.000 while recall sits at 0.774
+  against the rebuild's 0.952, so the patched graph is connected but worse
+  shaped; comparing its edge-length distribution against a fresh build
+  would say which edges it is missing.
+- heuristic fill costs 129.8% of one rebuild at 2000 vectors, but repair
+  cost is local (degree times candidates) while rebuild cost scales with
+  the whole store; somewhere in n the per-delete repair bill drops under
+  the amortized rebuild and that crossover is the number a store actually
+  needs.
 - the tombstone cost story used a fixed ef; a search that stops when it has
   k live results instead would show the true over-fetch curve, and where a
   70%-dead store forces the beam wide.
