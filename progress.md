@@ -168,6 +168,56 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-02] 01 — the headline row was labelled "feedback retry" and the
+  96.7% was credited to the feedback loop, but the harness cannot see feedback
+  at all. `ScriptedLLM.complete` pulls the ticket id out of the prompt with one
+  regex and returns `plan[min(attempt, len(plan)-1)]` — the output is a function
+  of the attempt count and nothing else, so the reply on attempt 2 is the same
+  string whether the prompt carried the validation error or was the original
+  prompt resent verbatim. measured the control: blind retry over the committed
+  30 tickets scores 29/30 at 44 calls, identical to the feedback path on every
+  field of every ticket — same success, same attempt count, same parse layers,
+  same validated data. so the one number the project publishes about retrying
+  cannot distinguish the two halves its own concept section says "it matters
+  that theyre distinct", and the readme stated the distinction as fact ("a blind
+  retry re-rolls the same dice — a feedback retry converges") one screen above a
+  table that is silent on it. the disclosure that was there — "the scripted
+  model always complies eventually except one ticket" — says compliance is
+  scripted but not that compliance is free, and a reader still reads the row
+  label as the attribution. the fix is a control row, not a rescoring:
+  `extract_ticket` gains `feedback: bool = True` and skips the two
+  `build_repair_prompt` reassignments when it is off, run.py runs both retry
+  strategies and prints them adjacent, the readme carries the blind row at the
+  same 96.7%/44 and says in prose why it ties. no measured value moved — every
+  cell that was in the table is character for character what it was, the new
+  row is new — but the claim did: the 96.7% prices retrying at all, and
+  feedback-beats-blind is now labelled the design bet it is, needing a model
+  that can read an error to settle. new tests/test_blind_retry.py: the model is
+  prompt-blind at a fixed attempt index, blind mode never emits a repair prompt
+  on either the parse or the validation branch, the dataset tie holds ticket for
+  ticket, run.py prints both rows with identical columns, and six holding the
+  readme to the corrected claims against whitespace-normalized text. 12 of its
+  15 fail on the old code and the revert check splits cleanly — reverting
+  pipeline.py and run.py fails the 7 behavioural tests, reverting the readme
+  alone fails 5 of the 6 prose ones — the sixth pins the feedback row, which was
+  already in the table. cross-project check: 08 runs the same scripted-
+  model shape and is clean, because its correction rule counts validation-error
+  messages in the visible conversation, so withholding the feedback message
+  really does change what the model emits — and its readme says so ("a
+  correction rule saying how many validation-feedback rounds"). that is the
+  disclosure 01 was missing. found and fixed 2026-09-02
+- [medium] 01 — `parse_lenient` runs the extract layer on `strip_code_fence`'s
+  output rather than the original text, so the first fence in a reply shadows
+  everything outside it. a model that emits a reasoning block in a bare fence
+  and then the json — `` ```\nreasoning\n```\n{"a": 1} `` — parses to nothing:
+  the fence regex is non-greedy and matches the first pair, `unfenced` becomes
+  `reasoning`, and the walker never sees the object that is sitting right there
+  in the raw text. costs a retry on output no llm call was needed for, which is
+  the exact failure the layered design exists to prevent. latent on the shipped
+  numbers — no ticket in the dataset has two fences or a non-json fence, so
+  every published rate is unaffected — but reason-then-answer is one of the
+  commonest real reply shapes. the extract layer should fall back to the raw
+  text when the fenced candidate yields nothing. found 2026-09-02
 - [fixed 2026-09-02] 22 — the escalation section's safety claim was reading
   structural zeros as measurements. "the hurt column is 0 everywhere, and
   thats measured, not assumed" was published over all twelve policy rows,
@@ -1563,6 +1613,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 01-structured-output | 2026-09-02 |
 | 22-rag-vertical-slice | 2026-09-02 |
 | 26-reranking | 2026-09-02 |
 | 25-query-rewriting | 2026-09-02 |
@@ -1588,7 +1639,6 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 03-hybrid-search | 2026-08-27 |
 | 04-bpe-tokenizer | 2026-08-27 |
 | 02-retrieval-eval | 2026-08-26 |
-| 01-structured-output | 2026-08-25 |
 
 Note on the first pass: every project in the repo was committed on 2026-08-25,
 so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
@@ -2196,6 +2246,30 @@ than a positive one, because a bug in the method is the cheapest way to get
 one. the tell was that the deviation up-weighted precisely the rare terms a
 64-dim space cannot represent, so the scorer was being handed its own worst
 inputs. five smaller findings came out of the same read and are listed open.
+
+01 came back clean on its code and dirty on its attribution — second review of
+the project, first since 2026-08-25. the parsing stack holds up under a much
+harder read than the first pass gave it: every layer does what its docstring
+says, the layers really are ordered cheapest-first, the brace walker survives
+nested objects, escaped quotes, braces inside both quote styles, concatenated
+objects, escaped `{`, 1MB of junk and a 500KB valid value, and fifteen
+hand-built edge shapes all land on the layer you would predict or fail cleanly.
+all three published rates match `run.py` today, the run is byte-identical
+across invocations, and the strategies do not share a client so no attempt
+counter leaks between rows. what was wrong was one level up: the third row was
+named after a mechanism the harness is structurally unable to observe. the
+general lesson, and it generalizes past this repo: when a mock stands in for
+the component whose behaviour a row is named after, the row measures the mock.
+the way to catch it is to ask what the control would print, and the way to keep
+it caught is to print the control — a tie that is visible in the table cannot
+be misread the way an absent comparison can. the same question is worth putting
+to every project here that scripts a model, which is why 08 got checked in the
+same run and came back clean: its scripted model reads the visible conversation
+rather than an attempt counter, so withholding feedback genuinely changes what
+it emits, and its readme names the correction rule as a round count instead of
+implying the error text is what lands. one new robustness finding came out of
+the same read, the fence shadowing the extract layer, and is listed open with
+the three that were already there.
 
 ## MECHANISMS
 

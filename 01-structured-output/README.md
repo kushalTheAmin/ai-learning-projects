@@ -19,10 +19,11 @@ the fix has two distinct halves and it matters that theyre distinct
 - **parse repairs are free** — stripping a fence or extracting the json out of
   prose costs zero extra llm calls. you should never pay for a retry on a
   failure a string operation can fix
-- **schema violations need a retry, and the retry needs feedback** — the model
+- **schema violations need a retry, and the retry carries feedback** — the model
   returned `"priority": "URGENT"` when the schema wants lowercase, so tell it
-  exactly that. a blind retry re-rolls the same dice — a feedback retry
-  converges
+  exactly that. the design belief is that a blind retry re-rolls the same dice
+  while a feedback retry converges — say up front that this repo builds the
+  feedback path and does not measure it, see the blind control row below
 
 the pipeline here does the cheap thing first, escalates only when it has to,
 and after `max_retries` returns a typed failure instead of raising or handing
@@ -57,15 +58,27 @@ python3 -m venv .venv
 |---|---|---|
 | strict json.loads, no retry | 20.0% | 30 |
 | layered parsing, no retry | 60.0% | 30 |
+| layered parsing + blind retry (max 2) | 96.7% | 44 |
 | layered parsing + feedback retry (max 2) | 96.7% | 44 |
 
 what they mean — naive `json.loads` glue code survives only perfectly clean
 output. free string-level repairs triple that without a single extra call.
-the feedback retry loop gets you to 29/30 at the cost of 44 calls for 30
-tickets — a 47% call overhead, which is the real price of reliability and
-exactly the number youd bring to a cost conversation. the one permanent
-failure is a ticket whose model truncates output on every attempt, which is
-the hard-failure policy doing its job: report it, dont hide it
+retrying gets you to 29/30 at the cost of 44 calls for 30 tickets — a 47%
+call overhead, which is the real price of reliability and exactly the number
+youd bring to a cost conversation. the one permanent failure is a ticket whose
+model truncates output on every attempt, which is the hard-failure policy doing
+its job: report it, dont hide it
+
+and the blind row is the control and it ties — 29/30 at 44 calls, identical
+ticket for ticket, same layers, same attempt counts. thats a fact about the
+harness, not about feedback. `ScriptedLLM` replays a fixed plan indexed by
+attempt number and never reads the prompt, so it complies on attempt 2 whether
+you hand it the validation error or the original prompt again. the feedback
+path is built and tested — the repair prompt really does name the failing
+field — but nothing here measures whether it helps. separating the two needs a
+model that can read the error, which means a real one. so read the 96.7% as the
+price of retrying at all, and treat feedback-beats-blind as the design bet its
+still on
 
 `run.py` also prints which layer or retry rescued each failure mode, so you
 can see e.g. that trailing commas never cost a retry but enum violations
@@ -80,8 +93,9 @@ always do
   containing stray braces before the real json defeats it (theres a test
   pinning that exact limitation)
 - feedback retries assume the model can act on the error message. the scripted
-  model always complies eventually except one ticket — real models are worse at
-  this, so real success rates land lower and you should measure yours
+  model always complies eventually except one ticket, and it complies for free —
+  it never reads the message. real models are worse at this, so real success
+  rates land lower and you should measure yours, blind control row included
 - retry-on-failure multiplies tail latency by up to `1 + max_retries` — fine
   for batch extraction, painful in a request path. thats where youd reach for
   constrained decoding or a providers native structured-output mode instead,
@@ -92,6 +106,11 @@ always do
 
 ## fixes
 
+- 2026-09-02 — the 96.7% row was labelled "feedback retry" and the prose
+  credited the feedback loop for it, but `ScriptedLLM` replays a plan indexed
+  by attempt number and never reads the prompt. added the blind-retry control:
+  same 96.7%, same 44 calls, identical ticket for ticket. no number moved, the
+  claim did — the retry rows price retrying, not feedback
 - 2026-08-25 — the brace walker only tracked double quotes, so a python-dict
   reply with an unmatched `{` or `}` inside a value got cut short and thrown
   away — a retry burned on output the `python_literal` layer already handles.

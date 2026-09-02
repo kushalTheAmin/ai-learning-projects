@@ -57,8 +57,13 @@ def extract_ticket(
     ticket: dict,
     max_retries: int = 2,
     lenient: bool = True,
+    feedback: bool = True,
 ) -> ExtractionResult:
-    """Run the full loop for one ticket. 1 + max_retries LLM calls at most."""
+    """Run the full loop for one ticket. 1 + max_retries LLM calls at most.
+
+    feedback=False is the blind-retry control: same loop, same call budget,
+    but every attempt resends the original prompt instead of the error.
+    """
     result = ExtractionResult(ticket_id=ticket["id"], success=False)
     prompt = build_prompt(ticket)
 
@@ -74,7 +79,8 @@ def extract_ticket(
         except ParseError as exc:
             result.error = str(exc)
             result.parse_layers.append("parse_failed")
-            prompt = build_repair_prompt(ticket, raw, f"unparseable output: {exc}")
+            if feedback:
+                prompt = build_repair_prompt(ticket, raw, f"unparseable output: {exc}")
             continue
 
         result.parse_layers.append(layer)
@@ -85,6 +91,7 @@ def extract_ticket(
             return result
         except ValidationError as exc:
             result.error = _format_validation_error(exc)
-            prompt = build_repair_prompt(ticket, raw, result.error)
+            if feedback:
+                prompt = build_repair_prompt(ticket, raw, result.error)
 
     return result
