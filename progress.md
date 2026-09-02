@@ -109,6 +109,10 @@ Re-attempted 2026-09-01 (22-byte-queue run): still denied, same sideband
 disconnect on ref deletion. Unchanged: every stale claude/* branch is merged
 or superseded by main, deletion stays a by-hand task on the github branches
 page.
+Re-attempted 2026-09-02 (14-incremental run): still denied, same sideband
+disconnect and the ref survives. Unchanged: every stale claude/* branch is
+merged or superseded by main, deletion stays a by-hand task on the github
+branches page.
 Re-attempted 2026-08-31 (08-caching run): still denied, sideband disconnect
 on ref deletion. Unchanged: all nine stale claude/* branches are merged or
 superseded by main, deletion stays a by-hand task on the github branches page.
