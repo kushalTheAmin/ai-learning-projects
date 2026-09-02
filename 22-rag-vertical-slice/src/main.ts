@@ -212,14 +212,15 @@ async function main(): Promise<void> {
     fixedRows.set(5, k5Row);
     fixedRows.set(10, (await evalGolden(baseUrl, queries, 10)).row);
 
-    console.log("policy               escal helped hurt  answrd  answer  mean in    cost/40  vs fixed");
-    console.log("                                        nogold     acc      tok             k2 cost");
+    console.log("policy               escal helped hurt atrisk  answrd  answer  mean in    cost/40  vs fixed");
+    console.log("                                               nogold     acc      tok             k2 cost");
     const policyLine = (label: string, row: PolicyRow, fixedCost: number): string =>
       [
         label.padEnd(20),
         pad(row.escalated, 6),
         pad(row.helped, 6),
         pad(row.hurt, 5),
+        pad(row.atRisk, 6),
         pad(row.answeredWithoutGold, 7),
         pad(fmt(row.answerAccuracy, 3), 8),
         pad(fmt(row.meanTokensIn, 1), 9),
@@ -233,6 +234,7 @@ async function main(): Promise<void> {
         pad(0, 6),
         pad("-", 6),
         pad("-", 5),
+        pad("-", 6),
         pad(row.answeredWithoutGold, 7),
         pad(fmt(row.answerAccuracy, 3), 8),
         pad(fmt(row.meanTokensIn, 1), 9),

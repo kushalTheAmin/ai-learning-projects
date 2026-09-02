@@ -81,6 +81,15 @@ export interface PolicyRow {
   helped: number;
   /** Escalated queries that flip from correct to wrong-or-refused. */
   hurt: number;
+  /**
+   * Escalated queries that were correct before escalating: the only ones
+   * `hurt` can ever count, so it is hurt's denominator. At any trigger at
+   * or below the refusal floor this is 0 by construction — escalation
+   * fires on a score under the trigger, a score under the floor refused,
+   * and a refusal is not correct — and a hurt of 0 there is vacuous
+   * rather than evidence.
+   */
+  atRisk: number;
   answered: number;
   refused: number;
   correct: number;
@@ -156,6 +165,7 @@ function accumulateRow(
   let escalated = 0;
   let helped = 0;
   let hurt = 0;
+  let atRisk = 0;
   let answered = 0;
   let correct = 0;
   let answeredWithoutGold = 0;
@@ -172,6 +182,7 @@ function accumulateRow(
     if (shouldEscalate(c1, c2)) {
       escalated++;
       const second = passOutcome(c2, floor);
+      if (first.correct) atRisk++;
       if (!first.correct && second.correct) helped++;
       if (first.correct && !second.correct) hurt++;
       final = second;
@@ -200,6 +211,7 @@ function accumulateRow(
     escalated,
     helped,
     hurt,
+    atRisk,
     answered,
     refused: n - answered,
     correct,
@@ -228,6 +240,7 @@ export function livePolicyRow(
   let escalated = 0;
   let helped = 0;
   let hurt = 0;
+  let atRisk = 0;
   let answered = 0;
   let correct = 0;
   let answeredWithoutGold = 0;
@@ -243,6 +256,7 @@ export function livePolicyRow(
     if (o.escalated) {
       escalated++;
       const firstCorrect = passOutcome(c1, floor).correct;
+      if (firstCorrect) atRisk++;
       if (!firstCorrect && o.correct) helped++;
       if (firstCorrect && !o.correct) hurt++;
     }
@@ -261,6 +275,7 @@ export function livePolicyRow(
     escalated,
     helped,
     hurt,
+    atRisk,
     answered,
     refused: n - answered,
     correct,

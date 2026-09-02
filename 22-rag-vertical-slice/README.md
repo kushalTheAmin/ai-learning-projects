@@ -16,7 +16,7 @@ a vertical slice is the argument that composition is where production behavior l
 
 ```
 npm ci
-npm test          # 112 tests: unit + integration over a live server
+npm test          # 125 tests: unit + integration over a live server
 npm run typecheck
 npm start
 ```
@@ -68,28 +68,30 @@ score-gated escalation. the floor sweep left one policy unbuilt: the overlap sco
 before the table, the anatomy that decides everything: 12 of 40 queries score under 0.35 at k=3, and they split 4 retrieval misses against 8 queries whose gold doc is already in context. widening k is a superset operation on this retriever (top-5 starts with top-3, a test holds it), so the gold sentences score never moves for those 8; more retrieval can only ever convert the 4 misses. and of those 4, exactly 1 converts even at k=10, where the context holds the entire corpus: the other 3 are paraphrase-bound, the gold doc arrives and its sentence still loses or stays under the floor. the score can say an answer is weak; it cannot say why, and only one of the two whys is fixable with more retrieval.
 
 ```
-policy               escal helped hurt  answrd  answer  mean in    cost/40  vs fixed
-                                        nogold     acc      tok             k2 cost
-fixed k=3                 0      -     -       0    0.450    2554.3    $0.3239         -
-fixed k=5                 0      -     -       0    0.475    4229.2    $0.5255         -
-  k2=5 trig 0.35         12      1     0       0    0.475    3838.6    $0.4808     91.5%
-  k2=5 trig 0.45         23      1     0       0    0.475    4992.8    $0.6258    119.1%
-  k2=5 trig 0.55         26      1     0       0    0.475    5307.0    $0.6650    126.5%
-  k2=5 trig 0.75         37      1     0       0    0.475    6463.0    $0.8093    154.0%
-  k2=5 always            40      1     0       0    0.475    6783.5    $0.8494    161.6%
-  k2=5 oracle             1      1     0       0    0.475    2655.3    $0.3368     64.1%
-fixed k=10                0      -     -       0    0.475    8339.8    $1.0191         -
-  k2=10 trig 0.35        12      1     0       0    0.475    5056.3    $0.6272     61.5%
-  k2=10 trig 0.45        23      1     0       0    0.475    7349.4    $0.9089     89.2%
-  k2=10 trig 0.55        26      1     0       0    0.475    7975.0    $0.9855     96.7%
-  k2=10 trig 0.75        37      1     0       0    0.475   10268.6    $1.2662    124.3%
-  k2=10 always           40      1     0       0    0.475   10894.1    $1.3430    131.8%
-  k2=10 oracle            1      1     0       0    0.475    2762.8    $0.3497     34.3%
+policy               escal helped hurt atrisk  answrd  answer  mean in    cost/40  vs fixed
+                                               nogold     acc      tok             k2 cost
+fixed k=3                 0      -     -      -       0    0.450    2554.3    $0.3239         -
+fixed k=5                 0      -     -      -       0    0.475    4229.2    $0.5255         -
+  k2=5 trig 0.35         12      1     0      0       0    0.475    3838.6    $0.4808     91.5%
+  k2=5 trig 0.45         23      1     0      5       0    0.475    4992.8    $0.6258    119.1%
+  k2=5 trig 0.55         26      1     0      6       0    0.475    5307.0    $0.6650    126.5%
+  k2=5 trig 0.75         37      1     0     15       0    0.475    6463.0    $0.8093    154.0%
+  k2=5 always            40      1     0     18       0    0.475    6783.5    $0.8494    161.6%
+  k2=5 oracle             1      1     0      0       0    0.475    2655.3    $0.3368     64.1%
+fixed k=10                0      -     -      -       0    0.475    8339.8    $1.0191         -
+  k2=10 trig 0.35        12      1     0      0       0    0.475    5056.3    $0.6272     61.5%
+  k2=10 trig 0.45        23      1     0      5       0    0.475    7349.4    $0.9089     89.2%
+  k2=10 trig 0.55        26      1     0      6       0    0.475    7975.0    $0.9855     96.7%
+  k2=10 trig 0.75        37      1     0     15       0    0.475   10268.6    $1.2662    124.3%
+  k2=10 always           40      1     0     18       0    0.475   10894.1    $1.3430    131.8%
+  k2=10 oracle            1      1     0      0       0    0.475    2762.8    $0.3497     34.3%
 ```
 
 the headline row is trigger 0.35 to k2=10: accuracy 0.475, exactly fixed k=10s, at 61.5% of its cost ($0.6272 vs $1.0191 per 40). that equality is not luck, its the free window again: any query a wider k can fix was a retrieval miss, every retrieval miss scores at most 0.333 at k=3, and 0.333 sits under the 0.35 trigger, so the trigger catches every fixable query by construction. the same argument caps what raising the trigger can buy at exactly nothing: every row above 0.35 escalates more queries (23 at 0.45, 40 at always) and converts the same 1, because the extra escalations are all queries whose gold doc is already in context. on this corpus the trigger belongs at the floor and not one point higher, and always-escalate is strictly worse than fixed k2 (131.8% of its cost) because it pays the k=3 draft on top of every wide call.
 
-the hurt column is 0 everywhere, and thats measured, not assumed: a wider context can only add competitor sentences, so a correct answer could in principle get outvoted after escalation, but on these 40 queries the gold sentence keeps winning every wider contest it was already winning. answered-without-gold also stays 0: no escalated refusal picks up a confident wrong-doc quote from the wider context.
+the hurt column is 0 everywhere, but only some of those zeros are evidence, which is what the atrisk column next to it is for. hurt needs an escalated query that was correct before it escalated, and the headline row cannot have one - the trigger sits on the floor, so escalation only ever fires on a query that already refused, and a refused query is not correct. same for the oracle rows, which escalate only the queries escalation fixes. atrisk counts what could have been hurt, and it reads 0 on both. the real evidence is the rows above the floor: 5 correct answers escalate at 0.45, 6 at 0.55, 15 at 0.75, 18 at always - every correct answer on the set - and not one of them flips. so a wider context outvoting a gold sentence is ruled out by those four rows, not by the row the headline is about.
+
+answered-without-gold stays 0 too, with the same split. the k2=10 rows cannot read anything else: at k=10 the context is the whole 10-doc corpus, so no escalated query can be missing its gold doc. the k2=5 rows are where the column is measured - 2 queries still miss gold at k=5, and both refuse rather than quoting the wrong doc, the free window holding one k wider.
 
 the oracle rows price what the trigger cannot see. an oracle that escalates only the 1 query escalation actually converts spends $0.3497 at k2=10 against the triggers $0.6272: the 11 pointless escalations, 8 unfixable-by-construction plus 3 where the gold doc arrives and still loses, are 44% of the policys bill. the score is a good refusal signal (roc-auc 0.903) and a weak routing signal, because routing needs to know why the score is low, and that distinction (gold missing vs gold present but paraphrase-bound) is exactly what a single scalar cannot carry.
 
@@ -130,6 +132,10 @@ validation is a table of exact rejections: empty or non-string question 400, k o
 ## why typescript
 
 this is the applied-ai shape typescript actually ships: an http endpoint, streaming wire protocols, backpressure across async boundaries, token accounting on the request path. strict mode with typed event payloads catches the protocol drift these systems are famous for, and node's microtask/macrotask scheduling made the backpressure experiment deterministic without a mock clock.
+
+## fixes
+
+- 2026-09-02 — the escalation section sold "the hurt column is 0 everywhere, and thats measured, not assumed", but at trigger 0.35 the trigger sits on the refusal floor, so escalation only fires on queries that already refused and none of them was correct going in — hurt was 0 by construction on the headline row and on both oracle rows, and the same for answered-without-gold on the k2=10 rows, where the wider context is the whole corpus. the policy table now carries an `atrisk` column, the escalated queries that were correct before escalating, so a 0 with nothing behind it reads as vacuous: 0 at trigger 0.35 and on the oracles, 5 / 6 / 15 / 18 on the rows above the floor, which are the four that actually rule the risk out. no measured number moved — the column is new, every other cell is what it was.
 
 ## open questions
 
