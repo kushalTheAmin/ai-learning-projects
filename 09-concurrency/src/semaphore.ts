@@ -4,12 +4,30 @@
  * virtual clock every interleaving is deterministic. A permit must be
  * released exactly once — releasing twice throws instead of silently
  * inflating the limit.
+ *
+ * `acquire` optionally takes an AbortSignal. Aborting while still waiting
+ * removes the waiter from the queue and rejects with AcquireCancelledError;
+ * a permit already granted is unaffected (cancellation reaches queued work
+ * only, never work in service).
  */
+export class AcquireCancelledError extends Error {
+  constructor() {
+    super("semaphore acquire cancelled while waiting");
+    this.name = "AcquireCancelledError";
+  }
+}
+
+interface Waiter {
+  settle: (release: () => void) => void;
+  cleanup?: () => void;
+}
+
 export class Semaphore {
   private held = 0;
-  private waiters: Array<(release: () => void) => void> = [];
+  private waiters: Waiter[] = [];
   private heldHighWater = 0;
   private queueHighWater = 0;
+  private cancelledWaiters = 0;
 
   constructor(private readonly limit: number) {
     if (!Number.isInteger(limit) || limit < 1) {
@@ -17,14 +35,30 @@ export class Semaphore {
     }
   }
 
-  acquire(): Promise<() => void> {
+  acquire(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted) {
+      this.cancelledWaiters++;
+      return Promise.reject(new AcquireCancelledError());
+    }
     if (this.held < this.limit) {
       this.held++;
       this.heldHighWater = Math.max(this.heldHighWater, this.held);
       return Promise.resolve(this.makeRelease());
     }
-    return new Promise((resolve) => {
-      this.waiters.push(resolve);
+    return new Promise((resolve, reject) => {
+      const waiter: Waiter = { settle: resolve };
+      if (signal) {
+        const onAbort = () => {
+          const index = this.waiters.indexOf(waiter);
+          if (index === -1) return;
+          this.waiters.splice(index, 1);
+          this.cancelledWaiters++;
+          reject(new AcquireCancelledError());
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        waiter.cleanup = () => signal.removeEventListener("abort", onAbort);
+      }
+      this.waiters.push(waiter);
       this.queueHighWater = Math.max(this.queueHighWater, this.waiters.length);
     });
   }
@@ -57,6 +91,11 @@ export class Semaphore {
     return this.queueHighWater;
   }
 
+  /** Waiters that aborted before a permit ever reached them. */
+  cancelledWaits(): number {
+    return this.cancelledWaiters;
+  }
+
   private makeRelease(): () => void {
     let released = false;
     return () => {
@@ -67,8 +106,10 @@ export class Semaphore {
       const next = this.waiters.shift();
       if (next) {
         // Hand the permit straight to the next waiter: held count is unchanged.
+        // Detach its abort listener first — once served, aborting is a no-op.
+        next.cleanup?.();
         this.heldHighWater = Math.max(this.heldHighWater, this.held);
-        next(this.makeRelease());
+        next.settle(this.makeRelease());
       } else {
         this.held--;
       }

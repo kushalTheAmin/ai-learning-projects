@@ -12,12 +12,18 @@
  * spend from a token balance earned as a fixed fraction of first attempts,
  * capping the whole client population's retry volume at `ratio` of offered
  * load no matter how many individual tasks want to retry.
+ *
+ * `cancelOnTimeout` flips the abandonment model: the timeout aborts the
+ * attempt's call, which dequeues it if it is still waiting for a server slot
+ * (never served, never charged) but cannot touch an attempt already in
+ * service. That is the AbortSignal-through-the-stack story: cancellation
+ * kills queued work, in-flight work is unkillable.
  */
 import { VirtualClock } from "../../06-rate-limiting/src/clock.js";
 import { nextDelayMs, type BackoffPolicy } from "../../06-rate-limiting/src/backoff.js";
 import { percentile } from "../../06-rate-limiting/src/percentile.js";
 import { createRng } from "../../05-token-streaming/src/rng.js";
-import { SimulatedApi, type ApiOptions, type ApiStats } from "./api.js";
+import { ApiError, SimulatedApi, type ApiOptions, type ApiStats } from "./api.js";
 
 export interface RetryBudgetOptions {
   /** Budget earned per first attempt; caps retry volume at this fraction of offered load. */
@@ -82,6 +88,13 @@ export interface StormConfig {
   arrivalWindowMs: number;
   /** Client-side per-attempt timeout; firing abandons but does not cancel. */
   timeoutMs: number;
+  /**
+   * When true, the timeout also aborts the attempt's call. Cancellation
+   * reaches only work still queued for a server slot (dequeued, never served,
+   * never charged); an attempt already in service completes as an orphan
+   * exactly as in abandon mode. Default false: abandon without cancelling.
+   */
+  cancelOnTimeout?: boolean;
   /** Per-attempt transient failure probability for every task's item. */
   flakeRate?: number;
   api: Partial<ApiOptions>;
@@ -108,6 +121,8 @@ export interface StormResult {
   attemptsAbandoned: number;
   /** Abandoned attempts the server nonetheless served to completion. */
   wastedCompletions: number;
+  /** Abandoned attempts cancelled while still queued: dequeued, never served. */
+  attemptsCancelled: number;
   retriesDenied: number;
   apiStats: ApiStats;
   costUsd: number;
@@ -144,6 +159,7 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
   let attemptsStarted = 0;
   let attemptsAbandoned = 0;
   let wastedCompletions = 0;
+  let attemptsCancelled = 0;
   let drainedAtMs = 0;
   const orphans: Promise<void>[] = [];
 
@@ -152,7 +168,8 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
     let prevDelayMs: number | undefined;
     for (let attempt = 1; ; attempt++) {
       attemptsStarted++;
-      const call = api.call([{ id, poisoned: false, flakeRate }]);
+      const controller = cfg.cancelOnTimeout ? new AbortController() : undefined;
+      const call = api.call([{ id, poisoned: false, flakeRate }], controller?.signal);
       const outcome = await Promise.race([
         call.then(
           () => "ok" as const,
@@ -181,11 +198,13 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
               wastedCompletions++;
               drainedAtMs = Math.max(drainedAtMs, clock.now());
             },
-            () => {
+            (err: unknown) => {
+              if (err instanceof ApiError && err.kind === "cancelled") attemptsCancelled++;
               drainedAtMs = Math.max(drainedAtMs, clock.now());
             },
           ),
         );
+        controller?.abort();
       }
       const retriesUsed = attempt - 1;
       const denied = retriesUsed < cfg.policy.maxRetries && budget !== undefined && !budget.trySpend();
@@ -219,6 +238,7 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
     attemptsStarted,
     attemptsAbandoned,
     wastedCompletions,
+    attemptsCancelled,
     retriesDenied: budget?.deniedCount() ?? 0,
     apiStats: api.snapshot(),
     costUsd: api.costUsd(),
@@ -237,6 +257,11 @@ export interface StormSummary {
   wastedCompletions: number;
   /** Fraction of started attempts the server served for nobody. */
   wastedPct: number;
+  attemptsCancelled: number;
+  /** Fraction of started attempts cancelled in the queue before service. */
+  cancelledPct: number;
+  /** Longest the server admission queue ever got. */
+  maxQueueDepth: number;
   retriesDenied: number;
   p50LatencyMs?: number;
   p95LatencyMs?: number;
@@ -262,6 +287,10 @@ export function summarize(result: StormResult): StormSummary {
     wastedCompletions: result.wastedCompletions,
     wastedPct:
       result.attemptsStarted === 0 ? 0 : (result.wastedCompletions / result.attemptsStarted) * 100,
+    attemptsCancelled: result.attemptsCancelled,
+    cancelledPct:
+      result.attemptsStarted === 0 ? 0 : (result.attemptsCancelled / result.attemptsStarted) * 100,
+    maxQueueDepth: result.apiStats.maxQueueDepth,
     retriesDenied: result.retriesDenied,
     p50LatencyMs: latencies.length === 0 ? undefined : percentile(latencies, 0.5),
     p95LatencyMs: latencies.length === 0 ? undefined : percentile(latencies, 0.95),

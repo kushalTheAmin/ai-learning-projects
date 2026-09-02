@@ -15,7 +15,7 @@
  */
 import { VirtualClock } from "../../06-rate-limiting/src/clock.js";
 import type { Rng } from "../../05-token-streaming/src/rng.js";
-import { Semaphore } from "./semaphore.js";
+import { AcquireCancelledError, Semaphore } from "./semaphore.js";
 
 export interface WorkItem {
   id: number;
@@ -82,7 +82,7 @@ export const DEFAULT_API_OPTIONS: ApiOptions = {
 
 export class ApiError extends Error {
   constructor(
-    readonly kind: "validation" | "oversize" | "empty",
+    readonly kind: "validation" | "oversize" | "empty" | "cancelled",
     message: string,
   ) {
     super(message);
@@ -98,6 +98,10 @@ export interface ApiStats {
   outputTokens: number;
   /** Time each call spent waiting for a server slot, ms, in call order. */
   queueWaitsMs: number[];
+  /** Calls whose signal aborted while still queued: never admitted, never charged. */
+  cancelledInQueue: number;
+  /** Longest the admission queue ever got, cancelled waiters included while they sat in it. */
+  maxQueueDepth: number;
 }
 
 export class SimulatedApi {
@@ -110,6 +114,8 @@ export class SimulatedApi {
     inputTokens: 0,
     outputTokens: 0,
     queueWaitsMs: [],
+    cancelledInQueue: 0,
+    maxQueueDepth: 0,
   };
 
   constructor(
@@ -141,7 +147,13 @@ export class SimulatedApi {
     return t >= slow.startMs && t < slow.endMs ? slow.factor : 1;
   }
 
-  async call(items: readonly WorkItem[]): Promise<ItemResult[]> {
+  /**
+   * The optional signal cancels the call only while it waits for a server
+   * slot: an abort dequeues it (no admission, no tokens, ApiError "cancelled").
+   * Once admitted, the call runs to completion regardless of the signal —
+   * in-service work is unkillable, like a generation already streaming.
+   */
+  async call(items: readonly WorkItem[], signal?: AbortSignal): Promise<ItemResult[]> {
     if (items.length === 0) {
       throw new ApiError("empty", "batch call carries no items");
     }
@@ -152,7 +164,16 @@ export class SimulatedApi {
       );
     }
     const queuedAt = this.clock.now();
-    const release = await this.slots.acquire();
+    let release: () => void;
+    try {
+      release = await this.slots.acquire(signal);
+    } catch (err) {
+      if (err instanceof AcquireCancelledError) {
+        this.stats.cancelledInQueue++;
+        throw new ApiError("cancelled", "call cancelled while queued for a server slot");
+      }
+      throw err;
+    }
     this.stats.queueWaitsMs.push(this.clock.now() - queuedAt);
     this.stats.calls++;
     this.stats.inputTokens +=
@@ -196,7 +217,11 @@ export class SimulatedApi {
   }
 
   snapshot(): ApiStats {
-    return { ...this.stats, queueWaitsMs: [...this.stats.queueWaitsMs] };
+    return {
+      ...this.stats,
+      queueWaitsMs: [...this.stats.queueWaitsMs],
+      maxQueueDepth: this.slots.maxQueue(),
+    };
   }
 
   costUsd(): number {

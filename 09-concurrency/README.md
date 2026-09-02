@@ -7,9 +7,12 @@ items that fail a batch are flags the fixture set itself. The flaky items in
 the extension are seeded coin flips, independent per attempt, which is the
 friendliest possible flake for a retry to meet. The storm extension's
 capacity dip is an authored window in which the server runs 5x slower, and
-its no-cancellation timeout is a modeling choice, so its storm numbers
-measure the retry loop's dynamics under this queueing model, not any real
-provider's failure behavior. No network, no real clock, no API key. What the numbers demonstrate is the relative shape of the
+its no-cancellation timeout is a modeling choice (the cancellation
+extension flips exactly that choice and measures the difference), so its
+storm numbers measure the retry loop's dynamics under this queueing model,
+not any real provider's failure behavior. Cancellation in the extension is
+free and instant, which is the friendliest version of it a real stack never
+quite gets. No network, no real clock, no API key. What the numbers demonstrate is the relative shape of the
 strategies, how cost, latency and failure blast radius move against each other
 under one reproducible model. Absolute values would differ against a real
 provider, and the failure model (a whole batch rejected fast, no word about
@@ -49,6 +52,7 @@ npm test
 npm start
 npm run start:flaky
 npm run start:storm
+npm run start:cancel
 ```
 
 ## results (seed 42, printed by `npm start`)
@@ -453,6 +457,112 @@ only a cap on how many retries happen fixes amplification, so a client that
 retries on timeout without a budget is a machine for converting a transient
 slowdown into a permanent outage, at 12x the cost per completed task.
 
+## the cancellation extension: hanging up vs actually hanging up
+
+Answers the cancellation-propagation question the storm study left open. The
+storm's timeout hangs up the way an HTTP client does: the connection closes,
+the request stays in the server's FIFO, the server serves it to nobody. This
+extension wires an AbortSignal through the stack the way grpc deadlines do:
+`Semaphore.acquire` takes a signal and an abort while waiting dequeues the
+waiter, `SimulatedApi.call` passes it through and a call cancelled in the
+queue is never admitted and never charged. The hard edge is kept honest: an
+attempt already in service is unkillable, a generation mid-stream does not
+stop because the caller left. Same dip, same policies, same seed; the one
+variable is what the timeout does.
+
+```
+npm run start:cancel
+```
+
+### 1. the same 15s dip, abandon vs cancel
+
+```
+         policy     mode     ok   amp  wasted  cancelled  queue max      p95  recovery  drained  $/1k ok
+       no-retry  abandon  66.9%  1.00   33.1%       0.0%        259    110ms     15.0s    90.1s    $2.73
+       no-retry   cancel  84.4%  1.00    5.2%      10.4%         25    110ms      0.0s    90.1s    $1.94
+   immediate-x4  abandon  22.6%  4.10   94.5%       0.0%       6261    109ms     NEVER   250.1s   $33.21
+   immediate-x4   cancel  23.4%  4.10   26.8%      67.5%        125    110ms     NEVER    94.7s   $10.43
+   fixed-500-x4  abandon  22.6%  4.10   94.5%       0.0%       6187    109ms     NEVER   250.1s   $33.21
+   fixed-500-x4   cancel  24.0%  4.10   27.5%      66.7%        125   6591ms     NEVER    96.5s   $10.41
+        expo-x4  abandon  22.6%  4.10   94.5%       0.0%       6020    109ms     NEVER   250.1s   $33.21
+        expo-x4   cancel  27.9%  4.10   28.3%      64.9%        127  12013ms     NEVER   101.6s    $9.44
+      jitter-x4  abandon  22.6%  4.10   94.5%       0.0%       6136    109ms     NEVER   250.1s   $33.21
+      jitter-x4   cancel  26.5%  4.09   27.3%      66.3%        144   9322ms     NEVER    99.4s    $9.52
+jitter+budget10  abandon  60.1%  1.04   42.4%       0.0%        303    257ms     21.3s    90.1s    $3.18
+jitter+budget10   cancel  84.5%  1.02    5.1%      12.0%         36    110ms      0.0s    90.1s    $1.94
+```
+
+Two different stories in one table, and telling them apart is the point.
+
+For the sane policies cancellation is a rescue. no-retry goes 66.9% to
+84.4% ok and its recovery lag goes 15.0s to 0.0s: every task arriving after
+the dip ends succeeds. The mechanism is the queue max column. In abandon
+mode the dip leaves 259 requests in the FIFO, two thirds of them ghosts
+whose clients gave up, and the server spends 15 post-dip seconds serving
+the dead before it can serve the living. In cancel mode the queue can hold
+at most one timeout's worth of live attempts, because anything older has
+aborted its way out; the dip ends, the queue is 25 deep instead of 259, and
+the backlog is gone before the next arrival times out. jitter+budget10 gets
+the same rescue, 60.1% to 84.5% with recovery 21.3s to 0.0s, and lands
+within a rounding error of no-retry cancel. Budget caps the volume, cancel
+caps the queue, and together they turn the 15s outage into exactly a 15s
+outage.
+
+For the unbudgeted retry policies cancellation is not a rescue, and that is
+the answer to the thread's question: the metastable storm survives. Every
+cancel row still says NEVER, ok moves from 22.6% to only 23.4-27.9%, and
+amplification is pinned at 4.10 either way. The storm was never sustained
+by the orphans in the queue; it is sustained by offered volume, 5 attempts
+per task at 25/s is 125/s against a 40/s server, and cancellation does not
+remove a single attempt. What it removes is the pretense of serving them.
+Wasted work collapses from 94.5% to about 27%, the queue from ~6200 deep to
+~130 (attempt rate times timeout, the depth bound cancellation enforces),
+drain time from 250.1s to under 102s, and cost per thousand completions
+from $33.21 to about $10. Same outage, one third the bill.
+
+The p95 column has a story too. In abandon mode p95 is 109ms because the
+only successes that exist are first attempts served fast; anything slower
+timed out into the void. In cancel mode the queue is short enough that a
+late retry sometimes gets served inside its timeout, so successes now
+include multi-attempt slogs at 6.5-12s p95. More tasks succeed and the
+successful tail gets much uglier, which is exactly the trade a caller with
+a per-attempt timeout and no per-task deadline signed up for.
+
+### 2. the capacity cliff with cancellation
+
+```
+load     policy     mode      ok   amp  wasted  cancelled  queue max      p95  drained
+104%   no-retry  abandon   23.2%  1.00   76.8%       0.0%        153    948ms    93.9s
+104%   no-retry   cancel   23.2%  1.00   73.8%       3.0%         42    948ms    91.1s
+104%  jitter-x4  abandon   23.2%  4.07   94.3%       0.0%      11361    948ms   382.0s
+104%  jitter-x4   cancel   24.9%  4.07   19.8%      74.1%        240   8762ms    99.7s
+125%   no-retry  abandon    4.1%  1.00   95.9%       0.0%        902    953ms   112.6s
+125%   no-retry   cancel    4.1%  1.00   76.7%      19.2%         50    953ms    91.0s
+125%  jitter-x4  abandon    4.1%  4.83   99.1%       0.0%      17828    953ms   544.2s
+125%  jitter-x4   cancel    5.5%  4.83   17.1%      81.8%        285  10399ms   100.3s
+```
+
+(83% and 100% load are all-100% ok in both modes, nothing to cancel.) Past
+the cliff the pattern repeats: success barely moves, the bill collapses.
+The no-retry 125% row is the instructive one: cancellation reclaims only
+19.2% of attempts while 76.7% are still served to nobody. At 50/s against
+40/s of capacity the queue sits pinned at about one timeout deep, so most
+requests get admitted just after their client gave up, a few hundred
+milliseconds too late to matter, and just barely too early to cancel. Only
+the overflow beyond the depth bound, 10/s of the 50/s, ever aborts in the
+queue. Cancellation reclaims queued work, and sustained overload keeps the
+queue exactly short enough that most doomed work is not queued, it is
+next in line.
+
+### what the extension says as one sentence
+
+Cancellation makes overload cheaper, not smaller: aborting queued work
+bounds the queue at one timeout of depth, deletes the dead backlog that
+made a 15s dip into a 15s-plus-recovery outage, and cuts the storm's bill
+to a third, but the storm itself is volume arithmetic that only a retry cap
+changes, so cancel and budget fix different halves of the same fire and you
+want both.
+
 ## typescript, and why
 
 This is the day-job stack on purpose: the subject here IS the async runtime,
@@ -498,10 +608,11 @@ extension's backoff policies come from 06-rate-limiting, the seeded rng from
   which is why the 100%-load row in the cliff sweep holds at all. A poisson
   stream at the same mean would cross the timeout in bursts and blur that
   knife edge
-- abandonment never cancels here. Stacks that propagate cancellation into
-  the server's queue (grpc deadlines, AbortSignal wired through) reclaim the
-  queued portion of the wasted work, and the storm arithmetic changes:
-  orphans stop holding capacity, though in-service work is still unkillable
+- the cancellation extension's abort is free and instant: the dequeue
+  happens the same virtual instant the timeout fires. A real abort is a
+  message that takes a network hop while the server may start serving the
+  request in the race window, so real reclamation decays with cancellation
+  latency and these numbers are its upper bound
 - the retry budget is one global balance for one client against one server.
   Real budgets are per endpoint and per priority, and a fleet of clients
   each with an honest budget can still jointly amplify past capacity
@@ -529,10 +640,22 @@ extension's backoff policies come from 06-rate-limiting, the seeded rng from
   one admission token
 - the storm's timeout is fixed per attempt; a per-task deadline spent across
   attempts, or a timeout tracking observed p99, would fail differently, and
-  an adaptive timeout under overload risks chasing the queue upward
-- cancellation propagation: with queued-but-not-started attempts killable on
-  abandon, how much of the metastable storm survives when only in-service
-  work is wasted?
+  an adaptive timeout under overload risks chasing the queue upward. The
+  cancellation numbers sharpen this: cancel mode's successes run to 12s p95
+  across attempts, a tail only a per-task deadline would cap
+- cancellation here is free and instant; parameterizing an abort latency
+  (the abort races admission over a network hop) would draw the curve from
+  these upper-bound numbers down to abandon mode, and where real stacks sit
+  on it decides whether wiring cancellation through is worth the plumbing
+- in-service work is fully unkillable here, but a streaming generation is
+  partially killable: killing it saves the remaining output tokens while the
+  prefill is spent either way. A partial-refund cost model would shrink the
+  wasted-work gap between the modes by exactly the killable fraction
+- cancel mode bounds the queue at roughly admission rate times timeout, which
+  a server could enforce unilaterally by shedding anything older than the
+  client timeout at admission; client-side cancel against server-side
+  age-based shedding on the same grid would say which side of the wire the
+  fix belongs on, and recomposes toward the bounded-queue thread below
 - 06's circuit breaker against the retry budget on the identical pulse: the
   breaker stops retrying on error-rate evidence, the budget on volume; which
   recovers faster, and does the breaker's probe traffic reopen the storm?
