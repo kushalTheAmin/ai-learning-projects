@@ -175,6 +175,11 @@ disconnect on the batch form and all nine refs survive. unchanged: nothing
 on those branches is unlanded, deletion stays a by-hand task on the github
 branches page. this run's own session branch was already absent from the
 remote and its local copy was removed.
+Re-attempted 2026-09-03 (06-rolling run): still denied, same sideband
+disconnect on the batch form and all nine refs survive. unchanged: nothing
+on those branches is unlanded, deletion stays a by-hand task on the github
+branches page. this run's own session branch was never pushed to the
+remote and its local copy was removed.
 
 ## FINDINGS
 
