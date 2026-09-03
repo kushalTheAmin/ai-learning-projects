@@ -12,7 +12,10 @@ extension flips exactly that choice and measures the difference), so its
 storm numbers measure the retry loop's dynamics under this queueing model,
 not any real provider's failure behavior. Cancellation in the extension is
 free and instant, which is the friendliest version of it a real stack never
-quite gets. No network, no real clock, no API key. What the numbers demonstrate is the relative shape of the
+quite gets. The breaker extension authors nothing new: its failures are the
+same dip, cliff, and flake fixtures, its breaker is 06's imported unchanged,
+and its false-trip numbers are one seed's draw from a distribution the
+readme names as such. No network, no real clock, no API key. What the numbers demonstrate is the relative shape of the
 strategies, how cost, latency and failure blast radius move against each other
 under one reproducible model. Absolute values would differ against a real
 provider, and the failure model (a whole batch rejected fast, no word about
@@ -53,6 +56,7 @@ npm start
 npm run start:flaky
 npm run start:storm
 npm run start:cancel
+npm run start:storm-breaker
 ```
 
 ## results (seed 42, printed by `npm start`)
@@ -563,6 +567,149 @@ to a third, but the storm itself is volume arithmetic that only a retry cap
 changes, so cancel and budget fix different halves of the same fire and you
 want both.
 
+## the breaker extension: error-rate evidence vs a budget on volume
+
+The storm extension ended with two fixes that both worked and neither
+satisfied: the retry budget un-stuck the metastable storm by arithmetic
+(amplified load capped below capacity) but converged slowly and only
+governs retries, and no-retry survived by never amplifying but kept feeding
+arrivals to a drowning queue. 06 built the third mechanism, a circuit
+breaker: memory across requests that trips on consecutive failures, sheds
+everything while open, and probes its way back. This extension imports 06's
+`CircuitBreaker` unchanged and puts it in front of the storm loop as one
+gate shared by every task, fail-fast: a rejected gate ends the task on the
+spot, zero wire attempts, zero budget spent. Wait mode is deliberately
+absent, because arrivals here are open-loop; waiting for the probe window
+would re-queue the whole storm client-side and shed none of the volume
+arithmetic that sustains it.
+
+One wiring decision matters enough to state: the breaker sees the client's
+evidence. An attempt's gate settles the instant the client learns the
+outcome, so a timeout settles as a counted failure right then, and the
+orphan's eventual server-side completion never touches the breaker. The
+breaker is a client-side organ and it learns at client speed.
+
+```
+npm run start:storm-breaker
+```
+
+### 1. the same 15s dip, budget vs breaker vs both
+
+```
+          policy     ok   amp  wasted  fastfail  trips  probefail  denied  recovery  drained  $/1k ok
+        no-retry  66.9%  1.00   33.1%      0.0%      -          -       0     15.0s    90.1s    $2.73
+       jitter-x4  22.6%  4.10   94.5%      0.0%      -          -       0     NEVER   250.1s   $33.21
+ jitter+budget10  60.1%  1.04   42.4%      0.0%      -          -     897     21.3s    90.1s    $3.18
+    no-retry+brk  85.2%  0.88    2.9%     12.2%      2        0/2       0      0.0s    90.1s    $1.89
+   jitter-x4+brk  85.2%  0.88    2.9%     14.8%      2        0/2       0      0.0s    90.1s    $1.89
+jitter+bgt10+brk  85.2%  0.88    2.9%     13.3%      2        0/2      34      0.0s    90.1s    $1.89
+```
+
+The top three rows are the storm extension's rows reproduced to the digit,
+which pins that the gate wiring leaves a breakerless run untouched. The
+bottom three answer the thread's first question flatly: the breaker doesnt
+just un-stick the storm, it beats every previous policy on every column at
+once. 85.2% ok against no-retry's 66.9%, recovery lag 0.0s against 15.0s,
+wasted completions 2.9% against 33.1%, $1.89 per 1k against $2.73, and the
+unbudgeted jitter-x4 goes from NEVER-recovers at 4.10x amplification to the
+same 85.2% just by having the gate in front. Amplification lands below 1.00
+because a shed task costs zero attempts.
+
+Why it beats no-retry is the part worth understanding: no-retry has no
+memory, so all 375 dip arrivals march into the queue, time out, and orphan;
+the server spends the dip and 15 more seconds serving completions nobody
+will read. The breaker eats 5 timeouts, concludes, and sheds at the gate,
+so the queue stays near empty and the instant the dip ends the server is
+already caught up. The shed tasks fail in 0ms instead of hanging a full
+timeout, which in production is a fast error to the caller instead of a
+slow one.
+
+The three breaker rows print the same headline numbers because almost every
+retry the policies want dies at the gate: by the time a 500ms backoff draw
+comes around, the breaker that watched five 40ms-spaced timeouts is already
+open. The budget row's 34 denials against 897 says the same thing from the
+other side, the breaker leaves the budget almost nothing to deny. Evidence
+beats volume accounting on this pulse because evidence acts on first
+attempts too, and first attempts are 80% of the flood.
+
+### 2. does the probe reopen the storm? yes, and its priced
+
+```
+cooldown     ok   amp  wasted  fastfail  trips  probefail  recovery  drained
+    1.0s  84.1%  0.88    4.5%     15.9%      3        3/6      0.4s    90.1s
+    2.0s  85.3%  0.88    3.2%     14.7%      2        2/4      0.0s    90.1s
+    5.0s  85.2%  0.88    2.9%     14.8%      2        0/2      0.0s    90.1s
+   15.0s  82.0%  0.83    1.5%     18.0%      1        0/1      1.6s    90.1s
+```
+
+The half-open probe meets a drained but still degraded server: one 500ms
+probe fits under the 1000ms timeout, so the server says yes im alive, the
+breaker closes, and 25/s of arrivals land on 8/s of capacity. The queue
+rebuilds, five timeouts, re-trip. Thats the flap, and trips greater than 1
+is the probe reopening the storm exactly as the open question suspected.
+But the price is bounded and small: each flap wastes one queue's worth of
+orphans and buys the handful of successes the closed window serves before
+the queue crosses the timeout again. The sweep says the knob is forgiving
+in the middle and honest at both ends: 1s cooldowns flap three times and
+fail half their probes, 15s cooldown flaps once but keeps shedding healthy
+arrivals after the dip already ended (18.0% fastfail, recovery 1.6s, and
+the worst ok of the table). Between 2s and 5s it barely matters.
+
+### 3. sustained overload, where there is nothing to recover to
+
+```
+load         policy     ok   amp  wasted  fastfail  trips    p95  drained
+104%       no-retry  23.2%  1.00   76.8%      0.0%      -  948ms    93.9s
+104%   no-retry+brk  78.6%  0.83    5.4%     16.9%      3  950ms    90.3s
+104%  jitter-x4+brk  78.6%  0.84    5.9%     21.4%      3  950ms    90.4s
+125%       no-retry   4.1%  1.00   95.9%      0.0%      -  953ms   112.6s
+125%   no-retry+brk  37.8%  0.49   22.9%     50.9%      9  955ms    90.4s
+125%  jitter-x4+brk  37.8%  0.49   23.5%     62.2%      9  955ms    90.3s
+```
+
+Past the cliff the flap stops being a bug and becomes the operating mode.
+Without a breaker, sustained 104% load grows the queue without limit until
+everyone times out: 23.2% ok, and 4.1% at 125%, the slow-motion version of
+the dip that never ends. The breaker duty-cycles instead: serve until the
+queue crosses the timeout, trip, drain, probe, serve again. 3 trips at
+104%, 9 at 125%, and ok goes 23.2% to 78.6% and 4.1% to 37.8% at half the
+attempts. Load shedding is the whole trick: some callers get a fast no so
+the rest get a real yes. What the breaker cannot do is move p95, because
+the survivors still ride a queue that runs right at the timeout boundary.
+
+### 4. the false-trip knife edge on a healthy but flaky service
+
+```
+           policy      ok   amp  fastfail  trips  probefail    p95
+        jitter-x4  100.0%  1.24         0      -          -  670ms
+ jitter-x4+brk-t3   47.6%  0.59      1180      8        1/9  616ms
+ jitter-x4+brk-t5  100.0%  1.24         0      0        0/0  670ms
+jitter-x4+brk-t10  100.0%  1.24         0      0        0/0  670ms
+```
+
+20% per-attempt flake, load at 63% of capacity, retries fully able to
+absorb it (jitter-x4 alone: 100.0% ok at 1.24x attempts). A threshold-5
+breaker never fires on this seed and costs nothing. A threshold-3 breaker
+fires 8 times and sheds 1180 healthy tasks, more than half the run, for
+47.6% ok. The arithmetic is brutal because consecutive counting turns a
+smooth 20% flake into a lottery: any window of 3 flakes in a row (0.8% per
+triple) buys a 5s outage of the client's own making, and flake failures
+settle fast, so triples come around often. One threshold step is the
+difference between a free insurance policy and the worst policy in the
+whole study. The production standard, an error rate over a rolling window,
+exists precisely because it reads 20% as 20%; that comparison is 06's open
+rolling-window thread and it stays open here.
+
+### what the extension says as one sentence
+
+A circuit breaker is the only mechanism in this study that acts on first
+attempts, which is why it dominates the dip (85.2% ok, instant recovery,
+cheapest bill) and turns sustained overload into deliberate load shedding,
+but it buys that with a consecutive-failure trigger whose threshold is a
+knife edge on flaky-but-healthy traffic, so the breaker and the budget are
+not substitutes: evidence decides when to stop trying, volume caps how hard
+you try when the evidence is still coming in.
+
 ## typescript, and why
 
 This is the day-job stack on purpose: the subject here IS the async runtime,
@@ -656,9 +803,25 @@ extension's backoff policies come from 06-rate-limiting, the seeded rng from
   client timeout at admission; client-side cancel against server-side
   age-based shedding on the same grid would say which side of the wire the
   fix belongs on, and recomposes toward the bounded-queue thread below
-- 06's circuit breaker against the retry budget on the identical pulse: the
-  breaker stops retrying on error-rate evidence, the budget on volume; which
-  recovers faster, and does the breaker's probe traffic reopen the storm?
+- the false-trip experiment is one seed; threshold 5 never tripped at 20%
+  flake here but the expected count over many seeds is not zero, and a
+  seed-swept trip-rate curve over the threshold x flake-rate grid would turn
+  the knife edge into a map (the rolling-window breaker from 06's open
+  thread is the fix the map would argue for)
+- probes here ride real arrivals, so a quiet client never probes and a busy
+  one probes with a user's request; a synthetic probe on its own schedule
+  decouples the two and changes what the probe costs
+- the breaker is one gate for the whole client population; per-client
+  breakers on this storm would learn 40x slower during the dip, and 06's
+  shared-vs-per-client scope comparison predicts but doesnt measure that gap
+  under open-loop arrivals
+- the cooldown is fixed; production breakers back off the open window
+  exponentially on repeated failed probes, which would help the dead-service
+  case and hurt the 15s-dip case, and the crossover is unmeasured
+- wait mode is absent by design here, but a closed-loop caller population
+  (each caller must get an answer before sending the next request) is the
+  regime where waiting for the probe window competes with failing fast, and
+  the storm arithmetic changes shape entirely there
 - a bounded server queue that sheds with a fast 429 instead of unbounded FIFO
   wait would turn the timeout cliff into cheap rejections and give the client
   a signal before the timeout; that recomposes this model toward 06's server

@@ -10,6 +10,7 @@
     "start": "tsx src/main.ts",
     "start:flaky": "tsx src/flaky-main.ts",
     "start:storm": "tsx src/storm-main.ts",
+    "start:storm-breaker": "tsx src/storm-breaker-main.ts",
     "start:cancel": "tsx src/cancel-main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

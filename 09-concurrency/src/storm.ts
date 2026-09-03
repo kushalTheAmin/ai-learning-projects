@@ -18,8 +18,20 @@
  * (never served, never charged) but cannot touch an attempt already in
  * service. That is the AbortSignal-through-the-stack story: cancellation
  * kills queued work, in-flight work is unkillable.
+ *
+ * `policy.breaker` puts 06's circuit breaker (imported, not reimplemented) in
+ * front of the wire as ONE gate shared by every task in the run, fail-fast
+ * only: a rejected gate ends the task immediately with zero wire attempts and
+ * zero budget spent. Wait mode is deliberately absent here — the arrivals are
+ * open-loop, so waiting for the probe window would re-queue the whole storm
+ * client-side without shedding any of the volume arithmetic that sustains it.
+ * The breaker sees the client's evidence: an attempt's gate settles at the
+ * instant the client learns the outcome, so a timeout settles as a counted
+ * failure right then, and the orphan's eventual server-side result never
+ * touches the breaker at all.
  */
 import { VirtualClock } from "../../06-rate-limiting/src/clock.js";
+import { CircuitBreaker, type BreakerOptions } from "../../06-rate-limiting/src/breaker.js";
 import { nextDelayMs, type BackoffPolicy } from "../../06-rate-limiting/src/backoff.js";
 import { percentile } from "../../06-rate-limiting/src/percentile.js";
 import { createRng } from "../../05-token-streaming/src/rng.js";
@@ -78,6 +90,15 @@ export interface StormPolicy {
   backoff: BackoffPolicy;
   /** Optional shared retry budget across every task in the run. */
   budget?: RetryBudgetOptions;
+  /**
+   * Optional circuit breaker shared by every task in the run, fail-fast: a
+   * rejected gate ends the task on the spot with no wire attempt. First
+   * attempts and retries pass the same gate. A retry the budget has already
+   * granted can still die at the gate, and that budget token stays spent —
+   * the two mechanisms account independently, which is part of what the
+   * study measures.
+   */
+  breaker?: BreakerOptions;
 }
 
 export interface StormConfig {
@@ -112,6 +133,19 @@ export interface TaskRecord {
   latencyMs?: number;
   /** The task gave up because the shared budget refused its next retry. */
   budgetDenied: boolean;
+  /** The task ended on an open-breaker rejection, not a server answer. */
+  fastFailed: boolean;
+}
+
+export interface BreakerRunStats {
+  /** Times the shared breaker went from closed to open. */
+  trips: number;
+  /** Half-open probes admitted (each is a real wire attempt). */
+  probes: number;
+  /** Probes whose attempt failed or timed out, restarting the cooldown. */
+  probeFailures: number;
+  /** Gate rejections; each one is a task ending fast-failed. */
+  rejections: number;
 }
 
 export interface StormResult {
@@ -124,6 +158,10 @@ export interface StormResult {
   /** Abandoned attempts cancelled while still queued: dequeued, never served. */
   attemptsCancelled: number;
   retriesDenied: number;
+  /** Tasks ended by an open-breaker rejection. */
+  fastFailedTasks: number;
+  /** Present iff the policy carried a breaker. */
+  breakerStats?: BreakerRunStats;
   apiStats: ApiStats;
   costUsd: number;
   /** Virtual instant the last attempt (orphans included) finished draining. */
@@ -155,6 +193,9 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
   const backoffRng = createRng(cfg.seed ^ 0x9e3779b9);
   const flakeRate = cfg.flakeRate ?? 0;
   const budget = cfg.policy.budget ? new RetryBudget(cfg.policy.budget) : undefined;
+  const breaker = cfg.policy.breaker ? new CircuitBreaker(clock, cfg.policy.breaker) : undefined;
+  let probeFailures = 0;
+  let fastFailedTasks = 0;
 
   let attemptsStarted = 0;
   let attemptsAbandoned = 0;
@@ -167,6 +208,21 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
     budget?.earn();
     let prevDelayMs: number | undefined;
     for (let attempt = 1; ; attempt++) {
+      const gate = breaker?.tryAcquire();
+      if (gate !== undefined && !gate.admitted) {
+        fastFailedTasks++;
+        const settledMs = clock.now();
+        drainedAtMs = Math.max(drainedAtMs, settledMs);
+        return {
+          id,
+          arrivedMs,
+          attempts: attempt - 1,
+          ok: false,
+          settledMs,
+          budgetDenied: false,
+          fastFailed: true,
+        };
+      }
       attemptsStarted++;
       const controller = cfg.cancelOnTimeout ? new AbortController() : undefined;
       const call = api.call([{ id, poisoned: false, flakeRate }], controller?.signal);
@@ -177,6 +233,14 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
         ),
         clock.sleep(cfg.timeoutMs).then(() => "timeout" as const),
       ]);
+      // The gate settles on the client's evidence, exactly once, right now: a
+      // timeout is a counted failure at the timeout instant, and the orphan's
+      // eventual result is a straggler the breaker never hears about.
+      if (gate !== undefined) {
+        const countedOk = outcome === "ok";
+        if (gate.probe && !countedOk) probeFailures++;
+        breaker!.settle(gate, countedOk);
+      }
       if (outcome === "ok") {
         const settledMs = clock.now();
         drainedAtMs = Math.max(drainedAtMs, settledMs);
@@ -188,6 +252,7 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
           settledMs,
           latencyMs: settledMs - arrivedMs,
           budgetDenied: false,
+          fastFailed: false,
         };
       }
       if (outcome === "timeout") {
@@ -211,7 +276,15 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
       if (retriesUsed >= cfg.policy.maxRetries || denied) {
         const settledMs = clock.now();
         drainedAtMs = Math.max(drainedAtMs, settledMs);
-        return { id, arrivedMs, attempts: attempt, ok: false, settledMs, budgetDenied: denied };
+        return {
+          id,
+          arrivedMs,
+          attempts: attempt,
+          ok: false,
+          settledMs,
+          budgetDenied: denied,
+          fastFailed: false,
+        };
       }
       const delayMs = nextDelayMs(cfg.policy.backoff, attempt, prevDelayMs, backoffRng);
       prevDelayMs = delayMs;
@@ -240,6 +313,16 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
     wastedCompletions,
     attemptsCancelled,
     retriesDenied: budget?.deniedCount() ?? 0,
+    fastFailedTasks,
+    breakerStats:
+      breaker === undefined
+        ? undefined
+        : {
+            trips: breaker.trips,
+            probes: breaker.probes,
+            probeFailures,
+            rejections: breaker.rejections,
+          },
     apiStats: api.snapshot(),
     costUsd: api.costUsd(),
     drainedAtMs,
@@ -263,6 +346,11 @@ export interface StormSummary {
   /** Longest the server admission queue ever got. */
   maxQueueDepth: number;
   retriesDenied: number;
+  fastFailedTasks: number;
+  /** Fraction of tasks ended by an open-breaker rejection. */
+  fastFailPct: number;
+  /** Present iff the policy carried a breaker. */
+  breakerStats?: BreakerRunStats;
   p50LatencyMs?: number;
   p95LatencyMs?: number;
   costUsd: number;
@@ -292,6 +380,9 @@ export function summarize(result: StormResult): StormSummary {
       result.attemptsStarted === 0 ? 0 : (result.attemptsCancelled / result.attemptsStarted) * 100,
     maxQueueDepth: result.apiStats.maxQueueDepth,
     retriesDenied: result.retriesDenied,
+    fastFailedTasks: result.fastFailedTasks,
+    fastFailPct: tasks === 0 ? 0 : (result.fastFailedTasks / tasks) * 100,
+    breakerStats: result.breakerStats,
     p50LatencyMs: latencies.length === 0 ? undefined : percentile(latencies, 0.5),
     p95LatencyMs: latencies.length === 0 ? undefined : percentile(latencies, 0.95),
     costUsd: result.costUsd,
