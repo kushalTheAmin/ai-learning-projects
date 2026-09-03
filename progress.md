@@ -168,6 +168,11 @@ Re-attempted 2026-09-02 (11-position run): still denied, same sideband
 disconnect on ref deletion. unchanged: nothing on those branches is
 unlanded, deletion stays a by-hand task on the github branches page. this
 run's own session branch was already absent from the remote.
+Re-attempted 2026-09-03 (05-limits run): still denied, same sideband
+disconnect on the batch form and all nine refs survive. unchanged: nothing
+on those branches is unlanded, deletion stays a by-hand task on the github
+branches page. this run's own session branch was already absent from the
+remote and its local copy was removed.
 
 ## FINDINGS
 
