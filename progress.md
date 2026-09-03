@@ -187,6 +187,72 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-03] 07 — the `mutant-mutant` category was 40% padding. the
+  `noise` mutation swaps case and doubles spaces; `normalize` casefolds and
+  collapses whitespace, so the two cancel exactly and all 24 noise mutants
+  shingle identically to their base — measured, not assumed. that makes
+  `X--noise vs X--typo` bit-for-bit the `X vs X--typo` comparison, and 96 of
+  the 240 mutant-mutant pairs are restatements of the single-mutation rows
+  printed directly above them in the same table. every number carrying that
+  label was a blend of 144 real measurements and 96 copies, and the readme read
+  the label causally: "mutant vs mutant pairs compound two mutations, so they
+  sit lowest". 96 of them compound one. the direction is favourable throughout,
+  which is why it survived a review — the restatements are the *easier* pairs
+  (mean jaccard 0.695 against 0.499), so they pull every recall figure up:
+  mistuned-lsh recall on the genuinely compounded pairs is 0.812 where 0.879
+  was published, simhash 0.861 where 0.908 was, and the separability row was
+  mean 0.577 min 0.280 max 0.939 over 240 where the real compounded figures are
+  mean 0.499 min 0.280 max 0.708 over 144. that 0.939 max is the giveaway and
+  was visible on screen the whole time: it is character-for-character the
+  `base vs shuffle` max two lines up, because the top mutant-mutant pair is
+  `X--noise vs X--shuffle`. so the readme's headline cost of mistuning —
+  "who pays" — understated the real cost by 6.7 points. the fix is
+  `pair_kind` gaining one branch that files a noise pair as `noise+mutant`,
+  the two report sites printing both rows, and `cross[0]` becoming a
+  `dup_floor` computed over all of truth since the list it read off is now
+  split. new tests/test_noise_is_not_a_second_mutation.py, 13 tests: six pin
+  the premise (all 24 noise mutants shingle to their base, the noise *text*
+  does differ so it is normalization doing the erasing, and all 96 pairs score
+  exactly as the base pair they restate), four hold `pair_kind` to the split
+  with the single-mutation rows untouched, and three hold the entry point and
+  the readme to the corrected numbers — the readme ones off
+  whitespace-normalized text so a line wrap cannot make them pass (23's trap).
+  7 of the 13 fail on the old code and the revert check is clean: reverting
+  main.py and README.md in a fresh clone fails exactly those 7 and all 114
+  pre-existing tests still pass. the noise row prints identically in both
+  recall tables (94/96) and a test asserts that count is 2, which is the
+  finding restated as an invariant. the duplicate floor 0.280, the 31 missed
+  pairs, the 360-pair candidate set, f1 0.942 and the root index row are all
+  unchanged. no other project manufactures mutants — nothing to port. found
+  and fixed 2026-09-03
+- [medium] 07 — the readme's simhash block is a fenced quote of the hamming
+  sweep showing 3 of its 7 rows: d<=8, d<=16, d<=20, with d<=2, 4, 6 and 12
+  dropped. same class as the 03 fix the run before, a published block that
+  reads as the run's report and is a selection off it, except the direction
+  here runs the other way — the dropped rows are simhash's worst (f1 0.144,
+  0.191, 0.235, 0.623) and the readme's thesis is that simhash loses, so the
+  selection flatters the method the prose is arguing against. the minhash and
+  lsh blocks above it are complete, which is what makes the inconsistency
+  visible. what the reader cannot see is the shape: f1 climbs from 0.125 at
+  d<=0 to 0.942 at d<=20 and then falls off a cliff, 0.926 at 21, 0.800 at 23,
+  0.333 at 27 — the operating point is a narrow peak, not a plateau, and three
+  rows cannot show that. found 2026-09-03
+- [low] 07 — the readme calls the hardest same-topic non-duplicate "index-02 vs
+  index-03 at 0.011". the pair main.py prints is `index-02--truncate vs
+  index-03--drop` — two mutants, not the two base documents. the value is
+  right and a test pins the full ids, so only the readme's shorthand is loose,
+  but it is the same abbreviation that produced the 2026-08-28 fix one section
+  down. found 2026-09-03
+- [low] 07 — minhash.py's docstring says the min of h over a set is equal
+  between two sets "with probability exactly their Jaccard similarity". the
+  affine map is `(a*x + b) mod 2^61-1` applied to 64-bit blake2b shingle
+  hashes, so x ranges over [0, 2^64) while the modulus is 2^61-1: the map is
+  not a permutation of the input universe, x and x+p collide, and the
+  guarantee is the textbook idealization rather than what this code has. the
+  effect is far below the k=128 sampling error the project actually measures
+  and the estimator error table tracks 1/sqrt(k) term by term, so nothing
+  published is wrong — the word "exactly" is doing work the construction does
+  not support. found 2026-09-03
 - [fixed 2026-09-03] 03 — the readme's "the numbers" block is a fenced quote of
   the entry point's report and it quoted three of the four strategies main.py
   prints. the missing row is `hybrid (weighted a=0.5)` — the second of the two
@@ -1886,7 +1952,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 10-chunking-strategies | 2026-08-29 |
 | 09-concurrency | 2026-08-28 |
 | 08-agent-tool-loop | 2026-08-28 |
-| 07-near-duplicates | 2026-08-28 |
+| 07-near-duplicates | 2026-09-03 |
 | 06-rate-limiting | 2026-08-28 |
 | 05-token-streaming | 2026-08-27 |
 | 03-hybrid-search | 2026-09-03 |
@@ -2593,6 +2659,42 @@ version of the claim and it is stronger than the one that was there, so the fix
 prints it. the two findings left open are the readme quoting the confounded
 mixed@1659 column for its dollar figure in the paragraph that exists to insist
 on the control, and the char row sitting unbudgeted under a budgeted header.
+
+07 was last reviewed on 2026-08-28 — the only project whose review left a table
+row and no narrative, which is part of why this came back. it is clean on all
+four algorithms. shingling is the standard set of word n-grams over
+nfkc/casefold/collapsed text with a documented short-document fallback. minhash
+is the affine family over a mersenne prime and the signatures really are
+prefix-truncatable, which is what lets one k=128 pass serve the whole accuracy
+sweep, and the duplicate-pairs error column tracks 1/sqrt(k) term by term:
+8→32 is 1.81x and 16→64 is 1.91x and 32→128 is 2.06x against a predicted 2. lsh
+banding is 1-(1-s^r)^b with the halfway point solved correctly, and the tuned
+b=64 r=2 candidate set being exactly the 360 labeled pairs is pinned by a test
+rather than quoted. simhash is unweighted per-shingle bit voting with the
+usual sign convention. determinism is real — blake2b rather than `hash()`,
+every rng seeded, two runs byte-identical.
+
+two things worth recording as checked-and-fine, because both look like the
+boundary artifacts this repo keeps finding and neither is. the hamming sweep's
+best f1 sits at d<=20, the last value in the grid, so the published "best
+operating point" could have been the edge of the sweep rather than an optimum —
+computed over all 65 possible thresholds, d=20 is the true global argmax. and
+the jaccard sweep's best sits at t=0.2, the first value in its grid, but f1 is
+1.000 across the whole plateau 0.03 to 0.28, so nothing is being read off a
+boundary there either.
+
+what was wrong was one category label. `noise` is a normalization no-op by
+construction — the mutation swaps case and doubles spaces and `normalize` undoes
+both — and the mutations docstring says so in as many words, yet 96 of the 240
+`mutant-mutant` pairs have a noise mutant on one side and are therefore the
+base-vs-mutant comparisons restated. the project knew the fact and still counted
+the pairs. it was visible on screen: the mutant-mutant max, 0.939, is
+character-for-character the base-vs-shuffle max two lines above it. every recall
+figure under that label was diluted upward by the easier copies, so the readme's
+account of who pays for mistuned banding understated the cost by 6.7 points.
+fixed above. the three findings left open are the simhash block quoting 3 of its
+7 sweep rows, the readme abbreviating a mutant pair as its base ids, and
+minhash.py claiming an exactness the modulus does not give it.
 
 ## MECHANISMS
 
