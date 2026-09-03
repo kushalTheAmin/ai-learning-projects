@@ -181,15 +181,15 @@ thats the whole trick in three lines. idf has already decided that the rank-1 te
 
 ```
 == postings scored per query at 32,000 docs, top-10, 100 queries each ==
-stratum         taat post/q  maxscore  probes  % of bill    wand  probes  % of bill
------------------------------------------------------------------------------------
-typical               46950      4907    3614      10.5%    4928    4446      10.5%
-common-heavy          68765     21794   20882      31.7%   20306   22994      29.5%
-rare-only                77        68      20      88.7%      68       3      88.5%
+stratum         taat post/q  maxscore  probes  % of bill  +probes    wand  probes  % of bill  +probes
+-----------------------------------------------------------------------------------------------------
+typical               46950      4907    3614      10.5%    18.1%    4928    4446      10.5%    20.0%
+common-heavy          68765     21794   20882      31.7%    62.1%   20306   22994      29.5%    63.0%
+rare-only                77        68      20      88.7%   115.1%      68       3      88.5%    92.6%
 ```
 
-- **the answer to the open question: at top-10, the bounds skip 68-70% of the common-heavy bill** (68765 postings term-at-a-time, 21794 scored by maxscore, 20306 by wand) **and just under 90% of the typical bill** (46950 down to ~4900). probes are the binary-search jumps that replace the reading. they land on one posting each, so even charging a probe as a touched posting the skip stays above 60% and 80%
-- **rare-only queries have nothing to skip.** the bill is 77 postings, the bounds save nothing worth having (88.7% still scored), and the pruning bookkeeping is pure overhead. dynamic pruning is a head-term technology; the tail was already cheap
+- **the answer to the open question: at top-10, the bounds skip 68-70% of the common-heavy bill** (68765 postings term-at-a-time, 21794 scored by maxscore, 20306 by wand) **and just under 90% of the typical bill** (46950 down to ~4900). but probes are the binary-search jumps that replace the reading and they land on one posting each, so the honest bill against term-at-a-time is scored plus probes — the `+probes` column. **on typical traffic that barely dents it**, 81.9% of the bill still skipped by maxscore and 80.0% by wand. **on common-heavy it takes most of the win back: 37.9% and 37.0%**, because there the pruners probe about as many postings as they score. postings scored is the ranking-work number, `+probes` is the one to quote against the exhaustive scan — and on rare-only it goes over 100%, the bookkeeping costing more touches than the 77-posting bill it was meant to shrink
+- **rare-only queries have nothing to skip.** the bill is 77 postings, the bounds save nothing worth having (88.7% still scored, 115.1% once probes are charged), and the pruning bookkeeping is pure overhead. dynamic pruning is a head-term technology; the tail was already cheap
 - **maxscore and wand land within a few percent of each other on postings scored.** the difference is where the work goes: on common-heavy, wand spends more probes (22994 vs 20882) because its cursors leapfrog per pivot, while maxscore reads its essential lists linearly and probes only the non-essential ones
 
 the wall clock is the honest asterisk:
@@ -203,7 +203,7 @@ common-heavy     40.477    57.185   93.004
 rare-only         0.113     0.336    0.269
 ```
 
-on typical queries maxscore converts its 10.5% postings bill into a real 2.1x wall-clock win. on common-heavy, both pruners are *slower* than the exhaustive scan they beat 3x on work counts. the reason is constant factors, not the algorithm: term-at-a-time is one dict lookup and one add per posting in a tight loop, while document-at-a-time pays python-level cursor sorting, attribute access, and bisect calls per candidate, and at 30% postings scored that overhead eats the saving. same lesson as the ann project (13): in pure python the operation count is the portable number and the wall clock is a property of the interpreter. a production engine gets the counts *and* the clock because its per-posting costs are branch-predictable native code, and it wouldnt sort cursors with a comparison sort per pivot either
+on typical queries maxscore converts its 10.5% postings bill into a real 2.1x wall-clock win. on common-heavy, both pruners are *slower* than the exhaustive scan they beat 3x on postings scored — and only 1.6x once the probes are charged, which is most of the answer. the rest is constant factors, not the algorithm: term-at-a-time is one dict lookup and one add per posting in a tight loop, while document-at-a-time pays python-level cursor sorting, attribute access, and bisect calls per candidate, and at 30% postings scored that overhead eats the saving. same lesson as the ann project (13): in pure python the operation count is the portable number and the wall clock is a property of the interpreter. a production engine gets the counts *and* the clock because its per-posting costs are branch-predictable native code, and it wouldnt sort cursors with a comparison sort per pivot either
 
 where the bound stops paying:
 
@@ -313,3 +313,13 @@ the wall clock is the same honest asterisk as the pruning study, sharper. block-
 - the posting lists here are python lists of tuples, so delta-encoded varint-compressed postings are the real memory story, and the decode cost per query is the tradeoff this study didnt price
 - a typical query builds a score accumulator over 84% of the corpus, so per-query memory scales with df too; accumulator capping (keep only the best partial scores) trades recall for memory and the damage is measurable here
 - adding one doc to the inverted index is an append per term, but it moves df and avg doc length, which silently re-prices every idf. at what update rate does rebuild-vs-patch flip, and is that why real engines ship immutable segments with background merges?
+
+## fixes
+
+- 2026-09-03 — the pruning section said that charging a probe as a touched
+  posting still left the skip "above 60% and 80%". 62.1% is the share of the
+  common-heavy bill maxscore still *touches*, quoted with the sign flipped —
+  the skip there is 37.9%, not 60-odd. added the `+probes` column so the
+  charged bill is read off the table instead of derived in prose. no measured
+  value moved, the column is new — typical still skips 80%, common-heavy
+  gives back most of its win

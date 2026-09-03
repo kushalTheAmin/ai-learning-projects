@@ -48,6 +48,16 @@ def ms_mean(timings: list[float]) -> float:
     return 1000 * sum(timings) / len(timings)
 
 
+def probe_charged_share(work: MethodWork, bill: float) -> float:
+    """Share of the term-at-a-time bill a pruner touches, probes included.
+
+    A probe is a binary search that lands on one posting and reads it, so
+    charging it as a touched posting is the honest comparison against the
+    exhaustive scan. `% of bill` counts only what was scored.
+    """
+    return (work.scored_mean + work.probes_mean) / bill
+
+
 def measure(
     index: PrunedBM25Index, method: str, queries: list[str], top_k: int
 ) -> MethodWork:
@@ -114,8 +124,8 @@ def print_strata(index: PrunedBM25Index, sampler: ZipfSampler) -> None:
     )
     header = (
         f"{'stratum':<14} {'taat post/q':>12} "
-        f"{'maxscore':>9} {'probes':>7} {'% of bill':>10} "
-        f"{'wand':>7} {'probes':>7} {'% of bill':>10}"
+        f"{'maxscore':>9} {'probes':>7} {'% of bill':>10} {'+probes':>8} "
+        f"{'wand':>7} {'probes':>7} {'% of bill':>10} {'+probes':>8}"
     )
     print(header)
     print("-" * len(header))
@@ -129,9 +139,11 @@ def print_strata(index: PrunedBM25Index, sampler: ZipfSampler) -> None:
             f"{work['maxscore'].scored_mean:>9.0f} "
             f"{work['maxscore'].probes_mean:>7.0f} "
             f"{100 * work['maxscore'].scored_mean / bill:>9.1f}% "
+            f"{100 * probe_charged_share(work['maxscore'], bill):>7.1f}% "
             f"{work['wand'].scored_mean:>7.0f} "
             f"{work['wand'].probes_mean:>7.0f} "
-            f"{100 * work['wand'].scored_mean / bill:>9.1f}%"
+            f"{100 * work['wand'].scored_mean / bill:>9.1f}% "
+            f"{100 * probe_charged_share(work['wand'], bill):>7.1f}%"
         )
         timing_rows.append((stratum, work))
     print("\nwall clock, ms per query (same runs)")
