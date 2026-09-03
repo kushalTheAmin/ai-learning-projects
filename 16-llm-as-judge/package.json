@@ -9,6 +9,7 @@
   "scripts": {
     "start": "tsx src/main.ts",
     "start:direction": "tsx src/direction-main.ts",
+    "start:power": "tsx src/power-main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

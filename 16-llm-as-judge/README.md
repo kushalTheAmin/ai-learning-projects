@@ -35,6 +35,7 @@ npm run typecheck
 npm test
 npm start
 npm run start:direction
+npm run start:power
 ```
 
 node 20+. no network, no api key, no model download.
@@ -245,6 +246,99 @@ calls are already paid for whenever the flip diagnostic runs, so lean is a
 free extra column, and a lean materially off zero says exactly which of your
 champion-first numbers, the small-gap ones, are fiction.
 
+## the power extension: what the second call actually buys
+
+answers the single-call thread below. lean was defined over both-order calls,
+but a randomized single call still correlates winner with presentation slot,
+so it carries the same signal at half the cost per pair. the question worth a
+number: at an equal call budget, how much detection power does the cheap
+version give up? same rules as everything above, scripted judges, authored
+bonuses as ground truth. run it with `npm run start:power` (500 replicate
+experiments per cell, printed tables are what is quoted here, ~9s).
+
+first the mechanism, because it reframes the whole comparison. a randomized
+single call picks one of the pair's two possible both-order calls by coin
+flip, so the single-call lean and the both-order lean estimate the exact same
+quantity; there is no weaker signal, only a noisier estimator. the difference
+is where the variance lives. a pair too clean for the bonus to sway presents
+each answer first exactly once under both-order and contributes exactly 0.5
+first-wins, zero variance, canceled by construction. the same pair under a
+single randomized call contributes a full coin flip of order luck: the better
+answer wins, and whether that counts as a first-win is the order draw. so
+both-order concentrates all its variance on the swing pairs the bonus can
+actually reach, while single-call pays Bernoulli variance on every clean pair
+in the set. same reason 02's paired bootstrap beats an unpaired one.
+
+measured, that mechanism is worth a lot at the cast's noise level. null
+spread of the lean statistic at 100 calls, sigma 0.04:
+
+```
+detector                             null sd   critical
+both-order (100 calls, 50 pairs)     0.0077    0.0200
+single-equal (100 calls, 100 pairs)  0.0509    0.0900
+single-half (50 calls, 50 pairs)     0.0697    0.1200
+```
+
+variance ratio 43.2x: a single-call design needs ~43x the calls to match
+both-order's null spread. detection power at a two-sided 0.05 threshold
+calibrated on the bonus-0 null, 100 calls, sigma 0.04:
+
+```
+bonus   both-order  single-equal  single-half
+0.00    0.002       0.048         0.038
+0.02    0.022       0.044         0.048
+0.04    0.132       0.058         0.054
+0.06    0.396       0.074         0.068
+0.09    0.822       0.164         0.116
+0.12    0.984       0.346         0.212
+0.15    1.000       0.682         0.442
+```
+
+both-order detects the cast's own 0.15 primacy bonus every single time on 50
+pairs, and a 0.09 bonus 82% of the time. single-equal, spending the same 100
+calls on 100 pairs, detects 0.15 in only 68% of experiments and is near
+useless below 0.09. at 400 calls the gap persists: both-order reaches 80%
+power at bonus 0.06, single-equal needs 0.12, single-half 0.15. the half-cost
+framing the thread came in with is worse still, single-half never reaches 80%
+on anything swept at budget 100.
+
+then the caveat that keeps this honest: the advantage is a function of the
+noise floor. at 3x noise (sigma 0.12) the variance ratio collapses from 43.2x
+to 3.2x, because noise makes every pair a swing pair: clean pairs start
+flipping on their own, both-order's cancellation stops being free, and its
+variance grows toward the coin-flip variance single-call always had. the
+power columns move too, and in opposite directions: both-order barely changes
+(0.822 to 0.880 at bonus 0.09, budget 100) while single-equal more than
+doubles (0.164 to 0.362), the same more-noise-reads-more-lean mechanism the
+direction extension measured, now visible as detection probability. so the 2x
+protocol is at its most valuable exactly when the judge is good: a
+low-noise judge hands both-order a nearly silent null, and the same
+judge starves the single-call estimator of the flips it needs.
+
+the skew control is why as-stored single calls were never in the race. lean
+measured at authored bonus 0, on pair sets whose stored arrangement puts the
+better answer in slot a at 0.5 / 0.7 / 0.9 rates:
+
+```
+gold-in-a  as-stored  randomized  both-order
+0.5        0.001      -0.014      0.001
+0.7        0.202      -0.002      0.002
+0.9        0.395      0.006       0.000
+```
+
+an as-stored single-call lean on a 90/10 arrangement reads 0.395 of pure
+fiction, quality wins masquerading as position wins, on a judge with zero
+position bias. randomizing the order is what makes the single-call statistic
+mean anything at all; both-order is immune even as-stored because it asks
+both ways regardless. so the real menu is: randomized single call, honest but
+noisy; both-order, honest and 43x tighter per call at low noise, 3x at high.
+
+one artifact worth naming: both-order's realized false-positive rate at
+sigma 0.04 sits at 0.002 against a nominal 0.05, because with so few flips
+the lean distribution is discrete and the empirical threshold lands
+conservative. the power numbers above pay for that conservatism, and
+both-order dominates anyway.
+
 ## fixes
 
 - 2026-08-31 — the champion set credited order randomization with 0.485, which
@@ -274,9 +368,19 @@ prng and 08's token estimator and pricing rather than rewriting them.
   distribution, so its suppression should be the map integrated over the gap
   histogram. checking that integral against the champion set's measured 0.380
   would validate the map as a predictor, not just a description
-- lean needs both orders. a randomized single-call eval still correlates
-  winner with slot, a weaker signal at half the cost, and its statistical
-  power against both-order lean at an equal call budget is unmeasured
+- the variance ratio runs 43.2x at sigma 0.04 and 3.2x at 0.12, and should
+  fall toward 1x as noise grows without bound since a coin judge flips
+  everything either way. the crossover curve between those two points is
+  unswept, and its shape says how much a team should pay for both-order once
+  they know their judge's flip rate
+- both-order's null is so discrete at low noise that the realized false
+  positive rate is 0.002 against a nominal 0.05. an exact binomial test on
+  net flip counts instead of an empirical threshold would spend the whole
+  alpha; how much power that recovers at small bonuses is unmeasured
+- both designs here spend the budget on distinct pairs. a third design,
+  repeat single calls on fewer pairs with fresh noise draws, is what
+  temperature sampling gives a real judge for free, and where it lands
+  between single-equal and both-order is unmeasured
 - position bias here is constant per judge. real models show primacy on some
   prompt shapes and recency on others; a per-item-length or per-domain bias
   model would test whether the flip diagnostic still localizes the damage
