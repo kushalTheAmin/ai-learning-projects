@@ -18,7 +18,7 @@
  */
 
 import { nextDelayMs } from "./backoff.js";
-import type { CircuitBreaker } from "./breaker.js";
+import type { Breaker } from "./breaker.js";
 import type { VirtualClock } from "./clock.js";
 import type { RetryOptions } from "./retry.js";
 import type { ApiResponse } from "./server.js";
@@ -42,7 +42,7 @@ export async function requestWithBreaker(
   clock: VirtualClock,
   rng: Rng,
   opts: RetryOptions,
-  breaker: CircuitBreaker,
+  breaker: Breaker,
   mode: BreakerMode,
   countsAsFailure: (res: ApiResponse) => boolean,
 ): Promise<BreakerRequestOutcome> {

@@ -69,7 +69,7 @@ describe("runBreakerScenario", () => {
       {
         name: "k2",
         retry: RETRY,
-        breaker: { failureThreshold: 2, openMs: 60_000, scope: "per-client", mode: "fail-fast", count429: false },
+        breaker: { detector: { kind: "consecutive" as const, failureThreshold: 2 }, openMs: 60_000, scope: "per-client", mode: "fail-fast", count429: false },
       },
       DEAD,
     );
@@ -88,7 +88,7 @@ describe("runBreakerScenario", () => {
       {
         name: "shared",
         retry: RETRY,
-        breaker: { failureThreshold: 2, openMs: 60_000, scope: "shared", mode: "fail-fast", count429: false },
+        breaker: { detector: { kind: "consecutive" as const, failureThreshold: 2 }, openMs: 60_000, scope: "shared", mode: "fail-fast", count429: false },
       },
       DEAD,
     );
@@ -114,7 +114,7 @@ describe("runBreakerScenario", () => {
       {
         name: "gated",
         retry,
-        breaker: { failureThreshold: 5, openMs: 2_000, scope: "per-client", mode: "fail-fast", count429: false },
+        breaker: { detector: { kind: "consecutive" as const, failureThreshold: 5 }, openMs: 2_000, scope: "per-client", mode: "fail-fast", count429: false },
       },
       healthy,
     );
@@ -129,7 +129,7 @@ describe("runBreakerScenario", () => {
       {
         name: "wait",
         retry: RETRY,
-        breaker: { failureThreshold: 2, openMs: 1_000, scope: "per-client", mode: "wait", count429: false },
+        breaker: { detector: { kind: "consecutive" as const, failureThreshold: 2 }, openMs: 1_000, scope: "per-client", mode: "wait", count429: false },
       },
       { ...DEAD, clients: 1, requestsPerClient: 1 },
     );

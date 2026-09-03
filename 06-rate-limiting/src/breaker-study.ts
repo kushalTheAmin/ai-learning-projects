@@ -8,21 +8,45 @@
  * comparable number for number with the earlier studies.
  */
 
-import type { BreakerOptions } from "./breaker.js";
+import type { Breaker } from "./breaker.js";
 import { CircuitBreaker } from "./breaker.js";
 import { requestWithBreaker, type BreakerMode, type BreakerRequestOutcome } from "./breaker-retry.js";
 import { VirtualClock } from "./clock.js";
+import { RollingWindowBreaker } from "./rolling-breaker.js";
 import { countInRange, peakPerWindow } from "./outage.js";
 import { percentile } from "./percentile.js";
 import { requestWithRetry, type RetryOptions } from "./retry.js";
 import { SimulatedApi, type ApiResponse } from "./server.js";
 import { createRng } from "../../05-token-streaming/src/rng.js";
 
-export interface BreakerConfig extends BreakerOptions {
+/** Which trip detector the breaker runs; the gate machinery is shared. */
+export type FailureDetector =
+  | { kind: "consecutive"; failureThreshold: number }
+  | { kind: "rolling"; windowMs: number; errorRateThreshold: number; minVolume: number };
+
+export interface BreakerConfig {
+  detector: FailureDetector;
+  /** Cooldown before an open breaker admits its half-open probe. */
+  openMs: number;
   scope: "per-client" | "shared";
   mode: BreakerMode;
   /** Whether 429s count as breaker failures; 503s always count. */
   count429: boolean;
+}
+
+function makeBreaker(clock: VirtualClock, config: BreakerConfig): Breaker {
+  if (config.detector.kind === "consecutive") {
+    return new CircuitBreaker(clock, {
+      failureThreshold: config.detector.failureThreshold,
+      openMs: config.openMs,
+    });
+  }
+  return new RollingWindowBreaker(clock, {
+    windowMs: config.detector.windowMs,
+    errorRateThreshold: config.detector.errorRateThreshold,
+    minVolume: config.detector.minVolume,
+    openMs: config.openMs,
+  });
 }
 
 export interface BreakerStrategySpec {
@@ -110,11 +134,8 @@ export async function runBreakerScenario(
   const config = spec.breaker;
   const countsAsFailure = (res: ApiResponse): boolean =>
     res.status === 503 || (res.status === 429 && (config?.count429 ?? false));
-  const breakers: CircuitBreaker[] = [];
-  const sharedBreaker =
-    config && config.scope === "shared"
-      ? new CircuitBreaker(clock, { failureThreshold: config.failureThreshold, openMs: config.openMs })
-      : undefined;
+  const breakers: Breaker[] = [];
+  const sharedBreaker = config && config.scope === "shared" ? makeBreaker(clock, config) : undefined;
   if (sharedBreaker) breakers.push(sharedBreaker);
 
   const outcomes: { outcome: BreakerRequestOutcome; requestIndex: number }[] = [];
@@ -122,10 +143,7 @@ export async function runBreakerScenario(
     const clientRng = createRng(opts.seed + 1 + clientIndex);
     let breaker = sharedBreaker;
     if (config && !breaker) {
-      breaker = new CircuitBreaker(clock, {
-        failureThreshold: config.failureThreshold,
-        openMs: config.openMs,
-      });
+      breaker = makeBreaker(clock, config);
       breakers.push(breaker);
     }
     for (let i = 0; i < opts.requestsPerClient; i++) {

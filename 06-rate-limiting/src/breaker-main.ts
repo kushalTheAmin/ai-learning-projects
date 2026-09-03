@@ -41,7 +41,7 @@ const EQUAL_JITTER = retryOpts({ kind: "equal-jitter", baseMs: BASE_MS, capMs: C
 
 function breaker(overrides: Partial<BreakerConfig>): BreakerConfig {
   return {
-    failureThreshold: 5,
+    detector: { kind: "consecutive", failureThreshold: 5 },
     openMs: 2_000,
     scope: "per-client",
     mode: "fail-fast",
@@ -73,7 +73,7 @@ async function studyDeadService(): Promise<void> {
   };
   const rows: BreakerStrategySpec[] = [
     { name: "no-breaker", retry: FULL_JITTER },
-    { name: "k=3 fail-fast", retry: FULL_JITTER, breaker: breaker({ failureThreshold: 3 }) },
+    { name: "k=3 fail-fast", retry: FULL_JITTER, breaker: breaker({ detector: { kind: "consecutive", failureThreshold: 3 } }) },
     { name: "k=5 fail-fast", retry: FULL_JITTER, breaker: breaker({}) },
     { name: "k=5 wait", retry: FULL_JITTER, breaker: breaker({ mode: "wait" }) },
     { name: "k=5 shared", retry: FULL_JITTER, breaker: breaker({ scope: "shared" }) },
@@ -269,7 +269,7 @@ async function studyHealthyHerd(): Promise<void> {
   const retry = retryOpts({ kind: "full-jitter", baseMs: BASE_MS, capMs: CAP_MS }, true);
   const rows: BreakerStrategySpec[] = [
     { name: "no-breaker", retry },
-    { name: "k=3 counts 429", retry, breaker: breaker({ failureThreshold: 3, count429: true }) },
+    { name: "k=3 counts 429", retry, breaker: breaker({ detector: { kind: "consecutive", failureThreshold: 3 }, count429: true }) },
     { name: "k=5 counts 429", retry, breaker: breaker({ count429: true }) },
     { name: "k=5 503s only", retry, breaker: breaker({}) },
     { name: "k=5 shared 429", retry, breaker: breaker({ count429: true, scope: "shared" }) },

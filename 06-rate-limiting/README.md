@@ -380,6 +380,156 @@ the healthy herd, 99.5% to 15.5% when 429s count), which is why the
 failure predicate and the cooldown, not the threshold, are the knobs that
 matter.
 
+## the rolling-window extension: rate over a window, volume as the price
+
+the breaker extension left a thread hanging: it counts consecutive failures,
+and the production standard (hystrix, envoy) is an error rate over a rolling
+time window, which one worker's bad streak cannot trip. this extension builds
+that detector and reruns the breaker scenarios with both. the gate machinery
+is shared code now, one open/half-open/probe state machine with the trip
+decision plugged in: the counter trips at k counted failures in a row, the
+rolling detector trips when the window covering the last windowMs of settles
+holds at least minVolume of them and the failed fraction reaches the
+threshold. a success never resets the rolling detector, it just dilutes the
+rate, and old evidence ages out instead of being wiped by one good response.
+
+the rolling rows below run 50% error rate over a 1s window; v5 and v20 are
+the minimum volume before the rate is judged at all. that floor is the whole
+design: 1 failed of 1 is "100% error rate", so a rate detector without a
+volume floor is a coin flip detector. everything here runs with
+`npm run start:rolling`.
+
+### study 1: the dead service, detector vs detector
+
+the breaker extension's study 1 scenario: 40 clients x 3 sequential
+requests, every attempt an instant 503, full-jitter retries.
+
+| strategy | wire att | att/req | rejected | trips | probes | makespan | give-up p50 req1 | later reqs |
+|---|---|---|---|---|---|---|---|---|
+| no-breaker | 1080 | 9.0 | 0 | 0 | 0 | 49.19s | 11.49s | 11.33s |
+| cons k=5 | 200 | 1.7 | 120 | 40 | 0 | 2.53s | 1.40s | 0.00s |
+| roll v5 | 231 | 1.9 | 116 | 40 | 0 | 11.06s | 1.52s | 0.00s |
+| roll v20 | 1080 | 9.0 | 0 | 0 | 0 | 49.19s | 11.49s | 11.33s |
+| roll v20 shared | 40 | 0.3 | 120 | 1 | 0 | 0.10s | 0.04s | 0.00s |
+
+**at reachable volume the detectors agree on a corpse.** roll v5 spends 231
+wire attempts and trips 40 times against cons k=5's 200 and 40: 100% failure
+clears any rate threshold the moment the volume floor is met, so the choice
+of detector barely moves the dead-service bill.
+
+**volume is the blind spot, and it costs the full no-breaker bill.** the
+per-client roll v20 row needs 20 settles inside one 1s window from a single
+caller whose backoff is stretching toward 10s. that never happens, so it
+trips 0 times and spends exactly the no-breaker 1080 attempts. same
+detector shared across the herd: trips on the 20th settle at t=0, 40
+attempts total. the rate detector wants aggregate traffic; for it, scope is
+not a tuning detail but the difference between working and inert.
+
+### study 2: chance streaks on the flaky-but-healthy service
+
+the scenario the thread was actually about. 40 clients x 10 requests
+against a server with capacity to spare (4000 req/s, burst 4000, zero 429s)
+and a swept transient 503 rate, shared scope, 503s only, 20 seeds per cell.
+with 9 attempts per request, every request on this sweep short of the
+brownout would succeed if allowed to retry, so every fast-failed request is
+a success the breaker threw away.
+
+| fault rate | cons: tripped | trips | fastfail | success | roll: tripped | trips | fastfail | success |
+|---|---|---|---|---|---|---|---|---|
+| 5.0% | 0/20 | 0.00 | 0.0 | 100.0% | 0/20 | 0.00 | 0.0 | 100.0% |
+| 10.0% | 0/20 | 0.00 | 0.0 | 100.0% | 0/20 | 0.00 | 0.0 | 100.0% |
+| 20.0% | 0/20 | 0.00 | 0.0 | 100.0% | 0/20 | 0.00 | 0.0 | 100.0% |
+| 30.0% | 17/20 | 0.85 | 189.1 | 52.7% | 3/20 | 0.15 | 36.8 | 90.8% |
+| 70.0% | 20/20 | 1.00 | 386.6 | 3.4% | 20/20 | 1.00 | 385.4 | 3.7% |
+
+**the counter false-trips on luck.** at 30% faults it trips in 17 of 20
+runs, fast-failing a mean 189.1 requests per run for 52.7% success, on a
+server where every one of those requests would have succeeded. five bad
+draws in a row is not an incident, it is arithmetic: ~0.3^5 per settle,
+times hundreds of interleaved settles.
+
+**the rate detector holds the same cell at 3 of 20 and 90.8%.** 30% never
+looks like 50% over 20+ settles for long enough to matter; one worker's
+streak is diluted by everyone else's successes in the same window, which is
+exactly the claim the thread made. and both fire 20/20 on the 70% brownout:
+the detectors dont differ on disasters, they differ on the false-positive
+bill across the healthy-but-imperfect middle where services actually live.
+the 3/20 also says the margin is finite; 30% against a 50% threshold still
+loses the coin flip sometimes.
+
+### study 3: the healthy herd, counting 429s
+
+the breaker extension's study 3 scenario: 40 clients x 5 requests into
+20 req/s burst 20, 2% transient faults, full-jitter+retry-after, shared
+scope. the question: does the better detector rescue the wrong predicate?
+
+| strategy | success | wire att | 429s | trips | fast-fail | makespan |
+|---|---|---|---|---|---|---|
+| no-breaker | 99.5% | 591 | 390 | 0 | 0 | 9.47s |
+| cons k=5 429 | 10.0% | 40 | 20 | 1 | 180 | 0.10s |
+| roll v20 429 | 10.0% | 40 | 20 | 1 | 180 | 0.10s |
+| roll v20 503s | 99.5% | 591 | 390 | 0 | 0 | 9.47s |
+
+no. at t=0 the herd's first wave takes the 20 burst admissions and the
+other 20 bounce, which is a genuine 50%+ 429 rate inside the window, so the
+rolling detector trips on the same evidence at the same instant and lands
+the identical 10.0% disaster, row for row equal with the counter. the
+window measured the truth; the truth was the wrong signal. counting only
+503s the same detector never fires and matches no-breaker to the attempt.
+detector choice tunes false-trip odds on the right signal; predicate choice
+decides what a trip means at all.
+
+### study 4: the survivable outage with a rolling detector
+
+the breaker extension's study 2 scenario: 40 clients x 1 request at t=0,
+server hard-down over [0, outage) then healthy, equal-jitter retries.
+
+| success by outage | 1s | 2s | 5s | 10s | 20s | 30s |
+|---|---|---|---|---|---|---|
+| no-breaker | 100.0% | 100.0% | 100.0% | 100.0% | 5.0% | 0.0% |
+| cons k=5 ff 2s | 77.5% | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| roll v5 ff 2s | 77.5% | 77.5% | 77.5% | 77.5% | 2.5% | 0.0% |
+| roll v20 sh ff | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| roll v20 sh wait | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% |
+
+detail at the 5s outage:
+
+| strategy | success | wire att | wasted | trips | probes | give-up p50 |
+|---|---|---|---|---|---|---|
+| no-breaker | 100.0% | 311 | 271 | 0 | 0 | - |
+| cons k=5 ff 2s | 0.0% | 200 | 200 | 40 | 0 | 2.25s |
+| roll v5 ff 2s | 77.5% | 284 | 253 | 9 | 0 | 1.89s |
+| roll v20 sh ff | 0.0% | 40 | 40 | 1 | 0 | 0.07s |
+| roll v20 sh wait | 100.0% | 124 | 42 | 1 | 3 | - |
+
+**fail-fast loses the survivable outage under either detector.** cons k=5
+and the shared rolling gate both sit at 0.0% from 2s up: the detector
+decides when the gate closes, the mode decides what closing costs, and it
+is the mode that loses the requests.
+
+**the per-client roll v5 row is an accident of starvation, not a design.**
+it holds 77.5% through 10s because equal-jitter spreads a lone caller's
+settles past the 1s window about as fast as they accrue, so only 9 of 40
+clients ever trip. the same backoff that protects the server starves the
+client's own rolling window of evidence. a breaker that mostly cannot fire
+is not a safer breaker, it is a random one.
+
+**shared wait outlives every outage on the grid.** 100.0% at 20s where the
+plain schedule keeps 5.0%, 100.0% at 30s where it keeps nothing, at 124
+wire attempts vs the plain 311 at 5s. one shared gate spends one probe per
+cooldown for the whole herd while every sleeper spends nothing, so no
+client's 9-attempt budget runs out waiting. the price is hang time
+(makespan 31.11s at the 30s outage) and that unbounded patience is a bug
+wearing a success metric: these callers have no deadline, and real ones do.
+
+### what the rolling extension says as one sentence
+
+a rolling-window breaker converts false trips from a streak-luck problem
+into a volume problem, which is a good trade exactly when you can feed it
+aggregate traffic on the right failure signal, and no detector fixes a
+wrong predicate, a starved window, or a fail-fast gate on an outage that
+retries would have survived.
+
 ## the pacing extension: the knee, then throwing the number away
 
 the base study paced at exactly the server rate and blamed the leftover 429s
@@ -618,10 +768,12 @@ loop under test is shaped like the retry loop youd actually ship.
 - `src/experiment.ts` one strategy vs one fresh server, metrics out
 - `src/outage.ts` outage scenarios: waste, recovery spike, drain, give-up latency
 - `src/outage-main.ts` the three outage studies above
-- `src/breaker.ts` circuit breaker: consecutive-failure trip, cooldown, half-open probe
+- `src/breaker.ts` shared open/half-open/probe gate machinery + the consecutive-failure detector
+- `src/rolling-breaker.ts` rolling-window detector: error rate over a time window behind a volume floor
 - `src/breaker-retry.ts` the retry loop behind a breaker gate, fail-fast and wait modes
-- `src/breaker-study.ts` breaker scenarios: per-client or shared scope, failure predicate
+- `src/breaker-study.ts` breaker scenarios: per-client or shared scope, failure predicate, either detector
 - `src/breaker-main.ts` the three breaker studies above
+- `src/rolling-main.ts` the four detector-vs-detector studies above
 - `src/adaptive.ts` aimd pacer: additive increase over time, multiplicative cut on 429, hold-off dedupe
 - `src/pacing-study.ts` pacing scenarios: rate schedules, phase-split metrics, adaptive rate trace
 - `src/pacing-main.ts` the sweep and the mid-run drop studies above
@@ -635,10 +787,11 @@ The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
 
 ```
 npm ci
-npm test               # 139 tests
+npm test               # 156 tests
 npm start              # the main table
 npm run start:outage   # the outage studies
 npm run start:breaker  # the breaker studies
+npm run start:rolling  # the rolling-window detector studies
 npm run start:pacing   # the rate sweep and the aimd studies
 npm run start:headers  # the header studies
 npm run typecheck
@@ -698,11 +851,23 @@ npm run typecheck
 - the virtual clock fires timers one at a time with a full continuation flush
   between. at what simulated scale does that become the bottleneck, and what
   does batching same-instant timers buy?
-- the breaker extension counts consecutive failures; the standard production
-  alternative is an error rate over a rolling window, which a burst of
-  parallel workers cannot trip with one bad streak. rerunning these three
-  studies with a rolling-window breaker would say what the window buys and
-  what it delays
+- the rolling detector's volume floor blinds low-traffic callers by design
+  (study 1's inert per-client row). a hybrid that falls back to consecutive
+  counting below the floor would cover both regimes, and what it re-imports
+  of the streak false-trip problem is measurable on study 2's grid
+- the 50% threshold was picked once; study 2's 3-of-20 trips at 30% faults
+  say the margin between fault rate and threshold is finite. sweeping
+  errorRateThreshold against the fault-rate axis would draw the
+  false-trip/detection frontier that single column only samples
+- study 2's failures are iid across the shared settle stream, the kindest
+  case for a rate detector. correlated failures (one bad shard hit by a
+  subset of clients) concentrate in the window and in the population rate
+  differently; per-dependency windows vs one per-population window is the
+  real production layout question
+- study 4's shared-wait row survives every outage by hanging forever; a
+  wall-clock deadline on top would cap hang time and re-lose the longest
+  outages on purpose, which is the deadline-budget thread below meeting the
+  breaker
 - half-open here admits exactly one probe and closes on one success. real
   breakers ramp: a probe quota, close on a success rate. against study 2's
   recovery herd, the quota is a knob between re-tripping on the recovery

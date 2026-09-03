@@ -12,6 +12,7 @@
     "start:pacing": "tsx src/pacing-main.ts",
     "start:headers": "tsx src/header-main.ts",
     "start:breaker": "tsx src/breaker-main.ts",
+    "start:rolling": "tsx src/rolling-main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

@@ -1,15 +1,21 @@
 /**
  * Circuit breaker: the memory across requests that the retry loop lacks.
- * Closed, it counts consecutive counted failures; at the threshold it opens
- * and rejects callers without touching the wire. After openMs of cooldown a
- * single half-open probe is admitted: its success closes the breaker, its
- * failure restarts the cooldown. Results from requests admitted before a
- * trip settle late; while open they are ignored, so stragglers neither
- * extend nor cut short the cooldown.
+ * Closed, a detector watches settled outcomes; when it trips the breaker
+ * opens and rejects callers without touching the wire. After openMs of
+ * cooldown a single half-open probe is admitted: its success closes the
+ * breaker, its failure restarts the cooldown. Results from requests admitted
+ * before a trip settle late; while open they are ignored, so stragglers
+ * neither extend nor cut short the cooldown.
  *
  * A response that the caller's failure predicate does not count (say a 429
  * when only 503s count) settles as success: the service answered, which is
- * evidence of life, and the consecutive-failure count resets.
+ * evidence of life.
+ *
+ * Two detectors share that gate machinery. CircuitBreaker counts consecutive
+ * counted failures, the shape of the original extension. RollingWindowBreaker
+ * (rolling-breaker.ts) judges the failure rate over a rolling time window
+ * once a minimum volume of settles is in it, the shape production breakers
+ * (hystrix, envoy) actually use.
  */
 
 import type { VirtualClock } from "./clock.js";
@@ -29,11 +35,27 @@ export type BreakerState = "closed" | "open" | "half-open";
 
 export type BreakerGate = { admitted: false } | { admitted: true; probe: boolean };
 
-export class CircuitBreaker {
+/** The gate surface the retry loop drives; both breaker classes provide it. */
+export interface Breaker {
+  state(): BreakerState;
+  tryAcquire(): BreakerGate;
+  msUntilProbe(): number;
+  settle(gate: { probe: boolean }, countedOk: boolean): void;
+  trips: number;
+  probes: number;
+  rejections: number;
+}
+
+/**
+ * The open/half-open/probe machinery, detector left abstract. recordSettle
+ * sees every counted outcome that arrives while the breaker is closed and
+ * returns true to trip; resetDetector runs when a probe success closes the
+ * breaker and when a trip discards the evidence that caused it.
+ */
+export abstract class GatedBreaker implements Breaker {
   private isOpen = false;
   private openedAtMs = 0;
   private probeInFlight = false;
-  private consecutiveFailures = 0;
   /** Times the breaker went from closed to open. */
   trips = 0;
   /** Half-open probes admitted. */
@@ -42,20 +64,20 @@ export class CircuitBreaker {
   rejections = 0;
 
   constructor(
-    private readonly clock: VirtualClock,
-    private readonly opts: BreakerOptions,
+    protected readonly clock: VirtualClock,
+    private readonly cooldownMs: number,
   ) {
-    if (!Number.isInteger(opts.failureThreshold) || opts.failureThreshold < 1) {
-      throw new Error(`failureThreshold must be a positive integer, got ${opts.failureThreshold}`);
-    }
-    if (!Number.isFinite(opts.openMs) || opts.openMs < 0) {
-      throw new Error(`openMs must be a finite non-negative number, got ${opts.openMs}`);
+    if (!Number.isFinite(cooldownMs) || cooldownMs < 0) {
+      throw new Error(`openMs must be a finite non-negative number, got ${cooldownMs}`);
     }
   }
 
+  protected abstract recordSettle(countedOk: boolean): boolean;
+  protected abstract resetDetector(): void;
+
   state(): BreakerState {
     if (!this.isOpen) return "closed";
-    return this.clock.now() >= this.openedAtMs + this.opts.openMs ? "half-open" : "open";
+    return this.clock.now() >= this.openedAtMs + this.cooldownMs ? "half-open" : "open";
   }
 
   /**
@@ -77,7 +99,7 @@ export class CircuitBreaker {
   /** Ms until a probe could be admitted; 0 when closed or the cooldown is spent. */
   msUntilProbe(): number {
     if (!this.isOpen) return 0;
-    return Math.max(0, this.openedAtMs + this.opts.openMs - this.clock.now());
+    return Math.max(0, this.openedAtMs + this.cooldownMs - this.clock.now());
   }
 
   /**
@@ -93,22 +115,44 @@ export class CircuitBreaker {
       this.probeInFlight = false;
       if (countedOk) {
         this.isOpen = false;
-        this.consecutiveFailures = 0;
+        this.resetDetector();
       } else {
         this.openedAtMs = this.clock.now();
       }
       return;
     }
     if (this.isOpen) return; // straggler admitted before the trip; the cooldown stands
-    if (countedOk) {
-      this.consecutiveFailures = 0;
-      return;
-    }
-    this.consecutiveFailures++;
-    if (this.consecutiveFailures >= this.opts.failureThreshold) {
+    if (this.recordSettle(countedOk)) {
       this.isOpen = true;
       this.openedAtMs = this.clock.now();
       this.trips++;
+      this.resetDetector();
     }
+  }
+}
+
+export class CircuitBreaker extends GatedBreaker {
+  private consecutiveFailures = 0;
+  private readonly failureThreshold: number;
+
+  constructor(clock: VirtualClock, opts: BreakerOptions) {
+    if (!Number.isInteger(opts.failureThreshold) || opts.failureThreshold < 1) {
+      throw new Error(`failureThreshold must be a positive integer, got ${opts.failureThreshold}`);
+    }
+    super(clock, opts.openMs);
+    this.failureThreshold = opts.failureThreshold;
+  }
+
+  protected override recordSettle(countedOk: boolean): boolean {
+    if (countedOk) {
+      this.consecutiveFailures = 0;
+      return false;
+    }
+    this.consecutiveFailures++;
+    return this.consecutiveFailures >= this.failureThreshold;
+  }
+
+  protected override resetDetector(): void {
+    this.consecutiveFailures = 0;
   }
 }
