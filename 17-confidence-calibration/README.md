@@ -15,6 +15,7 @@ the measurement is the reliability table: bin predictions by confidence, compare
 ```
 pip install -r requirements.txt
 python main.py
+python signals_main.py
 pytest tests/ -q
 ```
 
@@ -40,6 +41,18 @@ the policy table is the production translation. auto-answer iff confidence >= t,
 raw scores break the promise at every threshold: the "at least 90% confident" slice is 88.6% accurate, and even demanding 0.99 only buys 93.6%. with raw scores there is no threshold in this table that hits a 5% auto-answer error budget. calibrated scores keep the promise (conservatively, 0.980 at t=0.90) and the cost surfaces where it belongs, in coverage: you auto-answer 37.9% instead of 76.6%, because 37.9% is what this model can actually vouch for at that standard. the raw policy was answering the other 39% on confidence it didnt have.
 
 then the part that keeps this honest: distribution shift. the shifted stream raises the ambiguity rate and swaps the filler phrases for vocabulary the model never saw. accuracy drops 0.795 to 0.539, and raw ece explodes to 0.342. the validation-fitted T still helps, 0.342 to 0.140, but its promise is broken too: the calibrated policy at t=0.90 answers 15.8% of shifted traffic at 0.831 accuracy, not the ~0.98 it delivers in-distribution. an oracle temperature fitted on the shifted stream itself gets ece to 0.024, but T moves from 3.060 to 5.691, so calibration is a property of the traffic, not of the model. a temperature fitted once and trusted forever is a number quietly going stale.
+
+## the signals extension
+
+the open question this answers: max softmax is one of three cheap trust signals you can read off a probability row, margin (top1 minus top2) and entropy are the other two, and whether they rank mistakes differently was unmeasured. `python signals_main.py` trains the identical model on the identical seeds and compares the three as orderings, because thresholds on different signals live on different scales and the only fair comparison is who puts the mistakes last. the tool for that is the risk-coverage curve: sort predictions from most to least trusted, answer the top k, plot the error rate of the answered slice as k grows. aurc is the mean of that curve over all coverages, lower is better, and the oracle aurc (all correct answers sorted first) is the floor any signal gets judged against at a given accuracy.
+
+the answer on this data: they barely differ. the orderings disagree on under 2% of item pairs (max softmax vs margin 0.0075, vs neg entropy 0.0095, margin vs entropy 0.0169), and the disagreements nearly cancel, aurc reads 0.0675 / 0.0680 / 0.0673 across the three. at a 5% error budget max softmax answers 55.2% of test traffic, margin 53.2%, entropy 55.5%. so the choice of cheap signal is a third-decimal decision here. the number that isnt third-decimal is the oracle gap: the best signal sits at 0.0673 against a floor of 0.0227, so about two thirds of the achievable mistake-ranking is information none of these signals carries. picking between them is rearranging deck chairs; closing the oracle gap needs a signal that knows something the probability row doesnt.
+
+temperature scaling does move the orderings, and the arithmetic says it must: dividing logits by T is monotone within a row, but rows with different logit spreads compress differently, so cross-row order can flip. at the fitted T=3.060 the max softmax ordering moves on 4.05% of pairs, entropy on 7.09%, margin on 1.62%, and all three aurcs improve a hair (0.0675 to 0.0660, 0.0680 to 0.0672, 0.0673 to 0.0666). so calibration is not purely cosmetic for selective prediction, the reordering it causes is mildly in the right direction. but if you want an ordering that no recalibration can ever touch, the logit margin (top logit minus runner-up) is it: T scales every gap uniformly, the tests assert its pair disagreement under scaling is exactly 0.0000, and it comes from the same forward pass.
+
+under shift the ranking degrades along with everything else. shifted accuracy is 0.539, the signals aurcs land at 0.3075 / 0.3085 / 0.3061 against an oracle of 0.1280, so the signals now capture even less of the achievable ordering than in-distribution. the production translation is brutal: the 5% error budget that covered 55.2% of test traffic covers 2.3% of shifted traffic (28 of 1200 items). a trust signal is not a shift detector; it quietly hands you a nearly empty answer set while every number it is built from still looks like a probability.
+
+where the signals do part ways is rows that spread their doubt thin. the largest rank split is a row reading 0.519, 0.189, 0.171, 0.121: max softmax ranks it 1166 of 1200 (barely trusted, half confidence) while margin ranks it 1108, because margin also reads the runner-up and 0.519 vs 0.189 is a comfortable lead. whether a many-way-confused row deserves more trust than a two-way-tied one at equal top probability is exactly the bet that separates these signals, and on this dataset it settles nothing measurable.
 
 ## tradeoffs and where it breaks
 
@@ -69,4 +82,6 @@ python was the right language here. the whole project is matrix arithmetic, soft
 - one temperature per model is the coarsest knob. per-class temperature, platt scaling with a bias, or binning-based recalibration would show what the residual 0.030 ece is made of, and what each extra parameter buys
 - the shift experiment shows T goes stale but not when. an online recalibration loop (refit T on a sliding window of labeled outcomes) has a lag/variance tradeoff that would compose directly with 06s rate limiting style of measurement
 - ece on 1200 items has sampling noise this project never quantifies. 02s paired bootstrap machinery applies to the ece delta and to the policy table rows, and was not run
-- the selective policy uses max softmax as the trust signal. margin (top1 minus top2) and entropy are the other cheap signals, and which one ranks mistakes best is measurable right here with no new data
+- the signals extension leaves two thirds of the achievable mistake-ranking on the table (aurc 0.0673 vs oracle 0.0227), and no function of one probability row can close it. signals that look outside the row, distance to the nearest training ticket, vote disagreement across k models, an ood score, are the candidates, each with a real inference cost attached
+- the three signal aurcs sit within 0.0007 of each other, well inside plausible sampling noise on 1200 items. 02s paired bootstrap over per-item ordering contributions would say whether entropys hair of an edge is real, same unrun machinery as the ece bullet above
+- shift collapsed the 5% budget coverage from 55.2% to 2.3% while every score still looked like a probability. the coverage rate itself is therefore a shift alarm you get for free, and how fast a windowed coverage estimate detects onset, against how many false alarms, is the same lag/variance tradeoff as the online-refit thread
