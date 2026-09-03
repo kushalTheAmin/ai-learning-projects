@@ -187,6 +187,69 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-03] 04 — the baselines section was labelled a matched-vocab
+  comparison and is not one. `run_benchmark` sets `word_vocab =
+  mixed_bpe.vocab_size` (1659) and printed "=== baselines (word tokenizer at
+  matched vocab 1659) ===", and the readme's concept section said the word
+  tokenizer "at the same vocab size hits 20.3% unknown tokens on held-out
+  prose". it builds 1402. `WordTokenizer.train` keeps the top
+  `vocab_size - 1` word types and `Counter(word_split(train_prose + "\n" +
+  train_code))` holds 1401 of them, so `ranked[:1658]` is every type there is
+  and 257 of the 1659 slots go unspent. the header printed the *requested*
+  budget rather than `word.vocab_size`, which is the same shape as the 02 fix
+  the run before — a number derived from an input instead of read off the
+  object that was actually built. the direction is favourable, which is why it
+  survived a review: the word tokenizer already holds every type it saw, so
+  raising the budget cannot change the vocab (pinned by a test that hands it
+  ten times the slots and gets the identical vocab list), and 20.3% is the
+  ceiling for a closed word vocabulary on this corpus rather than a budget
+  handicap the bpe imposed. so the conclusion is stronger than the label, and
+  the label was still false — the same class as 04's own 2026-08-27 fix
+  (mixed@1659 read as a control) arriving from the opposite direction, an
+  uncontrolled comparison sold as controlled instead of a controlled one read
+  off the wrong column. the fix is two lines and no new measurement:
+  `WordTokenizer.train` is called before the header so the header can print
+  `word.vocab_size`, and a following line states the budget, the unspent
+  slots, the type count, and that the oov rates are a ceiling. new
+  tests/test_baseline_vocab_budget.py, 11 tests: the budget is not binding on
+  a toy text and on the committed corpus, the realized vocab is exactly the
+  type count plus unk, ten times the budget builds the identical vocab, the
+  header carries no "matched vocab" and does carry the vocab actually built,
+  the section names both numbers and says "unspent", the three oov rows are
+  unchanged, and three holding the readme to the corrected claim against
+  whitespace-normalized text so a line wrap cannot make them pass (23's trap).
+  5 of the 11 fail on the old code and the revert check splits cleanly —
+  reverting run_benchmark.py fails the 3 output tests, reverting the readme
+  alone fails the 2 prose ones. no measured value moved: the entry point's
+  output differs by exactly one replaced header line and one added line,
+  every other character of every table is what it was, and the root index row
+  quotes only the 20.3% so it needed no change. no other project makes a
+  matched-vocab claim, so nothing to port. found and fixed 2026-09-03
+- [medium] 04 — the cost section prices code through prose@1246 against
+  mixed@1659, which is the confounded column the readme itself calls
+  confounded one screen up ("that column has 413 extra vocab slots paying for
+  both domains at once"), and the readme introduces the cost block with "in
+  cost terms, from the run:" as the immediate continuation of the paragraph
+  that exists to insist on the matched control. so the one dollar figure the
+  project publishes — "the prose-only tokenizer pays 80.7% more for the same
+  code — training on code too cuts the bill 44.7%" — is the uncontrolled
+  comparison, quoted where the reader has just been told to distrust it. the
+  matched column says 71.8% and 41.8%, both smaller and both still large
+  enough to carry the point. nothing is arithmetically wrong: `domain_tokens
+  ["code"]["prose"]` and `["mixed"]` are correct token counts for the two
+  full tokenizers and the section labels them "prose-trained" and
+  "mixed-trained" honestly. it is the readme's framing that borrows the
+  control's authority for the uncontrolled number. left out of this run
+  because it is a second measurement in a second section, not the identical
+  one-line change, and it would have widened a fix commit that should read as
+  one intentional change. found 2026-09-03
+- [low] 04 — `CharTokenizer.train` takes no vocab budget at all, so the "char
+  tokenizer: vocab 79" row sits inside a section whose header now names a
+  budget the char row was never held to. it is the full training alphabet by
+  construction, which is the right thing to measure for the "even chars go
+  oov" point, but the row says nothing about being uncapped and a reader
+  arriving from the word row above will read 79 as a budgeted number. found
+  2026-09-03
 - [fixed 2026-09-03] 02 — the pruning section's probe accounting had the sign
   flipped. the bullet that answers the section's own open question reported the
   postings skipped by the bounds (68-70% of the common-heavy bill, just under
@@ -1756,7 +1819,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 06-rate-limiting | 2026-08-28 |
 | 05-token-streaming | 2026-08-27 |
 | 03-hybrid-search | 2026-08-27 |
-| 04-bpe-tokenizer | 2026-08-27 |
+| 04-bpe-tokenizer | 2026-09-03 |
 | 02-retrieval-eval | 2026-09-03 |
 
 Note on the first pass: every project in the repo was committed on 2026-08-25,
@@ -2423,6 +2486,42 @@ the errors live, and the fix is to make the table show it rather than to
 correct the sentence and leave the derivation in prose. the two findings left
 open are the same scored-only currency in the entry points this fix did not
 touch, and the empty-corpus divergence between the flat and inverted indexes.
+
+04 was last reviewed on 2026-08-27 and came back clean on the algorithm, which
+is what a from-scratch bpe should be judged on first. training is the canonical
+greedy loop — count adjacent pairs weighted by piece frequency, merge the most
+frequent, stop at the budget or when no pair occurs twice — and the merge order
+is the encode order, never longest-match. determinism holds two ways: merges
+reproduce identically across runs, and the prefix property is real rather than
+asserted, `train(text, 300).merges` is exactly `train(text, 400).merges[:44]`,
+which is what lets the vocab sweep train once and truncate. round-trip holds on
+the empty string, a lone space, a lone newline, a bare combining-latin
+character, a four-byte emoji, a repeated character and a mixed whitespace run,
+and on all five committed files through both tokenizers. the pretokenizer's
+join property is real — `" ?\S+|\s+"` puts a double space in the whitespace
+branch rather than losing it — and `_merge_seq` replaces non-overlapping
+occurrences left to right, so "aaa" under an (a,a) merge gives two tokens and
+not something order-dependent. every number in the readme matches what
+`run_benchmark.py` prints today, checked mechanically by pulling each fenced
+block out of the readme and requiring it whitespace-normalized in the run's
+output rather than by eye. the script-cost table's two suspicious coincidences
+are both mechanism and not defect: japanese and chinese land on exactly 3.000
+because every cjk codepoint is three utf-8 bytes with no merge learned for any
+of them, and russian and greek agreeing to three decimals at 1.835 is 233/127
+against 200/109, genuinely different counts landing four parts in ten thousand
+apart.
+
+what was wrong was the one comparison in the project that claims to be
+controlled: the word baseline, run at the mixed bpe's 1659-slot budget and
+printed as matched to it, builds 1402. the tell is the same one 02 produced the
+run before — the printed number came from the input (`word_vocab`, the budget
+asked for) rather than from the object built (`word.vocab_size`) — and it hid
+behind a favourable direction, since the word tokenizer already holds every
+type the corpus has and more slots would change nothing. that is the honest
+version of the claim and it is stronger than the one that was there, so the fix
+prints it. the two findings left open are the readme quoting the confounded
+mixed@1659 column for its dollar figure in the paragraph that exists to insist
+on the control, and the char row sitting unbudgeted under a budgeted header.
 
 ## MECHANISMS
 
