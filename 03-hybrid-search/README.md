@@ -33,11 +33,13 @@ ALL QUERIES (40)          recall@1    recall@5    mrr@10
 bm25 (lexical)               0.812       0.950     0.882
 dense (lsa)                  0.812       0.975     0.897
 hybrid (rrf)                 0.838       0.950     0.899
+hybrid (weighted a=0.5)      0.812       0.950     0.887
 
 PARAPHRASE ONLY (20)      recall@1    recall@5    mrr@10
 bm25 (lexical)               0.625       0.900     0.765
 dense (lsa)                  0.625       0.950     0.793
 hybrid (rrf)                 0.675       0.900     0.799
+hybrid (weighted a=0.5)      0.625       0.900     0.774
 ```
 
 mrr is cut off at rank 10, same as 02 — every ranking here covers all 100 docs, so without a cutoff nothing is ever a miss and the metric cant say "didnt find it". bm25s worst query sits at rank 12 and was booking 0.083 for it
@@ -45,6 +47,7 @@ mrr is cut off at rank 10, same as 02 — every ranking here covers all 100 docs
 - keyword queries: both sides go 20/20 at rank 1. more on why thats interesting below
 - paraphrase queries: bm25 gets trapped by surface-word collisions — "check who is logged in without a trip to the database" lands on the connection-pooling doc (database! trip!) and doesnt reach the JWT doc until rank 12, past the cutoff, so it scores zero — dense has it at 9. dense wins the category on mrr@10 and recall@5
 - hybrid rrf has the best mrr@10 and recall@1 overall — it recovers several of bm25s paraphrase misses without giving up the keyword wins
+- the weighted blend at the default a=0.5 is the row that doesnt pay — 0.887 overall and 0.774 on paraphrase, under rrf on both and under plain dense too. so "fusion helps" on this set is an rrf result, not a fusion result. the sweep below finds the blend only at a=0.2, where it lands on rrfs 0.899 exactly
 - the alpha sweep prints mrr@10 at every blend from pure-bm25 to pure-dense. best value on this set is 0.2, but with 40 queries thats reading tea leaves — the sweep is there to show the tradeoff curve exists, not to pick a production constant
 
 ## the honest finding about keyword queries
@@ -59,6 +62,9 @@ i expected dense to stumble on exact identifiers — thats the standard story fo
 
 ## fixes
 
+- 2026-09-03 — the numbers block quoted three of the four strategies main.py
+  prints, dropping hybrid (weighted a=0.5) — the one fusion that loses. both
+  tables carry it now: 0.887 mrr@10 overall, 0.774 paraphrase. no value moved
 - 2026-08-27 — the stemmer undoubled ll/ss/zz, so "killed" became "kil" while
   "kill" stayed "kill" — a word stopped matching its own inflections, same for
   install/installed and call/calling. l, s and z are excluded from the undouble
