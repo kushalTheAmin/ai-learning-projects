@@ -33,10 +33,16 @@ worse answers.
 starting from bytes instead of characters buys the property that makes this
 the industry default: nothing is ever out of vocabulary. worst case, an
 unseen character falls back to its raw bytes. the baselines show what youre
-buying — my word-level tokenizer at the same vocab size hits 20.3% unknown
-tokens on held-out prose and each one decodes to `<unk>`, information gone.
-even the char-level tokenizer meets 277 characters it has no id for. bpe
-round-trips every file exactly, including scripts it never trained on.
+buying — my word-level tokenizer hits 20.3% unknown tokens on held-out prose
+and each one decodes to `<unk>`, information gone. even the char-level
+tokenizer meets 277 characters it has no id for. bpe round-trips every file
+exactly, including scripts it never trained on.
+
+that word-level number isnt a handicap i imposed. it got the mixed bpes 1659
+slots and could only fill 1402 — the training text has 1401 word types and
+thats all there is to buy, so 257 slots go unspent. hand it ten times the
+budget and it builds the same vocabulary. 20.3% is the ceiling for a closed
+word vocab on this corpus, not a small one being unfair.
 
 and the reason this lives in an ai repo: apis price per token, so the
 tokenizer is a silent multiplier on every bill. same text, different
@@ -151,6 +157,11 @@ per-line granularity flattens whats inside the line.
 
 ## fixes
 
+- 2026-09-03 — the baselines section printed "matched vocab 1659" and the
+  readme called the word tokenizer vocab-matched to the bpe. it isnt — it
+  builds 1402, because the training text only has 1401 word types. the run
+  now prints the vocab it actually built and says 257 slots went unspent. no
+  measured number moves, the budget was never binding
 - 2026-08-27 — the open questions said mixed training won on code "without
   hurting prose", read off the mixed@1659 column the readme itself calls
   confounded. the honest control says the opposite. the run now prints the

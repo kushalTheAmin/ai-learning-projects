@@ -104,10 +104,19 @@ def main():
         tpc = tokens_per_char(body, len(mixed_bpe.encode(body)))
         print(f"{label.lower():>18} {tpc:>12.3f}  ({tpc / prose_tpc:>4.1f}x english)")
 
+    # The word tokenizer gets the same budget as the mixed bpe, but it cannot
+    # spend it: the training text holds fewer word types than the budget has
+    # slots, so it takes every type it saw and stops. The vocabs are not
+    # matched, and the oov rates below are the ceiling for a closed word
+    # vocabulary on this corpus rather than a budget handicap.
     word_vocab = mixed_bpe.vocab_size
-    print(f"\n=== baselines (word tokenizer at matched vocab {word_vocab}) ===")
     word = WordTokenizer.train(train_prose + "\n" + train_code, word_vocab)
     char = CharTokenizer.train(train_prose + "\n" + train_code)
+    print(f"\n=== baselines (word tokenizer, vocab {word.vocab_size}) ===")
+    print(f"budget was {word_vocab} slots to match the mixed bpe; "
+          f"{word_vocab - word.vocab_size} went unspent — the training text "
+          f"has only {word.vocab_size - 1} word types, so the oov rates below "
+          f"are the best a closed word vocab does here, not a smaller budget")
     for name, text in heldout.items():
         oov, total = word.oov_stats(text)
         print(f"word tokenizer, heldout {name}: {oov}/{total} tokens are OOV "
