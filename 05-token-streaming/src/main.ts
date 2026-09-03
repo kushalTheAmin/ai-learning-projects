@@ -33,6 +33,13 @@ import {
   type ProducerPacing,
   type StudyRun,
 } from "./byteQueueStudy.js";
+import {
+  normalEventsWire,
+  giantLineEventWire,
+  unterminatedLineWire,
+  manyLineEventWire,
+  replayInChunks,
+} from "./sseLimitStudy.js";
 
 const SEED = 20260826;
 
@@ -366,9 +373,111 @@ async function byteQueueDemo(): Promise<void> {
   if (!identical) throw new Error("byte-capped pipeline mismatch");
 }
 
+function sseLimitDemo(): void {
+  console.log("");
+  console.log("== 7. sse limits: what a hostile stream costs, and the two failure modes ==");
+  const chunk = 1024;
+  const lineCap = 65536;
+
+  // The hazard: one data line that never gets a terminator.
+  const poisonChars = 4 * 1024 * 1024;
+  const poison = unterminatedLineWire(poisonChars);
+  const unbounded = replayInChunks(poison, chunk);
+  console.log(
+    `unterminated ${poisonChars}-char data line in ${chunk}-char chunks, no limits:` +
+      ` 0 events, parser retains ${unbounded.retainedCharsHighWater} chars — the whole poison, forever`,
+  );
+  if (unbounded.events.length !== 0 || unbounded.retainedCharsHighWater !== poison.length) {
+    throw new Error("unbounded hazard replay mismatch");
+  }
+
+  // Failure mode 1: fail closed.
+  const failClosed = replayInChunks(poison, chunk, { maxLineChars: lineCap, onLimit: "error" });
+  if (failClosed.error === null) throw new Error("error mode did not fail");
+  console.log(
+    `maxLineChars ${lineCap}, error mode: SseLimitError("${failClosed.error.kind}") after ` +
+      `${failClosed.charsFed} of ${poison.length} chars ` +
+      `(${fmt((100 * failClosed.charsFed) / poison.length)}% of the poison), ` +
+      `retained high-water ${failClosed.retainedCharsHighWater} chars`,
+  );
+  if (failClosed.retainedCharsHighWater > lineCap + chunk) {
+    throw new Error("error mode exceeded the retention bound");
+  }
+
+  // Failure mode 2: skip the poisoned line, keep the stream.
+  const mixed =
+    normalEventsWire(20, "before") + giantLineEventWire(1024 * 1024) + normalEventsWire(20, "after");
+  const mixedUncapped = replayInChunks(mixed, chunk);
+  const mixedSkip = replayInChunks(mixed, chunk, { maxLineChars: lineCap, onLimit: "skip" });
+  const afterCount = mixedSkip.events.filter((e) => e.data.includes('"tag":"after"')).length;
+  console.log(
+    `20 events + one ${1024 * 1024}-char line + 20 events: no limits delivers ` +
+      `${mixedUncapped.events.length} events at high-water ${mixedUncapped.retainedCharsHighWater};` +
+      `\n  skip mode delivers ${mixedSkip.events.length} (all ${afterCount} post-poison events survive),` +
+      ` drops ${mixedSkip.droppedLines} line, high-water ${mixedSkip.retainedCharsHighWater}` +
+      ` (bound: cap ${lineCap} + chunk ${chunk})`,
+  );
+  if (
+    mixedSkip.events.length !== 40 ||
+    afterCount !== 20 ||
+    mixedSkip.droppedLines !== 1 ||
+    mixedSkip.retainedCharsHighWater > lineCap + chunk
+  ) {
+    throw new Error("skip mode recovery mismatch");
+  }
+
+  // The line cap alone misses accumulation: every line terminates, the event never does.
+  const accumulation = manyLineEventWire(2100, 512) + normalEventsWire(5, "tail");
+  const accUncapped = replayInChunks(accumulation, chunk);
+  const accSkip = replayInChunks(accumulation, chunk, {
+    maxLineChars: lineCap,
+    maxEventChars: lineCap,
+    onLimit: "skip",
+  });
+  const giant = accUncapped.events[0];
+  if (giant === undefined) throw new Error("accumulation control lost its event");
+  console.log(
+    `2100 short data lines, one event: every line passes a ${lineCap}-char line cap, but the` +
+      ` event accumulates\n  ${giant.data.length} chars (no limits, high-water ` +
+      `${accUncapped.retainedCharsHighWater}); maxEventChars ${lineCap} in skip mode drops ` +
+      `${accSkip.droppedEvents} event,\n  delivers the ${accSkip.events.length} tail events, ` +
+      `high-water ${accSkip.retainedCharsHighWater}`,
+  );
+  if (
+    accSkip.droppedEvents !== 1 ||
+    accSkip.events.length !== 5 ||
+    accSkip.retainedCharsHighWater > 2 * lineCap + chunk
+  ) {
+    throw new Error("event cap replay mismatch");
+  }
+
+  // The caps cost nothing on a well-formed stream: fuzz against the uncapped reference.
+  const bytes = scriptedSseBytes();
+  const reference = JSON.stringify(parseSseComplete(bytes));
+  const seeds = 300;
+  let identical = 0;
+  for (let seed = 1; seed <= seeds; seed++) {
+    const parser = new SseParser({ maxLineChars: lineCap, maxEventChars: lineCap });
+    const events = [];
+    let prev = 0;
+    for (const boundary of chunkOffsets(bytes.length, seed, 17)) {
+      events.push(...parser.feed(bytes.subarray(prev, boundary)));
+      prev = boundary;
+    }
+    events.push(...parser.end());
+    if (JSON.stringify(events) === reference) identical++;
+  }
+  console.log(
+    `capped parser on the well-formed fixture: ${identical}/${seeds} seeded chunkings` +
+      ` byte-identical to the uncapped reference`,
+  );
+  if (identical !== seeds) throw new Error("capped/uncapped divergence on a well-formed stream");
+}
+
 await streamingDemo();
 await partialJsonDemo();
 await backpressureDemo();
 await fuzzDemo();
 resumableDemo();
 await byteQueueDemo();
+sseLimitDemo();

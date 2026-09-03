@@ -10,7 +10,10 @@ parsing correctness under adversarial chunking, how early partial parsing
 makes data usable, and what a bounded queue does to memory — not the latency
 or failure behavior of any real API. The time-to-first-text figure in
 particular is a property of the simulated 2ms inter-chunk delay, not a claim
-about real-world TTFT.
+about real-world TTFT. The hostile streams in measurement 7 are authored
+attacks (an unterminated line, a giant frame, an event that accumulates
+forever), so those numbers measure the parser's bounds against those shapes,
+not how often real servers misbehave.
 
 Streaming is where LLM clients actually break. The network hands you bytes,
 not tokens: a chunk can end mid-UTF-8-character, between the CR and LF of a
@@ -28,7 +31,11 @@ that, from scratch, and measures each one.
   `data:` joined with `\n`, comments, one-leading-space stripping, events
   dispatched only when the data buffer is non-empty, last-event-id
   persistence. Multi-byte UTF-8 split across chunks is handled by
-  `TextDecoder`'s streaming mode.
+  `TextDecoder`'s streaming mode. `SseLimits` caps the two things the parser
+  retains between chunks, the incomplete line and the in-flight event's
+  accumulated data, with two failure modes: `"error"` throws a typed
+  `SseLimitError` and poisons the parser, `"skip"` drops the offending line
+  or event, counts it in `stats`, and keeps parsing what follows.
 - **`src/partialJson.ts`** — parses any prefix of a valid JSON document into
   the best-known value. One left-to-right scan tracks the container stack,
   the in-progress token, and the last index that closes cleanly; at end of
@@ -62,6 +69,12 @@ that, from scratch, and measures each one.
   chunk per macrotask tick, counting idle ticks, stalls, and byte
   high-water. Every reported number is a count or a byte total, so the runs
   reproduce exactly.
+- **`src/sseLimitStudy.ts`**: the rig for measurement 7, authored hostile
+  wires (a line with no terminator, a giant terminated frame, one event of
+  thousands of data lines) and a replay harness that feeds a wire through a
+  parser in fixed-size chunks and reports events delivered, drops, and the
+  retained-state high-water. All ASCII, so chars and bytes coincide and
+  every number reproduces exactly.
 - **`src/pipeline.ts`** — chunks → SSE events → accumulated text and
   tool-call arguments, with a partial-parse snapshot after every fragment.
 
@@ -69,8 +82,8 @@ that, from scratch, and measures each one.
 
 ```
 npm ci
-npm test        # 98 tests
-npm start       # the six measurements below
+npm test        # 126 tests
+npm start       # the seven measurements below
 npm run typecheck
 ```
 
@@ -229,6 +242,44 @@ near-uniform sizes are the one regime where a chunk count is an honest
 memory bound. The full pipeline runs behind a 256-byte-capped queue and
 parses the fixture byte-identically, so the budget costs no correctness.
 
+**7. SSE limits.** The parser retains two things between chunks: the current
+incomplete line, and the data accumulated for the in-flight event. A hostile
+or broken server can grow either one forever, and the open question from the
+byte-queue round was where the cap goes and what the right failure mode is
+when it fires. The answer is `SseLimits`: `maxLineChars` and
+`maxEventChars`, measured in UTF-16 code units of the decoded stream because
+that is the unit the retained strings actually occupy memory in, and a
+deliberate choice between failing closed and degrading.
+
+The hazard first: an unterminated `data:` line of 4194304 chars fed in
+1024-char chunks to an uncapped parser produces 0 events and a retained
+high-water of 4194310 chars. The whole poison, held forever, waiting for a
+terminator that never comes.
+
+`onLimit: "error"` fails closed. `maxLineChars 65536` throws
+`SseLimitError("line")` after 66560 of 4194310 chars, 1.6% of the poison,
+retained high-water 66560 chars. The parser is poisoned after the throw and
+every later call rethrows; this is the mode for a client that treats an
+over-limit stream as a protocol violation and tears the connection down.
+
+`onLimit: "skip"` drops the offending line or event and keeps the stream. On
+a wire of 20 events, one complete event whose data line is 1048576 chars,
+then 20 more events: no limits delivers 41 events at high-water 1048690
+chars; skip mode delivers 40, drops 1 line, and holds high-water at 65650
+chars against the bound of cap 65536 + chunk 1024. Every post-poison event
+survives, so one oversized frame costs one frame, not the connection.
+
+The line cap alone is not enough. 2100 short data lines belonging to one
+event pass a 65536-char line cap individually, every line terminated, and
+the event still accumulates 1077299 chars (uncapped high-water 1077521).
+`maxEventChars 65536` in skip mode drops 1 event, delivers the 5 tail
+events that follow it, high-water 65803 chars. Two caps because there are
+two growth paths: the line cap bounds the buffer a missing terminator
+grows, the event cap bounds the accumulation a missing blank line grows.
+
+And the caps cost nothing when nothing is wrong: 300/300 seeded chunkings
+of the well-formed fixture parse byte-identical to the uncapped reference.
+
 ## Design notes, and the honest parts
 
 - **A partial value is a snapshot, not a promise.** `"12` may become `125`,
@@ -284,6 +335,20 @@ parses the fixture byte-identically, so the budget costs no correctness.
   exactly that bug; the FIFO test caught a later 5-byte push overtaking a
   pending 100-byte one, and admission now defers to the waiting line before
   it checks the budget.
+- **Error mode drops events completed earlier in the same feed call.** The
+  throw happens mid-drain, so events the chunk had already completed never
+  reach the caller. That is fine for a mode whose contract is "tear it
+  down", but it is a contract: a caller that wants every last event before
+  the failure runs skip mode and reads `stats` instead.
+- **The cap boundary has a one-char trap.** A line of exactly the cap
+  ending in a CR on a chunk boundary sits in the buffer as cap + 1 chars,
+  but the CR is an unclassified terminator, not part of the line; counting
+  it would fail streams sitting exactly at the limit that happen to use
+  CRLF. The tests pin that case in error mode, where the false positive
+  would kill the connection. The mirror case matters too: an over-cap
+  buffer ending in CR is a completed poisoned line, and entering
+  discard-until-terminator there would silently eat the healthy line that
+  follows.
 - **The idle-tick currency belongs to the harness.** The consumer pays one
   tick per chunk whatever its size, so idle ticks price starvation in
   chunks, not bytes. A consumer whose cost scales with chunk size would
@@ -318,9 +383,21 @@ parses the fixture byte-identically, so the budget costs no correctness.
   mean of 46412 buffered under 50-chunk bursts and never starved, but a
   burst larger than the budget would starve the byte cap too. The
   burst-size-over-budget sweep that maps where that starts is unrun.
-- The SSE parser buffers one line, but a malicious or broken stream can
-  send an unbounded line with no terminator. Where's the cap, and what's
-  the right failure mode when it's hit?
+- The limits count decoded UTF-16 units, but the attack arrives as bytes:
+  the whole hostile chunk is decoded before any cap looks at it. A byte
+  cap ahead of the decoder would refuse work earlier, and could feed the
+  fused byte-level scanner idea below; what decoding a poison stream
+  itself costs is unmeasured.
+- Skip mode counts drops, but the events around a dropped line still
+  dispatch, so a consumer cannot tell which delivered event lost a line.
+  Surfacing drops in-band (an error event carrying the drop position)
+  changes the consumer contract; whether any client can use a
+  damaged-but-flagged event is the design question.
+- The caps here are hand-picked constants. A deployment would set them
+  from an observed frame-size distribution the way the byte queue sets
+  its budget, with a false-drop rate attached to the chosen quantile;
+  that needs a corpus of real provider streams, the same gap as the
+  replay-a-real-stream thread.
 - The snapshot column grows quadratically because a deep copy touches the
   whole tree. A persistent-structure version (path copying, shared
   unchanged children) would make an owned snapshot O(depth) per fragment;
