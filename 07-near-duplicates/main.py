@@ -34,14 +34,25 @@ JACCARD_SWEEP = [0.2, 0.3, 0.4, 0.5, 0.6]
 HAMMING_SWEEP = [2, 4, 6, 8, 12, 16, 20]
 TUNED_BANDS, TUNED_ROWS = 64, 2
 MISTUNED_BANDS, MISTUNED_ROWS = 32, 4
+NOISE_KIND = "noise"
 
 
 def pair_kind(docs_by_id: dict[str, Doc], pair: tuple[str, str]) -> str:
+    """Which comparison a duplicate pair actually is.
+
+    The `noise` mutation only swaps case and doubles spaces, both of which
+    `normalize` undoes, so a noise mutant shingles identically to its base
+    and `X--noise vs X--typo` is the `X vs X--typo` comparison restated.
+    Those pairs get their own category rather than padding the compounded
+    one with 96 copies of rows printed above it.
+    """
     a, b = docs_by_id[pair[0]], docs_by_id[pair[1]]
     if a.kind == "base":
         return b.kind
     if b.kind == "base":
         return a.kind
+    if NOISE_KIND in (a.kind, b.kind):
+        return "noise+mutant"
     return "mutant-mutant"
 
 
@@ -66,7 +77,7 @@ def recall_by_kind(
 
 def print_kind_recall(label: str, by_kind: dict[str, tuple[int, int]]) -> None:
     print(f"  recall by pair kind, {label}:")
-    kinds = [*MUTATIONS.keys(), "mutant-mutant"]
+    kinds = [*MUTATIONS.keys(), "noise+mutant", "mutant-mutant"]
     for kind in kinds:
         hit, total = by_kind[kind]
         print(f"    {kind:>14}: {hit:>3}/{total:<3} ({hit / total:.3f})")
@@ -101,14 +112,22 @@ def main() -> None:
             f"min {vals[0]:.3f}  max {vals[-1]:.3f}"
         )
     cross = sorted(
-        exact[p]
-        for p in truth
-        if docs_by_id[p[0]].kind != "base" and docs_by_id[p[1]].kind != "base"
+        exact[p] for p in truth if pair_kind(docs_by_id, p) == "mutant-mutant"
+    )
+    noise_cross = sorted(
+        exact[p] for p in truth if pair_kind(docs_by_id, p) == "noise+mutant"
     )
     print(
         f"  mutant vs mutant : mean {sum(cross) / len(cross):.3f}  "
         f"min {cross[0]:.3f}  max {cross[-1]:.3f}   ({len(cross)} pairs)"
     )
+    print(
+        f"  noise vs mutant  : mean {sum(noise_cross) / len(noise_cross):.3f}  "
+        f"min {noise_cross[0]:.3f}  max {noise_cross[-1]:.3f}   "
+        f"({len(noise_cross)} pairs, noise is a normalization no-op so each "
+        f"one restates a base-vs-mutant row above)"
+    )
+    dup_floor = min(exact[p] for p in truth)
     nondup = [(exact[p], p) for p in pairs if p not in truth]
     hardest_val, hardest_pair = max(nondup)
     ha, hb = docs_by_id[hardest_pair[0]], docs_by_id[hardest_pair[1]]
@@ -200,7 +219,7 @@ def main() -> None:
                 f"  the mistuned banding never sees {len(missed)} of brute "
                 f"force's {len(brute)} pairs: its 50% collision threshold "
                 f"({halfway_threshold(bands, rows):.3f}) sits above the "
-                f"lowest duplicate jaccard ({cross[0]:.3f})"
+                f"lowest duplicate jaccard ({dup_floor:.3f})"
             )
             print_kind_recall(
                 f"mistuned b={bands} r={rows}",

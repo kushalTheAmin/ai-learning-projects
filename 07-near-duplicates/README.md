@@ -22,7 +22,7 @@ no api key, no network, stdlib plus pytest. runs in about half a second.
 
 corpus: 24 base docs x 5 mutations, 144 docs, 10296 pairs, 360 true duplicate pairs.
 
-separability first. exact jaccard on 3-word shingles puts every duplicate pair at 0.280 or above (mutant vs mutant pairs compound two mutations, so they sit lowest) while the hardest non-duplicate lands at 0.024 — cache-03 (thundering herd) against ratelimit-03 (retry hints), which is a cross-topic pair, not a same-topic one. the hardest pair that really does share a topic is index-02 vs index-03 at 0.011, less than half of it. the means say the same thing in the other direction: same-topic non-duplicates average 0.0005 over 864 pairs, cross-topic 0.0001 over 9072 — sharing a topic does move you up, 5x, but 5x of nearly nothing, and one shared turn of phrase across two topics clears the whole same-topic ceiling. topical overlap is nearly invisible at the shingle level either way; two docs about caching share vocabulary but almost no 3-word sequences. so a threshold of 0.2 gives brute-force exact jaccard precision 1.000, recall 1.000 on this corpus, and the interesting question becomes what the approximations lose.
+separability first. exact jaccard on 3-word shingles puts every duplicate pair at 0.280 or above (the pairs that genuinely compound two mutations sit lowest, mean 0.499 over 144 pairs; the other 96 mutant-vs-mutant pairs have a noise mutant on one side and noise is a normalization no-op, so each one restates a base-vs-mutant row rather than compounding anything, mean 0.695) while the hardest non-duplicate lands at 0.024 — cache-03 (thundering herd) against ratelimit-03 (retry hints), which is a cross-topic pair, not a same-topic one. the hardest pair that really does share a topic is index-02 vs index-03 at 0.011, less than half of it. the means say the same thing in the other direction: same-topic non-duplicates average 0.0005 over 864 pairs, cross-topic 0.0001 over 9072 — sharing a topic does move you up, 5x, but 5x of nearly nothing, and one shared turn of phrase across two topics clears the whole same-topic ceiling. topical overlap is nearly invisible at the shingle level either way; two docs about caching share vocabulary but almost no 3-word sequences. so a threshold of 0.2 gives brute-force exact jaccard precision 1.000, recall 1.000 on this corpus, and the interesting question becomes what the approximations lose.
 
 minhash estimator error on duplicate pairs, against exact jaccard:
 
@@ -45,7 +45,7 @@ b=16 r= 8: 50% collision at s=0.674  candidates  137 (1.3% of pairs)  dup recall
 b= 8 r=16: 50% collision at s=0.856  candidates   60 (0.6% of pairs)  dup recall 0.167  precision 1.000
 ```
 
-the knob that matters is where the s-curve sits relative to your lowest real duplicate. b=64 r=2 puts its 50% collision point at 0.104, below the 0.280 floor, and its candidate set turns out to be exactly the 360 labeled pairs: verified with exact jaccard it matches brute force (precision 1.000, recall 1.000) with 360 verifications instead of 10296, 3.5% of the comparison work. move one step to b=32 r=4 and the 50% point (0.383) sits above the floor, so 31 true pairs are never generated as candidates and no amount of verification can get them back: recall 0.914, and the per-kind breakdown shows who pays, mutant-vs-mutant pairs at 0.879 and typo pairs at 0.917 while every single-mutation kind above the curve stays at 1.000. lsh recall failures are silent and concentrated in exactly the low-similarity duplicates you probably care about.
+the knob that matters is where the s-curve sits relative to your lowest real duplicate. b=64 r=2 puts its 50% collision point at 0.104, below the 0.280 floor, and its candidate set turns out to be exactly the 360 labeled pairs: verified with exact jaccard it matches brute force (precision 1.000, recall 1.000) with 360 verifications instead of 10296, 3.5% of the comparison work. move one step to b=32 r=4 and the 50% point (0.383) sits above the floor, so 31 true pairs are never generated as candidates and no amount of verification can get them back: recall 0.914, and the per-kind breakdown shows who pays, the genuinely compounded mutant-vs-mutant pairs at 0.812 and typo pairs at 0.917 while every single-mutation kind above the curve stays at 1.000. lsh recall failures are silent and concentrated in exactly the low-similarity duplicates you probably care about.
 
 simhash, one 64-bit fingerprint per document:
 
@@ -74,6 +74,18 @@ minhash + lsh keeps a tunable estimate of jaccard and a tunable candidate curve,
 the ml-adjacent dedup literature and tooling (datasketch, spark minhash) live here, and the project is set arithmetic over big integers, which python does natively with zero dependencies; the whole thing is stdlib plus pytest and runs offline. the typescript version would spend its effort fighting 64-bit integer hashing in a language with 53-bit doubles.
 
 ## fixes
+
+- 2026-09-03 — the `mutant-mutant` category was 40% padding. the `noise`
+  mutation only swaps case and doubles spaces, both of which `normalize`
+  undoes, so all 24 noise mutants shingle identically to their base and
+  `X--noise vs X--typo` is the `X vs X--typo` comparison restated - 96 of the
+  240 pairs, filed under a label the readme read as compounding two
+  mutations. `pair_kind` splits them into `noise+mutant` now. mistuned-lsh
+  recall on the genuinely compounded pairs is 0.812, not the published 0.879;
+  simhash 0.861, not 0.908; separability mean 0.499 over 144 pairs, not 0.577
+  over 240, and its max drops 0.939 → 0.708 (0.939 was the base-vs-shuffle max
+  wearing a noise label). the duplicate floor 0.280 and the 31 missed pairs
+  are unchanged
 
 - 2026-08-28 — the hardest non-duplicate was printed with a hardcoded
   "(same-topic vocabulary overlap)" label and the readme repeated it as "two
