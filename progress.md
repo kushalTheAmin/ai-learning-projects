@@ -173,6 +173,106 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-03] 02 — the pruning section's probe accounting had the sign
+  flipped. the bullet that answers the section's own open question reported the
+  postings skipped by the bounds (68-70% of the common-heavy bill, just under
+  90% of the typical one) and then defended those against the obvious
+  objection: a probe is a binary search that lands on a posting and reads it,
+  so it should be charged too. "even charging a probe as a touched posting the
+  skip stays above 60% and 80%". the 80% is right — typical maxscore is 4907
+  scored plus 3614 probes over a 46950 bill, 18.1% touched and 81.9% skipped,
+  wand 20.0%/80.0%. the 60% is not. common-heavy maxscore is 21794 plus 20882
+  over 68765: 62.1% touched, 37.9% skipped, and wand 63.0%/37.0%. 62.1% is the
+  *touched* share, quoted as if it were the skip — the one number in the
+  bullet that was hand-derived in prose rather than read off a column, and the
+  only stratum where scored and probes are the same order (20882 probes
+  against 21794 postings scored, because maxscore's non-essential lists get
+  probed once per candidate and common-heavy queries surface candidates by the
+  tens of thousands). so the sentence that exists to survive the objection is
+  where the objection actually lands: on common-heavy the pruners give back
+  most of the win, and that is also the honest first half of the wall-clock
+  inversion the next paragraph blamed entirely on interpreter constant factors
+  — 3x on postings scored is 1.6x once probes are charged, before any python
+  overhead is invoked. the fix is one column: `probe_charged_share` in
+  pruning.py and a `+probes` percent beside each pruner's `% of bill`, so the
+  charged bill is read off the table rather than derived, and the three
+  sentences that quoted it corrected. rare-only prints 115.1% there, over 100%,
+  which is the right thing to show — 88 touches against a 77-posting bill, the
+  bookkeeping costing more than the scan it replaced, and the readme already
+  said that stratum was pure overhead without a number for it. new
+  tests/test_probe_charged_bill.py: the share is scored plus probes over the
+  bill, it never reads below the scored share on any stratum, probes take back
+  measurably more of the common-heavy bill than the typical one on a live
+  index, the entry point prints four percents per row, the printed column
+  matches the measured share, and five holding the readme to the corrected
+  claims — the banned old sentence, the four skip figures each recomputed from
+  the readme's own table cell rather than hardcoded, and the table carrying
+  nine numbers per row. matched against whitespace-normalized text so a line
+  wrap cannot make them pass (23's trap). the revert check splits cleanly:
+  reverting pruning.py removes `probe_charged_share` so the whole module fails
+  to import and nothing in it can pass, reverting the readme alone fails
+  exactly the 5 prose tests with the other 151 green. the rare-only row is the
+  one cell the prose test cannot reconstruct from the printed integers — a
+  77-posting bill carries half a posting of rounding on each of three counts —
+  so that test's tolerance is that slack and nothing more, which still catches
+  a swapped column or a flipped sign by tens of points. no measured value
+  moved: every count in every table in the project is character for character
+  what it was, the column is new, and the root index row quotes only the
+  scored column so it needed no change. found and fixed 2026-09-03
+- [medium] 02 — every other `% of bill` in the project is still scored-only,
+  and the fix above establishes that on common-heavy that understates the cost
+  by about half. the k sweep in pruning.py prints "% of bill" at k = 1, 10,
+  100, 1000 without a probes column at all, so the readme's "at k=1 the
+  pruners read a quarter of the bill, at k=1000 they read 60% of it" is the
+  same scored-only currency the strata bullet got wrong, and the k sweep is
+  where the reader is being told the technology stops paying. blockmax_study.py
+  is the same shape twice over: the block size sweep prints probes/q beside a
+  scored-only "% of bill" (at block size 8, 6207 scored and 25907 probes
+  against a 68765 bill — 9.0% printed, 46.7% charged, the widest gap anywhere
+  in the project, because the shallow skip buys its jumps with probes), and the
+  per-stratum table at block size 32 prints no probes column, so bmw's headline
+  6.4% on typical and 17.6% on common-heavy carry the same silence. nothing
+  published is arithmetically wrong — every one of those cells is a correct
+  scored share and the column is labelled "% of bill" identically to the one
+  just corrected — but the headline block-max result ("cuts the floor from
+  29.5% to 9.0%") is the one most exposed to it, since block-max wand's whole
+  mechanism is trading postings read for directory checks and cursor jumps. the
+  same `probe_charged_share` applies unchanged to both scripts; it was left out
+  of this run because it is a second measurement in two more entry points, not
+  the identical one-column change, and it would have widened a fix commit that
+  should read as one intentional change. found 2026-09-03
+- [medium] 02 — the 1M-doc projection is quoted to two significant figures off a
+  quantity that moves by most of its own value. scaling.py prints "at 1,000,000
+  docs the measured slope projects to ~2.0s/query flat vs ~0.36s/query
+  inverted" from a single run's wall clock, and the readme repeats the flat half
+  in prose one screen down ("by 1M docs its ~2.0s per query") without the
+  caveat. three runs on this machine during the 2026-09-03 review gave 2.0/0.36
+  (committed), 2.3/0.66 and 1.6/0.35: the inverted projection nearly doubled
+  between two runs of the same seeded code. the disclosure that exists —
+  "wall-clock numbers are one run on one machine, so expect them to wobble a
+  little run to run" — is true of the ms/q columns, which moved 10-30%, but
+  "a little" does not cover an 80% swing, and a projection extrapolated 31x past
+  the largest measured corpus multiplies whatever noise the slope carries. the
+  work-count columns beside it are seeded and reproduce exactly, which is
+  precisely why a reader takes the whole fenced block as measurement. either the
+  projection gets a range across repeated runs or it drops to one significant
+  figure and says which. everything else in the block is fine and the linear-
+  growth conclusion it supports is not in question. found 2026-09-03
+- [medium] 02 — `InvertedBM25Index.__init__` builds `length_norms` eagerly with
+  `length / self.avg_doc_length`, so a corpus whose docs all tokenize to
+  nothing raises ZeroDivisionError at construction, and it raises at b=0 too,
+  where the length term is multiplied by zero and cannot matter. `BM25Index`
+  takes the same corpus and returns `[]`, because it divides inside the
+  per-term loop and there are no terms to loop over. so the two indexes the
+  project pins as bit-identical — "an optimization that changes results isnt an
+  optimization, its a different system" — disagree on this input by one of them
+  not existing, and `PrunedBM25Index` and `BlockMaxBM25Index` inherit it.
+  latent on every shipped path: `load_corpus` rejects an empty or
+  whitespace-only `text` field, and the synthetic corpora always draw terms, so
+  no committed number is affected and the equivalence counts (38/38, 150/150)
+  are honest. it bites the moment the index is built over anything not from
+  `load_corpus` — the constructor's own signature takes a plain dict. found
+  2026-09-03
 - [fixed 2026-09-02] 01 — the headline row was labelled "feedback retry" and the
   96.7% was credited to the feedback loop, but the harness cannot see feedback
   at all. `ScriptedLLM.complete` pulls the ticket id out of the prompt with one
@@ -1643,7 +1743,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 05-token-streaming | 2026-08-27 |
 | 03-hybrid-search | 2026-08-27 |
 | 04-bpe-tokenizer | 2026-08-27 |
-| 02-retrieval-eval | 2026-08-26 |
+| 02-retrieval-eval | 2026-09-03 |
 
 Note on the first pass: every project in the repo was committed on 2026-08-25,
 so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
@@ -2275,6 +2375,40 @@ it emits, and its readme names the correction rule as a round count instead of
 implying the error text is what lands. one new robustness finding came out of
 the same read, the fence shadowing the extract layer, and is listed open with
 the three that were already there.
+
+02 was reviewed on 2026-08-26 at four modules and came back on 2026-09-03 at
+nineteen: inverted.py, pruned.py, blockmax.py, synth.py and three study scripts
+all landed after that first pass, so this was a first review for most of the
+project rather than a re-read. the exactness contract is the load-bearing claim
+across all of it — three pruning algorithms are sold as returning the flat
+scan's floats, not merely its ranking — and it holds under a differential fuzz
+the committed tests do not attempt: 4000 randomly generated corpora against
+BM25Index, crossing block sizes 1/2/3/8/64, k1 from 0.0 to 2.0, b at 0.0 and
+1.0, vocabularies as small as one term, a third of the docs duplicated verbatim
+so ties are everywhere, queries carrying unknown terms, and k above the
+candidate count — 64,000 comparisons across the inverted, wand, maxscore and
+block-max paths, zero mismatches. the block-max shallow test is the part most
+likely to be subtly wrong and it is not: `pos // block_size` is the block
+holding the cursor, every earlier block ends short of the pivot so the bisect
+lands on the block that must contain any posting for a doc in the skipped
+range, the jump target is clamped to the next cursor's doc so a doc outside the
+pivot set's coverage is never skipped, and the comparison is strictly `<` so a
+doc that ties the k-th score keeps its chance to enter on a smaller id. every
+seeded count in all three studies reproduced exactly — the corpus-size sweep,
+the strata, the bound profile, the block size sweep, both k sweeps — and
+main.py is byte-identical across runs and across PYTHONHASHSEED. the metrics
+are the ones 02 was already clean on: mrr 1-indexed and cut at 10, recall@k
+slicing k, tf-idf on the sklearn weighting, bm25 on lucene's idf.
+
+what was wrong was the one number in the pruning section that was derived in
+prose instead of read off a column, and it was wrong by having the sign
+backwards — the share of the bill the pruners still touch, published as the
+share they skip. the habit worth keeping, and it is the same one 22 and 25
+produced from different directions: the arithmetic a table cannot show is where
+the errors live, and the fix is to make the table show it rather than to
+correct the sentence and leave the derivation in prose. the two findings left
+open are the same scored-only currency in the entry points this fix did not
+touch, and the empty-corpus divergence between the flat and inverted indexes.
 
 ## MECHANISMS
 
