@@ -187,6 +187,77 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-03] 03 — the readme's "the numbers" block is a fenced quote of
+  the entry point's report and it quoted three of the four strategies main.py
+  prints. the missing row is `hybrid (weighted a=0.5)` — the second of the two
+  fusion strategies the concept section announces, and the only one that loses:
+  0.887 mrr@10 overall against rrf's 0.899 and plain dense's 0.897, 0.774 on
+  paraphrase against 0.799 and 0.793, recall@1 0.812 where rrf takes 0.838. so
+  the reader was shown the fusion that wins, told "hybrid rrf has the best
+  mrr@10 and recall@1 overall", and given no way to see that the other fusion
+  is worse than not fusing at all. the weighted numbers appear nowhere else in
+  the readme either — the alpha sweep is mentioned in a bullet but its row is
+  not printed, so a=0.5 has no published value anywhere. same class as the 04
+  and 02 fixes before it: a published table that is a selection off the run
+  rather than the run, with the direction of the selection favourable. the fix
+  is the readme alone, no code and no new measurement: both tables carry the
+  fourth row copied from main.py, and one bullet says where the blend lands and
+  that "fusion helps" on this set is an rrf result rather than a fusion result.
+  new tests/test_readme_numbers.py, 6 tests: it runs main.py, parses both its
+  tables and the readme's fenced block by strategy label, and asserts the label
+  sets are equal and every value matches for the all-queries and paraphrase
+  tables, that exactly one row names the weighted blend and names
+  `DEFAULT_ALPHA` in its label, and that the prose names 0.887 and 0.774 —
+  the last read off whitespace-normalized text so a line wrap cannot make it
+  pass (23's trap). all 6 fail on the old readme and the revert check is clean:
+  restoring README.md alone in a fresh clone fails exactly those 6 and nothing
+  else. the parser resets at a blank line and rejects a label containing ":",
+  or the alpha sweep's own row of eleven numbers reads as a fifth strategy in
+  the paraphrase table. no measured value moved — main.py's output is
+  character-for-character what it was, and the root index row quotes 0.793,
+  0.765 and 0.899, all unchanged. found and fixed 2026-09-03
+- [medium] 03 — `stem` splits a word family whenever the base is four letters
+  ending in e. the -e strip is guarded by `len(word) > 4` while the -ing strip
+  is guarded by `len(word) > 5` and -ed by `len(word) > 4`, so ing/ed can leave
+  a three-letter stem but the -e strip can never reach one: "firing" → "fir"
+  while "fire" and "fires" → "fire", and the same for name/named, type/typing,
+  have/having. use/used/using is worse — three stems for one family, because
+  "use" is short-circuited by the `len <= 3` guard, "used" is too short for the
+  -ed rule and "using" too short for the -ing rule. all four families are in
+  the committed corpus and "fire" is a query term (p05). the stemmer's own
+  docstring promises the opposite ("map morphological variants onto one form"),
+  and the readme's tradeoffs bullet claims it "maps cache/caching/cached
+  together, which is all this corpus needs". not fixed this run because the
+  one-line guard alignment is not a fix: lowering the -e guard to `> 3` merges
+  those four families but also collides three identifier pairs the keyword
+  category exists to protect — core↔cors, pipe↔pip, site↔sit — and measured, it
+  moves dense mrr 0.897 → 0.896 and paraphrase dense 0.793 → 0.792, the wrong
+  way. porter's step 1b restore-e is the canonical answer and it contradicts
+  this stemmer's unconditional trailing-e strip (it would send "stored" → "store"
+  while "store" → "stor", breaking test_morphological_variants_share_a_stem).
+  so this needs a real decision about the stemmer's minimum stem length, not a
+  guard tweak. the 2026-08-27 cascade finding below is the same defect reached
+  through the plural rule instead of the length guards. found 2026-09-03
+- [low] 03 — `main.py` reports a unique best alpha off a tie. the sweep at 0.2
+  and 0.3 is bit-identical (0.8994047619047618 both), as is 0.7 through 1.0
+  (0.8965277777777778 four times), and `max(sweep, key=sweep.get)` returns the
+  first key it meets, so the line prints "best alpha on this query set: 0.2"
+  where the data says 0.2 and 0.3 are indistinguishable. the printed sweep row
+  shows the tie on screen (0.899 twice) and the readme calls the whole thing
+  tea leaves, so nothing downstream is wrong — the one line just states more
+  than it has. found 2026-09-03
+- [low] 03 — `evaluate` and `sweep_alpha` each call `index_corpus`, so a single
+  `main.py` run fits BM25 and the LSA twice over the same 100 docs. wrong in
+  kind rather than slow — the whole run is 1.5 s — but the sweep's docstring
+  says it "runs the retrievers once", which is true only within the sweep.
+  found 2026-09-03
+- [low] 03, 02 — the same metric name counts differently in the two projects.
+  03's `recall_at_k` counts positions, `sum(1 for doc_id in retrieved[:k] if
+  doc_id in relevant)`, while 02's counts distinct ids, `len(set(ranked[:k]) &
+  relevant)`. a ranking carrying the same doc id twice scores above 1.0 in 03
+  and correctly in 02. not reachable today — 03's rankings are argsort
+  permutations and a test pins that they are — but the two definitions are the
+  kind that drift. found 2026-09-03
 - [fixed 2026-09-03] 04 — the baselines section was labelled a matched-vocab
   comparison and is not one. `run_benchmark` sets `word_vocab =
   mixed_bpe.vocab_size` (1659) and printed "=== baselines (word tokenizer at
@@ -1818,7 +1889,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 07-near-duplicates | 2026-08-28 |
 | 06-rate-limiting | 2026-08-28 |
 | 05-token-streaming | 2026-08-27 |
-| 03-hybrid-search | 2026-08-27 |
+| 03-hybrid-search | 2026-09-03 |
 | 04-bpe-tokenizer | 2026-09-03 |
 | 02-retrieval-eval | 2026-09-03 |
 
