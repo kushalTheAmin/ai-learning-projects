@@ -70,6 +70,13 @@ const HAND_PICKED = [
   '{"a": [1, {"b": "x',
   '[{"a":[',
   '{"a": {"b": 1}',
+  // "__proto__" is an ordinary key, not the prototype setter
+  '{"__proto__": {"polluted": true}, "ok": 1}',
+  '{"__proto__": 5}',
+  '{"a": {"__proto__": [1, 2]}}',
+  '{"__proto__": "abc',
+  '{"__proto__": {"x": 1',
+  '{"__proto__": 1, "__proto__": 2}',
   // duplicate keys
   '{"a":1,"a":2',
   '{"a":1,"a":tr',
@@ -278,6 +285,40 @@ describe("view and snapshot contracts", () => {
     (snap.value as { [key: string]: JsonValue })["a"] = "clobbered";
     parser.push("}}");
     expect(parser.view()).toEqual({ status: "complete", value: { a: { b: 1 } } });
+  });
+});
+
+describe('"__proto__" is a key, not the prototype setter', () => {
+  /** The value tree, or a thrown error when the result carries none. */
+  function objectValue(result: PartialResult): { [key: string]: JsonValue } {
+    if (result.status === "unparseable") throw new Error("expected a value");
+    if (typeof result.value !== "object" || result.value === null || Array.isArray(result.value)) {
+      throw new Error("expected an object");
+    }
+    return result.value as { [key: string]: JsonValue };
+  }
+
+  it("lands as an own enumerable property and leaves the prototype alone", () => {
+    const value = objectValue(feed('{"__proto__": {"polluted": true}, "ok": 1}').view());
+    expect(Object.prototype.hasOwnProperty.call(value, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    expect(Object.keys(value)).toEqual(["__proto__", "ok"]);
+    // the pollution read: an inherited "polluted" would answer true here
+    expect((value as { [key: string]: unknown })["polluted"]).toBeUndefined();
+  });
+
+  it("survives snapshot as an own property", () => {
+    const value = objectValue(feed('{"__proto__": {"polluted": true}}').snapshot());
+    expect(Object.prototype.hasOwnProperty.call(value, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+  });
+
+  it("reverts a dangling __proto__ value on the next call, like any other key", () => {
+    const parser = new ResumableJsonParser();
+    parser.push('{"__proto__": "ab');
+    expect(asJson(parser.view())).toBe(asJson(parsePartialJson('{"__proto__": "ab')));
+    parser.push('c"}');
+    expect(asJson(parser.view())).toBe(asJson(parsePartialJson('{"__proto__": "abc"}')));
   });
 });
 

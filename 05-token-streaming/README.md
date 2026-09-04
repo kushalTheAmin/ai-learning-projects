@@ -82,7 +82,7 @@ that, from scratch, and measures each one.
 
 ```
 npm ci
-npm test        # 126 tests
+npm test        # 129 tests
 npm start       # the seven measurements below
 npm run typecheck
 ```
@@ -357,6 +357,12 @@ of the well-formed fixture parse byte-identical to the uncapped reference.
 
 ## fixes
 
+- 2026-09-04 — the resumable parser dropped any key literally named
+  `__proto__` — `container[key] = value` runs the inherited prototype setter,
+  so `{"__proto__": {"x": 1}}` came back as `{}` with the object it was
+  building silently reparented under the streamed value. keys go through
+  `Object.defineProperty` now, same as `JSON.parse` does. no measured number
+  moves, 126 tests → 129
 - 2026-08-27 — the field availability table counted a field as available the
   moment it first parsed, and `filters` first parses as `{}` — so 60.5% said
   you could read filters that werent there yet. table has a second column for

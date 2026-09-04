@@ -47,6 +47,21 @@ type Token =
   | { type: "number"; text: string }
   | { type: "literal"; text: string };
 
+/**
+ * Set an object key the way `JSON.parse` does: a plain own data property.
+ * `container[key] = value` would instead run the inherited `__proto__`
+ * setter for that one key name, silently dropping it from the document and
+ * reparenting the object being built.
+ */
+function setKey(container: { [key: string]: JsonValue }, key: string, value: JsonValue): void {
+  Object.defineProperty(container, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
 const SIMPLE_ESCAPES: { [ch: string]: string } = {
   '"': '"',
   "\\": "\\",
@@ -290,7 +305,7 @@ export class ResumableJsonParser {
       this.root = value;
     } else if (top.kind === "object") {
       if (top.pendingKey === null) return this.fail();
-      top.container[top.pendingKey] = value;
+      setKey(top.container, top.pendingKey, value);
     } else {
       top.container.push(value);
     }
@@ -355,10 +370,10 @@ export class ResumableJsonParser {
       const key = top.pendingKey as string;
       const had = Object.prototype.hasOwnProperty.call(container, key);
       const previous = container[key];
-      container[key] = value;
+      setKey(container, key, value);
       this.viewUndo = () => {
         if (had) {
-          container[key] = previous as JsonValue;
+          setKey(container, key, previous as JsonValue);
         } else {
           delete container[key];
         }
