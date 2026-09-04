@@ -8,8 +8,9 @@ import { dirname, join } from "node:path";
 import { computeCachingReport } from "./caching.js";
 import { runDriftStudy } from "./driftStudy.js";
 import { runExperiment } from "./experiment.js";
+import { loadResultTasks, runResultStudy } from "./resultStudy.js";
 import { loadCities, loadNotes, loadTasks } from "./tasks.js";
-import { renderCachingReport, renderDriftReport, renderReport } from "./report.js";
+import { renderCachingReport, renderDriftReport, renderReport, renderResultReport } from "./report.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +31,13 @@ async function main(): Promise<void> {
     notes,
   });
   console.log(renderDriftReport(driftReport));
+  console.log("");
+  const resultReport = await runResultStudy({
+    tasks: loadResultTasks(join(dataDir, "resultTasks.json")),
+    cities,
+    notes,
+  });
+  console.log(renderResultReport(resultReport));
 }
 
 await main();

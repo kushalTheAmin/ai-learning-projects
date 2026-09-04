@@ -1,0 +1,115 @@
+[
+  {
+    "id": "a-clean",
+    "prompt": "What is double the population of Reykjavík?",
+    "calls": [
+      { "name": "lookup_city", "args": { "city": "Reykjavík" } },
+      { "name": "calc", "args": { "op": "mul", "a": "{last:number}", "b": 2 } }
+    ],
+    "finalTemplate": "doubled population: {last}",
+    "expectedAnswer": "doubled population: 279750"
+  },
+  {
+    "id": "a-lie-lookup",
+    "prompt": "What is double the population of Reykjavík?",
+    "calls": [
+      { "name": "lookup_city", "args": { "city": "Reykjavík" } },
+      { "name": "calc", "args": { "op": "mul", "a": "{last:number}", "b": 2 } }
+    ],
+    "finalTemplate": "doubled population: {last}",
+    "expectedAnswer": "doubled population: 279750",
+    "corruption": { "tool": "lookup_city", "family": "lie" }
+  },
+  {
+    "id": "a-empty-lookup",
+    "prompt": "What is double the population of Reykjavík?",
+    "calls": [
+      { "name": "lookup_city", "args": { "city": "Reykjavík" } },
+      { "name": "calc", "args": { "op": "mul", "a": "{last:number}", "b": 2 } }
+    ],
+    "finalTemplate": "doubled population: {last}",
+    "expectedAnswer": "doubled population: 279750",
+    "corruption": { "tool": "lookup_city", "family": "empty" }
+  },
+  {
+    "id": "a-garbage-lookup",
+    "prompt": "What is double the population of Reykjavík?",
+    "calls": [
+      { "name": "lookup_city", "args": { "city": "Reykjavík" } },
+      { "name": "calc", "args": { "op": "mul", "a": "{last:number}", "b": 2 } }
+    ],
+    "finalTemplate": "doubled population: {last}",
+    "expectedAnswer": "doubled population: 279750",
+    "corruption": { "tool": "lookup_city", "family": "garbage" }
+  },
+  {
+    "id": "a-bomb-lookup",
+    "prompt": "What is double the population of Reykjavík?",
+    "calls": [
+      { "name": "lookup_city", "args": { "city": "Reykjavík" } },
+      { "name": "calc", "args": { "op": "mul", "a": "{last:number}", "b": 2 } }
+    ],
+    "finalTemplate": "doubled population: {last}",
+    "expectedAnswer": "doubled population: 279750",
+    "corruption": { "tool": "lookup_city", "family": "bomb" }
+  },
+  {
+    "id": "a-transient-lookup",
+    "prompt": "What is double the population of Reykjavík?",
+    "calls": [
+      { "name": "lookup_city", "args": { "city": "Reykjavík" } },
+      { "name": "calc", "args": { "op": "mul", "a": "{last:number}", "b": 2 } }
+    ],
+    "finalTemplate": "doubled population: {last}",
+    "expectedAnswer": "doubled population: 279750",
+    "corruption": { "tool": "lookup_city", "family": "transient-garbage" }
+  },
+  {
+    "id": "a-lie-calc",
+    "prompt": "What is double the population of Reykjavík?",
+    "calls": [
+      { "name": "lookup_city", "args": { "city": "Reykjavík" } },
+      { "name": "calc", "args": { "op": "mul", "a": "{last:number}", "b": 2 } }
+    ],
+    "finalTemplate": "doubled population: {last}",
+    "expectedAnswer": "doubled population: 279750",
+    "corruption": { "tool": "calc", "family": "lie" }
+  },
+  {
+    "id": "a-garbage-calc",
+    "prompt": "What is double the population of Reykjavík?",
+    "calls": [
+      { "name": "lookup_city", "args": { "city": "Reykjavík" } },
+      { "name": "calc", "args": { "op": "mul", "a": "{last:number}", "b": 2 } }
+    ],
+    "finalTemplate": "doubled population: {last}",
+    "expectedAnswer": "doubled population: 279750",
+    "corruption": { "tool": "calc", "family": "garbage" }
+  },
+  {
+    "id": "a-transient-calc",
+    "prompt": "What is double the population of Reykjavík?",
+    "calls": [
+      { "name": "lookup_city", "args": { "city": "Reykjavík" } },
+      { "name": "calc", "args": { "op": "mul", "a": "{last:number}", "b": 2 } }
+    ],
+    "finalTemplate": "doubled population: {last}",
+    "expectedAnswer": "doubled population: 279750",
+    "corruption": { "tool": "calc", "family": "transient-garbage" }
+  },
+  {
+    "id": "b-clean",
+    "prompt": "Which notes mention backoff?",
+    "calls": [{ "name": "search_notes", "args": { "query": "backoff" } }],
+    "finalTemplate": "matching notes: {last}",
+    "expectedAnswer": "matching notes: retry backoff notes"
+  },
+  {
+    "id": "b-garbage-search",
+    "prompt": "Which notes mention backoff?",
+    "calls": [{ "name": "search_notes", "args": { "query": "backoff" } }],
+    "finalTemplate": "matching notes: {last}",
+    "expectedAnswer": "matching notes: retry backoff notes",
+    "corruption": { "tool": "search_notes", "family": "garbage" }
+  }
+]

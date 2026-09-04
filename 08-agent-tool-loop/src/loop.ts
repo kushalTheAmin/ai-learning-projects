@@ -14,7 +14,7 @@ import type { Rng } from "../../05-token-streaming/src/rng.js";
 import { costUsd, historyTokens, messageTokens, type Message } from "./messages.js";
 import { invalidArgsGuardKey, unknownToolGuardKey, type GuardKeyKind } from "./guards.js";
 import { scriptedModelTurn, type TaskSpec } from "./model.js";
-import { availableToolNames, formatIssues, type ToolSpec } from "./tools.js";
+import { availableToolNames, formatIssues, isInvalidResult, type ToolSpec } from "./tools.js";
 
 export interface LoopPolicy {
   name: string;
@@ -30,6 +30,13 @@ export interface LoopPolicy {
   guardKey: GuardKeyKind;
   /** Emissions of one guard key that trigger the abort. */
   guardLimit: number;
+  /**
+   * Check successful tool results against the tool's resultSchema before
+   * they enter the history. An invalid result re-executes the tool up to
+   * maxReruns times; still invalid after that fails the task (bad-result).
+   * Absent = every result is trusted as-is, the original behavior.
+   */
+  resultValidation?: { maxReruns: number };
 }
 
 export type FailReason =
@@ -37,7 +44,8 @@ export type FailReason =
   | "feedback-exhausted"
   | "loop-detected"
   | "step-budget"
-  | "wrong-answer";
+  | "wrong-answer"
+  | "bad-result";
 
 export interface TaskOutcome {
   taskId: string;
@@ -57,6 +65,10 @@ export interface TaskOutcome {
   outputTokensPerCall: number[];
   costUsd: number;
   virtualMs: number;
+  /** Tool re-executions forced by an invalid result (result validation only). */
+  resultReruns: number;
+  /** Results still invalid after the rerun budget; each one fails the task. */
+  rejectedResults: number;
 }
 
 export const MODEL_LATENCY_BASE_MS = 600;
@@ -80,6 +92,8 @@ export async function runTask(
   const inputTokensPerCall: number[] = [];
   const outputTokensPerCall: number[] = [];
   let feedbacksThisIntent = 0;
+  let resultReruns = 0;
+  let rejectedResults = 0;
   const invalidEmissions = new Map<string, number>();
 
   const finish = (ok: boolean, extra: Partial<TaskOutcome>): TaskOutcome => ({
@@ -95,6 +109,8 @@ export async function runTask(
     outputTokensPerCall,
     costUsd: costUsd(tokensIn, tokensOut),
     virtualMs: clock.now() - startMs,
+    resultReruns,
+    rejectedResults,
     ...extra,
   });
 
@@ -130,7 +146,20 @@ export async function runTask(
         feedbacksThisIntent = 0;
         toolCalls++;
         await clock.sleep(tool.latencyMs);
-        const result = await tool.run(turn.args);
+        let result = await tool.run(turn.args);
+        if (policy.resultValidation !== undefined) {
+          let rerunsThisCall = 0;
+          while (isInvalidResult(tool, result) && rerunsThisCall < policy.resultValidation.maxReruns) {
+            rerunsThisCall++;
+            resultReruns++;
+            await clock.sleep(tool.latencyMs);
+            result = await tool.run(turn.args);
+          }
+          if (isInvalidResult(tool, result)) {
+            rejectedResults++;
+            return finish(false, { failReason: "bad-result" });
+          }
+        }
         history.push({ role: "tool", result });
         continue;
       }
@@ -188,6 +217,21 @@ export const POLICIES: LoopPolicy[] = [
     guardLimit: DEFAULT_GUARD_LIMIT,
   },
 ];
+
+/**
+ * The guarded policy with result validation on: reruns 0 rejects an invalid
+ * result outright, reruns > 0 gives a flaky upstream that many second
+ * chances before failing the task.
+ */
+export function resultValidationPolicy(maxReruns: number): LoopPolicy {
+  const base = POLICIES.find((p) => p.name === "guarded");
+  if (base === undefined) throw new Error("guarded policy missing");
+  return {
+    ...base,
+    name: maxReruns === 0 ? "guarded+reject" : `guarded+retry${maxReruns}`,
+    resultValidation: { maxReruns },
+  };
+}
 
 /** The signature-keyed variant of the guarded policy, at a given trip limit. */
 export function signatureGuardPolicy(limit: number = DEFAULT_GUARD_LIMIT): LoopPolicy {

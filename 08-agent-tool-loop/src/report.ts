@@ -7,7 +7,9 @@
 import type { CachingReport } from "./caching.js";
 import type { DriftReport } from "./driftStudy.js";
 import type { ExperimentReport } from "./experiment.js";
+import type { TaskOutcome } from "./loop.js";
 import { PRICING } from "./messages.js";
+import { BOMB_CHARS, type ResultReport } from "./resultStudy.js";
 
 function pad(value: string | number, width: number): string {
   return String(value).padStart(width);
@@ -184,6 +186,106 @@ export function renderDriftReport(report: DriftReport): string {
     `original ${o.tasks}-task suite, same seeds: guarded ${o.guardedCompleted}/${o.tasks}, ` +
       `guarded-sig ${o.sigCompleted}/${o.tasks}, ` +
       `${o.divergingTaskIds.length === 0 ? "no task diverges in outcome, calls, or tokens" : `diverging: ${o.divergingTaskIds.join(", ")}`}`,
+  );
+  return lines.join("\n");
+}
+
+const OUTCOME_SHORT: Record<string, string> = {
+  "wrong-answer": "wrong",
+  "loop-detected": "loop",
+  "bad-result": "badres",
+  "feedback-exhausted": "feedex",
+  "step-budget": "budget",
+  "validation-error": "valerr",
+};
+
+function outcomeShort(outcome: TaskOutcome): string {
+  if (outcome.ok) return "ok";
+  return OUTCOME_SHORT[outcome.failReason ?? ""] ?? outcome.failReason ?? "fail";
+}
+
+export function renderResultReport(report: ResultReport): string {
+  const lines: string[] = [];
+  lines.push(
+    `result study: valid args, garbage results ` +
+      `(${report.rows.length} tasks x ${report.policies.length} policies)`,
+  );
+  lines.push(
+    `(one tool per task returns a corrupted value; checkers are zod schemas over the ` +
+      `returned value, a rerun re-executes the tool; policies: ${report.policies.join(", ")})`,
+  );
+  lines.push("");
+  const labels = ["guarded", "+reject", "+retry2"];
+  lines.push(
+    (
+      `task               corruption                     ` +
+      labels.map((l) => `${l.padEnd(8)}${pad("tokens-in", 10)}${pad("reruns", 7)}  `).join("")
+    ).trimEnd(),
+  );
+  for (const row of report.rows) {
+    const corruption = row.family === "none" ? "none" : `${row.family}@${row.target}`;
+    const cells = row.outcomes
+      .map((o) => `${outcomeShort(o).padEnd(8)}${pad(o.tokensIn, 10)}${pad(o.resultReruns, 7)}  `)
+      .join("");
+    lines.push(`${row.id.padEnd(19)}${corruption.padEnd(31)}${cells}`.trimEnd());
+  }
+  lines.push("");
+
+  const outcome = (id: string, policyIdx: number): TaskOutcome => {
+    const row = report.rows.find((r) => r.id === id);
+    if (row === undefined) throw new Error(`no result row for task "${id}"`);
+    return row.outcomes[policyIdx]!;
+  };
+
+  const bombOff = outcome("a-bomb-lookup", 0);
+  const bombRetry = outcome("a-bomb-lookup", 2);
+  lines.push(
+    `bomb pricing: validation off lets the ${BOMB_CHARS}-char value into history and every ` +
+      `later call repays it - ${bombOff.tokensIn} tokens-in over ${bombOff.modelCalls} model ` +
+      `calls before the loop guard fires; the boundary check rejects it unseen at ` +
+      `${bombRetry.tokensIn} tokens-in (${(bombOff.tokensIn / bombRetry.tokensIn).toFixed(1)}x less)`,
+  );
+
+  const transientIds = report.rows
+    .filter((r) => r.family === "transient-garbage")
+    .map((r) => r.id);
+  const okCount = (policyIdx: number): number =>
+    transientIds.filter((id) => outcome(id, policyIdx).ok).length;
+  const retryReruns = transientIds.reduce((acc, id) => acc + outcome(id, 2).resultReruns, 0);
+  lines.push(
+    `transient garbage: off ${okCount(0)}/${transientIds.length} ok, reject ${okCount(1)}/` +
+      `${transientIds.length} (detection without retry converts a wrong answer into a fast ` +
+      `clean failure), retry2 ${okCount(2)}/${transientIds.length} rescued for ${retryReruns} ` +
+      `rerun${retryReruns === 1 ? "" : "s"} total`,
+  );
+
+  const lieRows = report.rows.filter((r) => r.family === "lie");
+  const lieWrongEverywhere = lieRows.every((r) =>
+    r.outcomes.every((o) => !o.ok && o.failReason === "wrong-answer"),
+  );
+  const lieOff = outcome("a-lie-lookup", 0);
+  const cleanOff = outcome("a-clean", 0);
+  lines.push(
+    `lies: ${lieRows.length}/${lieRows.length} wrong answers under every policy` +
+      `${lieWrongEverywhere ? "" : " (UNEXPECTED: some lie outcome differs)"} at clean-run ` +
+      `cost (a-lie-lookup ${lieOff.tokensIn} vs a-clean ${cleanOff.tokensIn} tokens-in); a ` +
+      `plausible wrong number passes every shape check and only the harness's answer key ` +
+      `catches it - production has no answer key`,
+  );
+
+  const lastHopOff = outcome("a-garbage-calc", 0);
+  const lastHopReject = outcome("a-garbage-calc", 1);
+  lines.push(
+    `last hop: garbage@calc under off ships "${(lastHopOff.finalAnswer ?? "").slice(0, 44)}..." ` +
+      `as the final answer (${lastHopOff.failReason}); there is no next call whose arg schema ` +
+      `could catch it, the boundary check turns it into ${lastHopReject.failReason}`,
+  );
+
+  const freeTextRetry = outcome("b-garbage-search", 2);
+  lines.push(
+    `free text: garbage@search_notes passes the min-length checker and ships a wrong answer ` +
+      `even under retry2 (${freeTextRetry.failReason}, ${freeTextRetry.resultReruns} reruns) - ` +
+      `prose has no shape to validate`,
   );
   return lines.join("\n");
 }

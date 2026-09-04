@@ -6,7 +6,10 @@ calls, tokens, dollars and latency. plus a drift study over 10 more tasks where
 the model mutates its broken call every round, asking what a loop guard should
 key on: exact call identity, or the zod issue signature. plus a caching study
 that reprices the same runs under a warm prompt cache and asks how much of the
-loop guard's headline saving survives when replayed history costs a tenth.
+loop guard's headline saving survives when replayed history costs a tenth. plus
+a result study over 11 tasks that flips the failure to the other side of the
+boundary: the args are valid, the tool result comes back corrupted, and the
+question is where that gets caught, if anywhere.
 
 everything model-shaped here is simulated. the "model" is a scripted intent list
 per task: the tool calls a competent model would make, each optionally wrapped in
@@ -247,6 +250,88 @@ output". thats still worth having, but the case for it is no longer about
 input replay, and anyone justifying a loop guard by multiplying history length
 by input price is overstating it by roughly 2x.
 
+## the result extension: valid args, garbage results
+
+every failure priced above happens before a tool runs: zod rejects the call and
+no tool executes. the dual failure mode is the mirror image. the args validate,
+the tool runs, and the result comes back wrong, and the loop hands it to the
+model, which reasons over it as if it were true. this study corrupts one tool
+result per task five ways and measures where each corruption gets caught: at
+the result boundary, one hop later by the next call's arg schema, or never.
+
+the machinery. every tool now carries a result schema, zod again but over the
+returned value: lookup_city must return a bare integer, calc a finite number
+string, fetch_page its status line, and search_notes any nonempty string, which
+is all the shape prose has. the loop grows an optional result validation
+policy: off trusts every result (the original behavior, all prior tables byte
+identical), reject fails the task on the first invalid result, retry2 re-runs
+the tool up to twice before failing. corruption is a wrapper on one tool per
+task: a lie (the true number times 10), an empty string, an html error page
+(garbage), a 20000-char dump (bomb), or garbage on the first execution only
+(transient). the scripted model gained one honest mechanic to make corruption
+travel: an arg written as "{last:number}" copies the previous tool value into
+the next call the way a real model copies results forward, so a garbage result
+becomes a garbage argument one hop later.
+
+```
+task               corruption                     guarded  tokens-in reruns  +reject  tokens-in reruns  +retry2  tokens-in reruns
+a-clean            none                           ok             168      0  ok             168      0  ok             168      0
+a-lie-lookup       lie@lookup_city                wrong          168      0  wrong          168      0  wrong          168      0
+a-empty-lookup     empty@lookup_city              wrong          161      0  badres          17      0  badres          17      2
+a-garbage-lookup   garbage@lookup_city            loop           374      0  badres          17      0  badres          17      2
+a-bomb-lookup      bomb@lookup_city               loop         15341      0  badres          17      0  badres          17      2
+a-transient-lookup transient-garbage@lookup_city  loop           374      0  badres          17      0  ok             168      1
+a-lie-calc         lie@calc                       wrong          168      0  wrong          168      0  wrong          168      0
+a-garbage-calc     garbage@calc                   wrong          177      0  badres          73      0  badres          73      2
+a-transient-calc   transient-garbage@calc         wrong          177      0  badres          73      0  ok             168      1
+b-clean            none                           ok              70      0  ok              70      0  ok              70      0
+b-garbage-search   garbage@search_notes           wrong           76      0  wrong           76      0  wrong           76      0
+```
+
+what the grid says:
+
+- mid-chain garbage is caught anyway, but one hop late and at 22x the price.
+  Number(html garbage) is NaN, the next calc call fails arg validation, the
+  model keeps re-emitting it because the bad value is baked into its copied
+  arg, and the loop guard kills the task at 374 tokens-in. the boundary check
+  exits at 17. same detection, the difference is whether the garbage gets to
+  sit in the history charging rent first
+- the empty string is worse than loud garbage, because Number("") is 0, a
+  perfectly valid argument. the chain computes 0 times 2, ships "doubled
+  population: 0", and no arg schema anywhere objects. quiet garbage slips past
+  the downstream layer that catches loud garbage; only the result boundary
+  sees it
+- the bomb is a token bill, not just a wrong answer: 15341 tokens-in with
+  validation off, because every model call after the corruption re-reads the
+  20000-char value in history, against 17 tokens-in when the boundary rejects
+  it unseen. thats 902.4x, the strongest single argument for checking results
+  before they enter the conversation
+- the last hop has no downstream net. garbage@calc goes straight into the
+  final answer ("doubled population: <!doctype html>...") because there is no
+  next call whose arg schema could object. interior edges of a chain get a
+  free second check from the next call's validation; the final edge gets
+  nothing unless the boundary checks it
+- retry earns its keep only on transient garbage: reject and retry2 both catch
+  it, but reject converts a wrong answer into a fast clean failure (17
+  tokens-in) while retry2 converts it into a success (168 tokens-in, 1 rerun).
+  on persistent garbage the 2 reruns are pure waste, 2 extra tool executions
+  before the same bad-result
+- lies beat everything. the true population times 10 is a bare integer like
+  any other, passes the result schema, flows through calc, and ships a
+  confident wrong answer under all three policies at exactly clean-run cost
+  (168 tokens-in, same as a-clean). the harness catches it only because it
+  holds the answer key, and production has no answer key. so does free-text
+  garbage: search_notes results have no shape to check, and the html page
+  sails through min(1) under every policy
+
+the corruption families and their rates are authored, like every flaw in this
+project, so the grid prices mechanisms, not the wild. what it demonstrates is
+structural: arg validation, however strict, only guards the edges between
+calls, and the two failure shapes that actually ship wrong answers (plausible
+lies, corrupted free text) are exactly the ones no schema can see. shape
+checking results is cheap insurance against loud garbage and token bombs, and
+it is not a groundedness check.
+
 ## tradeoffs and where it breaks
 
 - the feedback cap and the guard threshold are both blunt. 6 rounds is generous
@@ -317,6 +402,19 @@ holds the message-passing honest end to end.
 - error message quality is untested: the scripted model corrects on any
   feedback, but a real model corrects better on some phrasings. an ablation
   needs a real model in the loop
-- tool results here are always well-formed. the dual failure mode, valid args
-  but garbage results the model then reasons over, is unmeasured and probably
-  costs more
+- the result schemas are static per tool, and the prose one is vacuous by
+  necessity. the missing layer for free-text results is checking the answer
+  against the query on the way out, a groundedness-shaped check
+  (12-groundedness-scoring has the machinery), and its price per tool call is
+  unmeasured
+- lies are invisible to shape checks by construction. a range or sanity layer
+  (a city population times 10 lands outside any real city) would catch gross
+  lies, at an unmeasured false-positive cost on honest outliers
+- the rerun budget faces the same problem as the guard limit: transient
+  garbage here clears after exactly one rerun, so retry2 wins by construction.
+  with rerun success drawn from a distribution the right budget is a quantile
+  of it, which needs real upstream flake data
+- the bomb was rejected outright at 20000 chars. truncating it instead would
+  keep the call's information at a bounded token price, and where the
+  crossover sits between truncate-and-continue and reject-and-fail is
+  unmeasured
