@@ -66,9 +66,16 @@ export class AimdPacer {
     this.bucket = new TokenBucket(opts.initialRatePerSec, opts.burst, clock);
   }
 
+  /**
+   * The rate the pacer would send at right now. A pure read: committing the
+   * growth here would refill the token bucket at an extra instant, and because
+   * the rate is moving, splitting one refill interval into two accrues a
+   * different number of tokens. A diagnostic trace must not change the run it
+   * samples, so the growth is computed and not banked.
+   */
   currentRatePerSec(): number {
-    this.applyGrowth();
-    return this.rate;
+    const elapsedSec = Math.max(0, (this.clock.now() - this.growthAnchorMs) / 1000);
+    return Math.min(this.opts.maxRatePerSec, this.rate + elapsedSec * this.opts.increasePerSec);
   }
 
   async acquire(): Promise<void> {

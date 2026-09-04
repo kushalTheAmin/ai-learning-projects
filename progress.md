@@ -188,6 +188,80 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-04] 06 — the aimd rate trace was a diagnostic instrument that
+  changed the run it measured, so every published aimd number was an artifact
+  of the sampling interval. `AimdPacer.currentRatePerSec()` called
+  `applyGrowth()`, which is a mutator: it banks the elapsed growth into
+  `this.rate`, advances `growthAnchorMs`, and calls `bucket.setRate()`, whose
+  first act is `refill()` at the pre-growth rate. token accrual under a moving
+  rate is path-dependent — `refill()` credits the interval at the rate in
+  force when it runs — so splitting one refill interval into two by reading
+  the rate in the middle accrues a different number of tokens than not reading
+  it. `runPacingStudy`'s trace sampler fires `traceIntervalMs` apart purely to
+  record the rate, and `pacing-main.ts:171`, `header-main.ts:157` and
+  `header-main.ts:281` set it on every drop/rise row, so all three published
+  aimd rows were measured through the instrument. measured on the committed
+  drop scenario: phase-2 429s came out 155 with no sampler, 177 at 5000ms
+  (the committed number), 142 at 1000ms and 149 at 100ms — a 25% spread in a
+  count the readme quotes as the probing bill, plus makespan 85.93s to 86.29s
+  and attempts 1167 to 1189. the header pacer was never affected;
+  `HeaderPacer.currentRatePerSec()` reads the bucket's stored rate and mutates
+  nothing. fixed by making the aimd read pure: compute
+  `min(max, rate + elapsed * increasePerSec)` and return it without banking
+  it, which is the same value `applyGrowth()` would have reported at that
+  instant, so the trace prints what it always meant to print. all seven
+  pre-existing adaptive tests pass unchanged. regression: two tests, one
+  holding the pacer's grant times identical with and without a sampler
+  running, one holding makespan, attempts, 429s and successes identical across
+  trace intervals of none/2000/500/50 for both the aimd and the header pacer;
+  both fail on the old code and the revert check in a clean clone fails
+  exactly those two. numbers moved: aimd's drop row 1189 → 1167 attempts,
+  1.19 → 1.17 att/ok, 4 → 5 phase-1 and 177 → 155 phase-2 429s, 8.04 → 8.05
+  ok/s ph2, 85.99s → 85.93s, and the rise row 1068 → 1071 attempts, 47 → 45
+  and 7 → 10 429s, 19.53 → 19.49 ok/s ph2, 68.05s → 68.12s. the readmes'
+  derived figures moved with them (10.9% → 10.8% tax, 181 → 160 probing 429s,
+  11.0% → 10.8% and 199 → 160 in the header section, 3.7% → 3.8% for
+  hdr-remain-95, 54 → 55 cuts-era 429s in part 3), and the root index row
+  carries the two it quotes. the header extension's "one honesty note" is
+  gone with it: it explained the aimd row differing between the pacing and
+  header tables (85.99s vs 86.06s, 177 vs 195 phase-2 429s) as the server's
+  extra header-time refills changing the float accumulation path. that was
+  the wrong culprit — with the read made pure the two tables produce the
+  identical aimd row, digit for digit, so the gap was the sampler all along.
+  156 tests → 158.
+- [low] 06 — every multi-seed aggregate in the project draws its server stream
+  and its client streams from overlapping seeds, so the runs it averages are
+  not independent. each scenario builds the server rng as `createRng(seed)`
+  and client i's as `createRng(seed + 1 + i)` (`experiment.ts:73,100`,
+  `outage.ts:108,132`, `breaker-study.ts:121,143`, `pacing-study.ts:111,163`),
+  and the sweeps step the seed by 1: outage study 1 runs seeds 42-46, rolling
+  study 2 runs 1000-1019. so run 1000's client 0 draws the exact stream run
+  1001's server draws. the streams drive different things (backoff jitter vs
+  latency and faults) so the coupling is weak, and mulberry32's states never
+  coincide across two runs, but "20 seeds per cell" and the 5-seed makespan
+  mean are quoted as independent replicates and they are not quite that.
+  striding the seeds (or offsetting the client base by a constant well past
+  the client count) makes them independent; nothing in the published
+  conclusions looks likely to move.
+- [low] 06 — a settle that arrives after the breaker re-closed is recorded as
+  fresh evidence at the wrong instant. `GatedBreaker.settle` drops stragglers
+  while `isOpen` (`breaker.ts:124`), which covers the documented case, but a
+  request admitted before a trip can also land after a half-open probe has
+  closed the gate, and then it is fed to `recordSettle` like a new outcome —
+  for the rolling detector, stamped `clock.now()` instead of the instant it
+  actually settled. two such stale failures re-trip a healthy k=2 breaker
+  immediately, verified by hand. the gate has no way to tell them apart
+  because the caller's gate token carries no admission time; carrying one
+  would let both detectors either drop or correctly date them. no published
+  number is affected — the studies' scenarios settle within the cooldown.
+- [low] 06 — `runPacingStudy` validates a rate schedule's `atMs` but not its
+  `ratePerSec` (`pacing-study.ts:92-100`), and applies the schedule from a
+  floating `void clock.sleep(...).then(...)` (`pacing-study.ts:132`). a
+  non-positive rate therefore throws inside `TokenBucket.setRate` where
+  nothing observes it: the rejection is swallowed, the rate change silently
+  does not happen, and the study returns a full result as if the schedule had
+  been honored. no committed study passes one, so this misreports only a
+  caller error, but it misreports it as a clean run.
 - [fixed 2026-09-04] 05 — the resumable parser silently dropped any object key
   literally named `__proto__`. `attachValue` and `attachForView` both wrote
   with `container[key] = value`, which for that one key name runs the
@@ -2117,6 +2191,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
+| 06-rate-limiting | 2026-09-04 |
 | 01-structured-output | 2026-09-02 |
 | 22-rag-vertical-slice | 2026-09-02 |
 | 26-reranking | 2026-09-02 |
@@ -2138,7 +2213,6 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 09-concurrency | 2026-08-28 |
 | 08-agent-tool-loop | 2026-08-28 |
 | 07-near-duplicates | 2026-09-03 |
-| 06-rate-limiting | 2026-08-28 |
 | 05-token-streaming | 2026-09-04 |
 | 03-hybrid-search | 2026-09-03 |
 | 04-bpe-tokenizer | 2026-09-03 |

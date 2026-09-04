@@ -118,6 +118,74 @@ describe("runPacingStudy", () => {
     expect(oracle.phase2OkPerSec!).toBeLessThanOrEqual(4.5);
   });
 
+  it("the rate trace does not change the run it samples, at any interval", async () => {
+    // Every published adaptive row is measured with traceIntervalMs set. If the
+    // sampler perturbs the run, those attempt and 429 counts are artifacts of
+    // how often the instrument reads the rate.
+    const base = makeOpts({
+      clients: 4,
+      requestsPerClient: 25,
+      faultRate: 0.05,
+      rateSchedule: [{ atMs: 3000, ratePerSec: 3 }],
+      phaseBoundaryMs: 3000,
+    });
+    const specs = [
+      [
+        "aimd",
+        {
+          kind: "aimd",
+          opts: {
+            initialRatePerSec: 2,
+            minRatePerSec: 1,
+            maxRatePerSec: 40,
+            increasePerSec: 2,
+            decreaseFactor: 0.6,
+            holdOffMs: 500,
+            burst: 2,
+          },
+        },
+      ],
+      [
+        "hdr-remaining",
+        {
+          kind: "header",
+          opts: {
+            mode: "remaining-only",
+            initialRatePerSec: 2,
+            minRatePerSec: 1,
+            maxRatePerSec: 40,
+            headroom: 1,
+            burst: 2,
+          },
+        },
+      ],
+    ] as const;
+    for (const [name, spec] of specs) {
+      const opts = spec.kind === "header" ? { ...base, advertiseRateHeaders: true } : base;
+      const untraced = await runPacingStudy(name, spec, opts);
+      expect(untraced.rateTrace).toBeUndefined();
+      for (const traceIntervalMs of [2000, 500, 50]) {
+        const traced = await runPacingStudy(name, spec, { ...opts, traceIntervalMs });
+        expect(traced.rateTrace!.length).toBeGreaterThan(1);
+        expect({
+          interval: traceIntervalMs,
+          makespanMs: traced.makespanMs,
+          totalAttempts: traced.totalAttempts,
+          count429: traced.count429,
+          phase2Count429: traced.phase2Count429,
+          succeeded: traced.succeeded,
+        }).toEqual({
+          interval: traceIntervalMs,
+          makespanMs: untraced.makespanMs,
+          totalAttempts: untraced.totalAttempts,
+          count429: untraced.count429,
+          phase2Count429: untraced.phase2Count429,
+          succeeded: untraced.succeeded,
+        });
+      }
+    }
+  });
+
   it("aimd converges instead of storming: fewer 429s than a stale fixed rate after a drop", async () => {
     const opts = makeOpts({
       clients: 4,

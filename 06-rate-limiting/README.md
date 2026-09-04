@@ -587,13 +587,13 @@ unpaced        96.2%       3280     3.41      1281      1023      20.23       7.
 fixed-20       97.4%       2091     2.15        71      1034      20.33       7.52     78.39s
 fixed-8       100.0%       1010     1.01         0         0       8.63       8.01    122.55s
 oracle         98.9%       1088     1.10        71        17      20.33       7.97     77.54s
-aimd           99.9%       1189     1.19         4       177      18.30       8.04     85.99s
+aimd           99.9%       1167     1.17         5       155      18.30       8.05     85.93s
 ```
 
 the aimd rate trace, sampled every 5s (34 cuts taken over the run):
 
 ```
-t=0s 4.0  t=5s 14.0  t=10s 24.0  t=15s 13.8  t=20s 23.8  t=25s 23.4  t=30s 23.6  t=35s 5.7  t=40s 9.4  t=45s 7.8  t=50s 6.0  t=55s 7.9  t=60s 9.8  t=65s 7.7  t=70s 10.2  t=75s 8.0  t=80s 10.0  t=85s 7.8
+t=0s 4.0  t=5s 14.0  t=10s 24.0  t=15s 13.8  t=20s 23.8  t=25s 23.4  t=30s 23.6  t=35s 5.8  t=40s 5.7  t=45s 7.6  t=50s 9.5  t=55s 7.5  t=60s 9.4  t=65s 7.3  t=70s 10.0  t=75s 7.6  t=80s 9.6  t=85s 7.6
 ```
 
 reading it:
@@ -603,10 +603,10 @@ reading it:
   retry burnout. fixed-8 never gets rejected and never fails, but leaves
   11.37 req/s of phase-1 capacity unused and takes 122.55s, half again the
   ideal
-- aimd knows neither rate and pays a 10.9% makespan tax over the oracle
-  (85.99s vs 77.54s). the probing bill is 181 429s against unpaced's 2304.
+- aimd knows neither rate and pays a 10.8% makespan tax over the oracle
+  (85.93s vs 77.54s). the probing bill is 160 429s against unpaced's 2304.
   the tax lives almost entirely in phase 1 (18.30 vs 20.33 ok/s, the ramp
-  from 4 req/s plus the sawtooth troughs), not phase 2 (8.04 vs 7.97): once
+  from 4 req/s plus the sawtooth troughs), not phase 2 (8.05 vs 7.97): once
   converged, probing costs nearly nothing, and the trace shows convergence
   to the new 8 req/s budget within one 5s sample of the drop
 - the surprise: the informed client is not the safe one. the oracle paces
@@ -641,12 +641,9 @@ admission control tells you nothing about its rate. two new clients read them:
   one bit, capacity is at least my send rate, so they drive an additive probe
   (2 req/s per second, same as aimd) instead of an estimate update
 
-both start blind at 4 req/s like aimd. one honesty note: turning headers on
-makes the server refill its bucket at extra instants, which changes the
-floating point accumulation path, so the aimd reference row here differs in
-its last digits from the pacing table (85.99s there, 86.06s here, 177 phase-2
-429s there, 195 here). same configuration, same dynamics, different rounding
-path; each table reproduces itself exactly.
+both start blind at 4 req/s like aimd. the aimd reference row below is the
+pacing table's row to the digit - 1167 attempts, 5 and 155 429s, 85.93s -
+so the two tables read against each other directly.
 
 ### part 1: the drop scenario, now with headers (`npm run start:headers`, seed 42)
 
@@ -655,18 +652,18 @@ strategy         success   attempts   att/ok   429 ph1   429 ph2   ok/s ph1   ok
 -------------------------------------------------------------------------------------------------
 unpaced            96.2%       3280     3.41      1281      1023      20.23       7.56     76.94s
 oracle             98.9%       1088     1.10        71        17      20.33       7.97     77.54s
-aimd              100.0%       1207     1.21         4       195      18.30       8.05     86.06s
+aimd               99.9%       1167     1.17         5       155      18.30       8.05     85.93s
 hdr-limit         100.0%       1011     1.01         0         0      20.10       8.03     79.47s
 hdr-remaining      99.1%       1269     1.28         0       269      18.03       8.10     85.57s
 hdr-remain-95     100.0%       1011     1.01         0         0      17.57       7.99     89.23s
 ```
 
-- trusting the limit header cuts aimds 11.0% makespan tax over the oracle to
-  2.5% and its 199 429s to zero. one response converts the unknown-budget
+- trusting the limit header cuts aimds 10.8% makespan tax over the oracle to
+  2.5% and its 160 429s to zero. one response converts the unknown-budget
   problem into the oracles problem. the residual 2.5% is the blind 4 req/s
   start before the first response lands
 - the estimator at full throttle was the surprise. it recovers almost none of
-  the makespan tax (10.4%, 85.57s) and takes 269 429s, more than aimds 199.
+  the makespan tax (10.4%, 85.57s) and takes 269 429s, more than aimds 160.
   the makespan cost is the discovery ramp both share, but the 429s are a
   different mechanism: aimds sawtooth spends most of its time below the
   budget and pays in bursts at the peaks, while an estimator that locks onto
@@ -675,7 +672,7 @@ hdr-remain-95     100.0%       1011     1.01         0         0      17.57     
   8.0 is a 429
 - the production shape is estimator plus margin: `hdr-remain-95` paces at 95%
   of the estimate and takes zero 429s, the entire sawtooth skipped, at 89.23s
-  (3.7% over aimd). so the thread's answer is: remaining alone recovers the
+  (3.8% over aimd). so the thread's answer is: remaining alone recovers the
   429 bill entirely, recovers none of the makespan tax, and the two answers
   point in opposite directions. which one you want depends on what a 429
   costs upstream of you
@@ -722,16 +719,16 @@ server at 8 req/s until t=30s, then 20. a raise never sends a 429, so the
 strategy         success   attempts   att/ok   429 ph1   429 ph2   ok/s ph1   ok/s ph2   makespan
 -------------------------------------------------------------------------------------------------
 oracle             99.1%       1117     1.13        16        99       8.57      16.30     75.03s
-aimd              100.0%       1068     1.07        47         7       8.57      19.53     68.05s
+aimd              100.0%       1071     1.07        45        10       8.57      19.49     68.12s
 hdr-limit         100.0%       1014     1.01         0         0       8.13      20.00     67.81s
 hdr-remaining     100.0%       1014     1.01         0         0       8.20      19.51     68.66s
 ```
 
-- hdr-limit reads the raise off the next response (67.81s); aimd (68.05s) and
+- hdr-limit reads the raise off the next response (67.81s); aimd (68.12s) and
   hdr-remaining (68.66s) climb at 2 req/s per second and reach the new budget
   about 6 seconds late, which this backlog absorbs into under a second of
   extra makespan. the difference is what the probing spends: aimd buys its
-  ceiling with 429s (54 of them, 20 cuts), the estimator probes on censored
+  ceiling with 429s (55 of them, 20 cuts), the estimator probes on censored
   full-bucket windows and re-locks from refill arithmetic the moment the
   bucket drains, taking zero
 - the perfectly informed oracle is the slowest row and the only one that
@@ -787,7 +784,7 @@ The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
 
 ```
 npm ci
-npm test               # 156 tests
+npm test               # 158 tests
 npm start              # the main table
 npm run start:outage   # the outage studies
 npm run start:breaker  # the breaker studies
@@ -799,6 +796,12 @@ npm run typecheck
 
 ## fixes
 
+- 2026-09-04 — the aimd rate trace was not a read. `currentRatePerSec` banked
+  the growth it reported, refilling the pacing bucket at an extra instant, and
+  with the rate moving that accrues different tokens - so every published aimd
+  number was an artifact of the sampling interval. now a pure read. aimd's
+  drop row moved 1189 → 1167 attempts, 177 → 155 phase-2 429s, 85.99s → 85.93s,
+  and the two tables' aimd rows now agree exactly instead of by 18 429s
 - 2026-08-28 — the p50/p99 columns only ever covered requests that succeeded,
   with nothing in the table saying so, and success rates run 10.5% to 100%
   down that column - no-retry read 40ms while 89.5% of its requests were

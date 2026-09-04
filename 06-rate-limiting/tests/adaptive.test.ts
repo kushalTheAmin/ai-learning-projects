@@ -115,6 +115,46 @@ describe("AimdPacer", () => {
     expect(gaps[gaps.length - 1]!).toBeLessThan(gaps[0]!);
   });
 
+  it("reading the rate does not advance the pacer: sampled and unsampled grants match", async () => {
+    // currentRatePerSec is a diagnostic read. If it commits growth to the
+    // token bucket, sampling the rate accrues tokens on a different path than
+    // not sampling it, and the trace changes the run it is supposed to watch.
+    const grantsWith: number[] = [];
+    const grantsWithout: number[] = [];
+    const sampledRates: number[] = [];
+    for (const [sample, grants] of [
+      [true, grantsWith],
+      [false, grantsWithout],
+    ] as const) {
+      const clock = new VirtualClock();
+      const pacer = new AimdPacer(
+        makeOpts({ initialRatePerSec: 2, increasePerSec: 20, maxRatePerSec: 1000, burst: 2 }),
+        clock,
+      );
+      let sampling = true;
+      if (sample) {
+        void (async () => {
+          while (sampling) {
+            sampledRates.push(pacer.currentRatePerSec());
+            await clock.sleep(20);
+          }
+        })();
+      }
+      const work = (async () => {
+        for (let i = 0; i < 10; i++) {
+          await pacer.acquire();
+          grants.push(clock.now());
+        }
+      })().finally(() => {
+        sampling = false;
+      });
+      await clock.runUntil(work);
+    }
+    expect(grantsWith).toHaveLength(10);
+    expect(sampledRates.length).toBeGreaterThan(3);
+    expect(grantsWith).toEqual(grantsWithout);
+  });
+
   it("a cut while waiters sleep stretches their remaining wait", async () => {
     const clock = new VirtualClock();
     const pacer = new AimdPacer(
