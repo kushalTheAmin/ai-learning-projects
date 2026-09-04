@@ -84,6 +84,19 @@ export function makeToolCallJson(targetChars: number, seed: number): string {
   return JSON.stringify(doc);
 }
 
+/**
+ * Characters the rescan baseline feeds its scanner over a whole replay:
+ * the sum of the prefix lengths it reparses, one per fragment. Depends only
+ * on the fragment boundaries, so it is exact without running the replay —
+ * which is the only way to state the cost at sizes where the baseline takes
+ * minutes of CPU.
+ */
+export function baselineScanChars(docChars: number, seed: number, maxFragmentChars: number): number {
+  let total = 0;
+  for (const boundary of chunkOffsets(docChars, seed, maxFragmentChars)) total += boundary;
+  return total;
+}
+
 export type ReplayMode = "baseline" | "view" | "snapshot";
 
 export interface ReplayStats {

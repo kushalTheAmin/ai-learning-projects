@@ -82,7 +82,7 @@ that, from scratch, and measures each one.
 
 ```
 npm ci
-npm test        # 129 tests
+npm test        # 141 tests
 npm start       # the seven measurements below
 npm run typecheck
 ```
@@ -156,26 +156,48 @@ fragments of 1 to 24 chars, correctness cross-checked by asserting all modes
 end on identical results. Equivalence first: 300/300 seeded chunkings of the
 fixture arguments match the rescan baseline at every fragment boundary.
 
-| doc chars | fragments | rescan+reparse | resumable view | speedup | snapshot per fragment |
-|---|---|---|---|---|---|
-| 266 | 23 | 0.09ms | 0.03ms | 3.4x | 0.08ms |
-| 1071 | 88 | 0.90ms | 0.16ms | 5.5x | 0.57ms |
-| 8273 | 662 | 41.13ms | 0.71ms | 57.7x | 12.59ms |
-| 65619 | 5264 | 2457.96ms | 3.71ms | 662.5x | 669.45ms |
+The load-bearing column is the work, not the clock — chars fed through a
+scanner to answer the same question after every fragment. These are exact
+and identical every run:
 
-Wall times are medians (50/20/5/3 repeats by row) on the machine that ran
-it and move a few percent run to run; the fragment and character counts are
-exact and reproduce every run. The work counts say why the table looks like
-this: at 65619 doc chars the baseline feeds 172521764 chars through its
-scanner, 2629.1x the document, and then pays roughly the same again in
-`JSON.parse` of the repaired text. The resumable scanner reads 65619 chars,
-1.0x, no reparse. At 1048586 chars the resumable view finishes the whole
-replay in 69.1ms over 84070 fragments, about 0.8µs per fragment; the
-baseline projects to ~629.2s by the n² law (projected, not run, that is ten
-minutes of CPU for one megabyte of streamed JSON).
+| doc chars | fragments | baseline chars scanned | vs the document | resumable chars scanned |
+|---|---|---|---|---|
+| 266 | 23 | 3365 | 12.7x | 266 |
+| 1071 | 88 | 47479 | 44.3x | 1071 |
+| 8273 | 662 | 2721000 | 328.9x | 8273 |
+| 65619 | 5264 | 172521764 | 2629.1x | 65619 |
+
+The baseline pays roughly the same again inside `JSON.parse` of the repaired
+text. The resumable scanner reads each char once and never reparses — 1.0x
+at every size, which is the whole shape of the thing in one column.
+
+The wall clock agrees, one machine, medians of 50/20/5/3 repeats by row:
+
+| doc chars | rescan+reparse | resumable view | snapshot per fragment |
+|---|---|---|---|
+| 266 | 0.07ms | 0.02ms | 0.08ms |
+| 1071 | 0.79ms | 0.16ms | 0.40ms |
+| 8273 | 29.82ms | 0.67ms | 10.55ms |
+| 65619 | 1992.70ms | 4.27ms | 568.73ms |
+
+Those four are one run and the ratio between the two time columns is not a
+property of the code — five runs of this committed code on one machine
+spread the 8273 row from 40.5x to 60.1x and the 65619 row from 452.7x to
+524.8x, and that is five observations, not a bound. The figure this section
+used to publish for that row, read off a single median on another machine,
+sits outside the spread entirely. Two significant figures of speedup is
+noise dressed as a result, so no speedup figure is published here — the
+character counts above are the reproducible claim and they say the same
+thing louder.
+
+At 1048586 chars the resumable view finishes the whole replay in 76.0ms over
+84070 fragments, about 0.9µs per fragment. The same replay costs the
+baseline 44074751901 scanned chars, 42032.6x the document (counted exactly,
+not run — actually running it is minutes of CPU for one megabyte of streamed
+JSON, which is why it is counted).
 
 The snapshot column is the honest asterisk: a deep copy per fragment is
-O(tree) again, so it grows quadratically too, 3.7x cheaper than the
+O(tree) again, so it grows quadratically too — a few times cheaper than the
 baseline at 64KB but the same shape. The win lives in `view()`, and `view()`
 comes with a contract: the value is the parser's live tree, valid until the
 next call, never to be mutated. Cheap reads or owned reads, pick per call.
@@ -357,6 +379,12 @@ of the well-formed fixture parse byte-identical to the uncapped reference.
 
 ## fixes
 
+- 2026-09-04 — measurement 5 published a `speedup` column, a ratio of two
+  wall clocks, at two significant figures — 662.5x at 64KB, and the root
+  index quoted it as a headline. five runs of the same code put that row at
+  452.7x-524.8x here. the column is gone, both readmes lead on the chars fed
+  through a scanner (exact every run), and the 1MB projection states counted
+  work instead of projected seconds. no algorithm changed, 129 tests → 141
 - 2026-09-04 — the resumable parser dropped any key literally named
   `__proto__` — `container[key] = value` runs the inherited prototype setter,
   so `{"__proto__": {"x": 1}}` came back as `{}` with the object it was

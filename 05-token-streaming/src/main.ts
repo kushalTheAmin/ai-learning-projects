@@ -23,7 +23,7 @@ import { AsyncQueue } from "./queue.js";
 import { SseParser } from "./sse.js";
 import { parsePartialJson } from "./partialJson.js";
 import { ResumableJsonParser } from "./resumableJson.js";
-import { makeToolCallJson, replayTimed } from "./resumableBench.js";
+import { baselineScanChars, makeToolCallJson, replayTimed } from "./resumableBench.js";
 import {
   heavyTailedSizes,
   uniformSizes,
@@ -218,12 +218,16 @@ function resumableDemo(): void {
     { target: 8192, repeats: 5 },
     { target: 65536, repeats: 3 },
   ];
-  console.log("cost of a value after every fragment (fragments of 1..24 chars, median of the listed repeats):");
+  // Work first: chars fed through a scanner is exact and identical every
+  // run, so it is what the readme publishes. The wall clock follows, and
+  // the ratio between the two time columns is left for the reader to take
+  // or leave — it moves by more than 2x run to run on one machine.
+  console.log("work per replay, one value after every fragment (fragments of 1..24 chars, exact every run):");
   console.log(
-    `  ${"doc chars".padStart(9)} ${"fragments".padStart(9)} ${"rescan+reparse".padStart(15)}` +
-      ` ${"resumable view".padStart(15)} ${"speedup".padStart(8)} ${"snapshot/frag".padStart(14)} ${"reps".padStart(5)}`,
+    `  ${"doc chars".padStart(9)} ${"fragments".padStart(9)} ${"baseline scan".padStart(13)}` +
+      ` ${"vs doc".padStart(8)} ${"resumable scan".padStart(14)}`,
   );
-  let last65536BaselineMs = NaN;
+  const timings: { json: string; baseline: number; view: number; snapshot: number; repeats: number }[] = [];
   for (const { target, repeats } of rows) {
     const json = makeToolCallJson(target, benchSeed);
     const baseline = replayTimed(json, benchSeed, 24, "baseline", repeats);
@@ -232,29 +236,36 @@ function resumableDemo(): void {
     if (baseline.finalResult !== view.finalResult || baseline.finalResult !== snapshot.finalResult) {
       throw new Error(`final results diverge at ${target} chars`);
     }
-    if (target === 65536) last65536BaselineMs = baseline.ms;
     console.log(
       `  ${String(json.length).padStart(9)} ${String(view.fragments).padStart(9)}` +
-        ` ${`${fmt(baseline.ms, 2)}ms`.padStart(15)} ${`${fmt(view.ms, 2)}ms`.padStart(15)}` +
-        ` ${`${fmt(baseline.ms / view.ms)}x`.padStart(8)} ${`${fmt(snapshot.ms, 2)}ms`.padStart(14)}` +
-        ` ${String(repeats).padStart(5)}`,
+        ` ${String(baseline.charsScanned).padStart(13)}` +
+        ` ${`${fmt(baseline.charsScanned / json.length)}x`.padStart(8)} ${String(json.length).padStart(14)}`,
+    );
+    timings.push({ json, baseline: baseline.ms, view: view.ms, snapshot: snapshot.ms, repeats });
+  }
+  console.log(
+    "  the baseline pays roughly the same again in JSON.parse of the repaired text; the resumable scanner never reparses",
+  );
+  console.log("wall clock on this machine (median of the listed repeats, run-dependent — not a property of the code):");
+  console.log(
+    `  ${"doc chars".padStart(9)} ${"rescan+reparse".padStart(15)} ${"resumable view".padStart(15)}` +
+      ` ${"snapshot/frag".padStart(14)} ${"reps".padStart(5)}`,
+  );
+  for (const row of timings) {
+    console.log(
+      `  ${String(row.json.length).padStart(9)} ${`${fmt(row.baseline, 2)}ms`.padStart(15)}` +
+        ` ${`${fmt(row.view, 2)}ms`.padStart(15)} ${`${fmt(row.snapshot, 2)}ms`.padStart(14)}` +
+        ` ${String(row.repeats).padStart(5)}`,
     );
   }
 
-  const big = makeToolCallJson(65536, benchSeed);
-  const bigBaseline = replayTimed(big, benchSeed, 24, "baseline", 1);
-  console.log(
-    `chars fed to the scanner at ${big.length} doc chars: baseline ${bigBaseline.charsScanned}` +
-      ` (${fmt(bigBaseline.charsScanned / big.length)}x the document, before the same again in JSON.parse),` +
-      ` resumable ${big.length} (1.0x)`,
-  );
-
   const huge = makeToolCallJson(1048576, benchSeed);
   const hugeView = replayTimed(huge, benchSeed, 24, "view", 3);
-  const projected = (last65536BaselineMs * (huge.length / 65536) ** 2) / 1000;
+  const hugeScan = baselineScanChars(huge.length, benchSeed, 24);
   console.log(
     `resumable view at ${huge.length} doc chars: ${fmt(hugeView.ms)}ms over ${hugeView.fragments} fragments;` +
-      ` the baseline projects to ~${fmt(projected)}s by the n² law (projected, not run)`,
+      ` the same replay costs the baseline ${hugeScan} scanned chars, ${fmt(hugeScan / huge.length)}x the document` +
+      ` (counted exactly, not run)`,
   );
 }
 
