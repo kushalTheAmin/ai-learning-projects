@@ -188,6 +188,74 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-04] 05 — the resumable parser silently dropped any object key
+  literally named `__proto__`. `attachValue` and `attachForView` both wrote
+  with `container[key] = value`, which for that one key name runs the
+  inherited `Object.prototype` setter instead of creating a property: the key
+  never appears in the parsed document, and when the streamed value is an
+  object it becomes the prototype of the object being built. so
+  `{"__proto__": {"polluted": true}, "ok": 1}` reads back as `{"ok": 1}` under
+  `JSON.stringify` while `value.polluted` answers `true` through the chain —
+  a property the document never contained, on a tree built out of exactly the
+  kind of attacker-influenced JSON a tool-call argument stream carries. this
+  broke the module's own stated contract ("same answer as `parsePartialJson`
+  for every prefix of a valid JSON document"), since the baseline goes through
+  `JSON.parse`, which creates `__proto__` as an ordinary own data property.
+  the fuzz corpus could never catch it: `makeToolCallJson` builds documents
+  from a fixed WORDS list and a fixed key set, so the string `__proto__` never
+  entered the equivalence check. fixed by routing both writes through
+  `Object.defineProperty` with a plain data descriptor, which is what
+  `JSON.parse` does; `structuredClone` carries the own property through, so
+  `snapshot()` needed no separate change. regression test pins three things
+  the old code got wrong — own enumerable property, untouched prototype, and
+  the dangling-value revert path — plus six `__proto__` documents added to the
+  hand-picked baseline-equivalence corpus. no measured number moves (the
+  bench documents contain no such key), 126 tests → 129.
+- [high] 05 — measurement 5's `speedup` column is a ratio of two wall clocks
+  and the readme prices its variance at "move a few percent run to run". it
+  does not. four runs of the same committed code on the same machine gave the
+  8273-char row 57.7x (the committed number), 110.1x, 69.6x and 52.8x, a 2.1x
+  spread, and the 65619-char row 662.5x, 623.6x, 491.4x, 503.9x. the root
+  readme's index row carries the same two endpoints as headline facts, "3.4x
+  faster at 266 chars rising to 662.5x at 64KB", and the projection sentence
+  ("~629.2s by the n² law") is derived from the same unstable baseline median
+  — observed 485.5s and 514.0s on re-runs. the takeaway the section actually
+  supports is safe (the resumable scanner wins at every size and the gap grows
+  superlinearly) and it already prints the exact, deterministic evidence for
+  it: 172521764 chars scanned vs 65619, 2629.1x. so the fix is to lead on the
+  work counts, quote the ratios as run-dependent with a real observed range,
+  and stop pinning a two-significant-figure speedup in two readmes. found
+  2026-09-04.
+- [medium] 05 — `parsePartialJson` is typed to return a `PartialResult` and
+  documents `unparseable` as its failure answer, but the `complete` branch
+  calls `JSON.parse(text)` outside the try/catch every other path uses. a
+  finished document holding a raw control character inside a string — which
+  `scanPrefix` accepts, since the string branch consumes any character that
+  is not `\` or `"` — throws a `SyntaxError` out of the function instead:
+  `parsePartialJson('{"a":"x\ny"}')` throws today. the resumable parser's
+  docstring already names this as a divergence it deliberately does not copy
+  ("the baseline lets `JSON.parse` throw"), so the behaviour is known one
+  module over and undeclared at the api it belongs to. `runPipeline` calls it
+  on every `tool_args_delta`, so a provider emitting an unescaped control
+  character takes the pipeline down rather than yielding an unparseable
+  snapshot. found 2026-09-04.
+- [medium] 05, 24, 08 — the `__proto__` write mechanism fixed in 05 exists in
+  two other projects and was left alone this run because the change is not
+  identical: `24-extraction-metrics/src/extractors.ts` rebuilds records with
+  `out[key] = child` in `dropLeaves` and `corruptLeaves`, and
+  `08-agent-tool-loop/src/messages.ts` canonicalizes with `sorted[k] = obj[k]`
+  before hashing. neither misreports anything today — both walk authored
+  fixtures whose key sets are fixed and contain no `__proto__` — so this is
+  latent, not live. worth one pass to decide whether the repo wants a shared
+  "set an own key" helper or three independent spot fixes. found 2026-09-04.
+- [low] 05 — measurement 2's "snapshots yielding a value: 35/35" counts a
+  snapshot as yielding a value whenever it is not `unparseable`, and the first
+  argument fragment parses as `{}`. that is the same shape as the field
+  availability overclaim fixed on 2026-08-27 one line further down the same
+  section, which grew a second column precisely because `{}` is not a value a
+  consumer can act on. the design notes do cover it ("dropped keys reappear"),
+  and 35/35 is not load-bearing for any takeaway, so this is a wording
+  cleanup, not a measurement error. found 2026-09-04.
 - [fixed 2026-09-04] 10 — "the retriever never got a chunk worth ranking" was
   never measured and the run refutes it. a split answer has an empty relevant
   set, so `_score_query` short-circuits to `rr, hit1, hitk = 0.0, False, False`
@@ -2028,7 +2096,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 08-agent-tool-loop | 2026-08-28 |
 | 07-near-duplicates | 2026-09-03 |
 | 06-rate-limiting | 2026-08-28 |
-| 05-token-streaming | 2026-08-27 |
+| 05-token-streaming | 2026-09-04 |
 | 03-hybrid-search | 2026-09-03 |
 | 04-bpe-tokenizer | 2026-09-03 |
 | 02-retrieval-eval | 2026-09-03 |
@@ -2805,6 +2873,44 @@ account of who pays for mistuned banding understated the cost by 6.7 points.
 fixed above. the three findings left open are the simhash block quoting 3 of its
 7 sweep rows, the readme abbreviating a mutant pair as its base ids, and
 minhash.py claiming an exactness the modulus does not give it.
+
+05 came back clean on the wire and dirty one layer above it. all 126 tests it
+carried into the review pass (129 after the fix below), typecheck is clean, and
+every exact number in the readme is what
+`npm start` prints today, checked line by line from a fresh clone: the 5185-byte
+420-chunk stream, the five field-availability rows, both queue high-waters (419
+chunks / 5169 bytes and 8 / 149), 300/300 on both fuzz corpora and on the capped
+parser, every row and every column of the byte-budget study, and all seven
+hostile-stream figures in measurement 7 down to the 66560-char retention and the
+1.6%-of-the-poison throw point. the sse parser holds against the whatwg model
+where it claims to: multi-line data joined and the trailing lf removed, a lone
+`data:` dispatching an empty-data event, nul-bearing ids rejected, non-numeric
+retry ignored, and the cr-on-a-boundary case correct in the drain, the discard
+state machine and the pending-lf swallow across an empty feed. the queue's
+admission is sound too — a push behind waiting producers really does defer to
+the line before it checks the budget, so the byte cap cannot reorder, and the
+pending-push branch in `next()` is unreachable rather than wrong (an empty
+buffer always admits, so pendings never outlive an empty buffer).
+
+what was wrong was in the resumable scanner, and it was invisible to every test
+the project had. `container[key] = value` is the ordinary way to build an object
+and it is wrong for exactly one key name: `__proto__` runs an inherited setter
+rather than creating a property. so a streamed `{"__proto__": {...}}` left no
+key behind and reparented the tree instead — the parsed document lost a field
+and gained an inherited one, on a parser whose whole job is reading
+attacker-influenced json off a wire. the equivalence fuzz could not reach it
+because the generator draws keys from a fixed list, which is the same lesson
+07's noise pairs taught from the other side: a corpus only tests the shapes it
+can emit. fixed above, and the same mechanism is logged open in 24 and 08 where
+it is latent rather than live.
+
+the finding worth the next fix run is measurement 5's speedup column. the
+section's conclusion is safe and its deterministic evidence is already on
+screen, but the ratios it publishes are wall-clock quotients labelled as moving
+"a few percent run to run", and four runs put the 8273-char row between 52.8x
+and 110.1x. the root readme carries two of those numbers as headline facts.
+that is the same class of defect as 19's bare gate rates and 16's cost table:
+a number quoted to a precision the measurement does not have.
 
 ## MECHANISMS
 
