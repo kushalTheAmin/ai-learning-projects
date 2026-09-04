@@ -188,6 +188,79 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-04] 10 — "the retriever never got a chunk worth ranking" was
+  never measured and the run refutes it. a split answer has an empty relevant
+  set, so `_score_query` short-circuits to `rr, hit1, hitk = 0.0, False, False`
+  without reading `ranked` at all — the zero is a fact about the containment
+  rule, not about retrieval. the readme's first bullet read it causally
+  ("boundary placement is most of the story ... 17 of those misses are split
+  answers, not ranking failures. the retriever never got a chunk worth
+  ranking") and the root index row went further, "boundary placement decides
+  retrieval before ranking gets a vote". ask the ranking and it did fine: take
+  the chunk holding the largest piece of each split answer, the same chunk the
+  published 71.1% coverage is read off, and at fixed-80 it comes back inside
+  k=5 for 14 of the 17 and at rank 1 for 7 — fixed-40 16 of 27 and 9 at rank 1,
+  fixed-160 8 of 10 and 5 at rank 1. so on this corpus a boundary costs one
+  step less than the table shows: retrieval still hands you the mostly-right
+  chunk four times in five and the metric scores it a total miss. the project
+  had already conceded half of this ("a split is not a total loss ... measuring
+  that needs a model in the loop") and misplaced the line — the reader half
+  needs a model, the retrieval half needed one field and was answerable from
+  the run it already did. the ranks are not tie-fragile: no split answer's best
+  chunk sits in an exact bm25 score tie straddling rank 1 or rank 5 in any of
+  the three fixed configs, and the second-best covering chunk is a distinct
+  smaller number for all 17 at fixed-80 (closest 0.526 against 0.469), so the
+  chunk being ranked is unambiguous. the fix is one measurement and the prose
+  it corrects: `_best_coverage` becomes `_best_covering_chunk` returning the
+  chunk id beside the fraction, `QueryResult` gains `best_chunk_id` and
+  `best_chunk_rank`, and `print_split_autopsy` prints one line per fixed
+  config. new tests/test_split_answers_are_still_retrieved.py, 9 tests: two pin
+  the counts at all three sizes, four hold the field to the ranking it indexes
+  (it points at the chunk the coverage is read off, it is None when bm25 never
+  returns that chunk, and on a non-overlap config where each answer has one
+  relevant chunk it agrees with `reciprocal_rank` exactly), one runs main.py
+  and parses the three printed rows, and two hold both readmes — the retired
+  sentence banned from the project readme's live prose and the root row's
+  "before ranking gets a vote" gone, matched off whitespace-normalized text so
+  a line wrap cannot make them pass (23's trap). the readme ban exempts the
+  `## fixes` section, which quotes the sentence it retired. all 9 fail on the
+  old code and the revert check splits cleanly: reverting evaluate.py and
+  main.py fails the 7 code and output tests with all 65 pre-existing green,
+  reverting the two readmes alone fails exactly the 2 prose tests. no measured
+  number moved — main.py's output differs by exactly three added lines and
+  every character of every table is what it was, so the 8-row table, the split
+  counts, the coverage percentages, the overlap recovery figures and the
+  keyword/paraphrase rows all stand. no other project scores relevance by
+  containment, so nothing to port. found and fixed 2026-09-04
+- [low] 10 — `print_split_autopsy` files all 27 of fixed-40's splits under
+  "answers split by a boundary" and one of them is not: q40's answer is 51
+  words and the window is 40, so no placement of a 40-word window could hold
+  it. the other two sizes are clean (0 answers over 80 words, longest is 51),
+  and at fixed-40 it is 1 of 27, so the direction and the published 67.5% are
+  unaffected — but "split by a boundary" and "too long for the chunk" are two
+  different failure modes with two different fixes (move the boundary vs raise
+  the budget) and the line names only the first. the readme's overlap bullet
+  inherits it: overlap can buy back a misaligned answer and can never buy back
+  an oversized one. found 2026-09-04
+- [low] 10 — one query's mrr@10 is decided by 02's alphabetical tiebreak. at
+  fixed-80, q34's relevant chunk `db-migrations#3` sits in a five-way exact
+  bm25 score tie that straddles the rank-10 cutoff, and `search` sorts on
+  `(-score, doc_id)`, so the chunk wins its rank by being alphabetically first
+  among `db-migrations#3`, `feature-flags#1`, `feature-flags#4`,
+  `log-pipeline#2`, `rate-limit-design#1` rather than by scoring above them.
+  deterministic and reproducible, which is why it never surfaced, but it is
+  arbitrary: reverse the tiebreak and fixed-80's published mrr@10 moves off
+  0.445. one query of 40, and the only such tie in the eight configs — the
+  other cutoff-straddling ties contain no relevant chunk. found 2026-09-04
+- [low] 10 — "bigger chunks trade precision for recall" is a trade the table
+  does not show. every quality column rises monotonically with size in both
+  families (fixed hit@1 0.225 → 0.400 → 0.575, mrr@10 0.263 → 0.445 → 0.640;
+  sentence 0.475 → 0.600 → 0.650 and 0.558 → 0.698 → 0.771), so nothing
+  measured here is given up for the recall. the sentence is probably reaching
+  for context dilution, which the same bullet prices in `ctx w@5` — that
+  reading makes it true, so this is an ambiguous word rather than a false
+  claim, logged rather than rewritten. same shape as the "per word of prompt"
+  item below. found 2026-09-04
 - [fixed 2026-09-03] 07 — the `mutant-mutant` category was 40% padding. the
   `noise` mutation swaps case and doubles spaces; `normalize` casefolds and
   collapses whitespace, so the two cancel exactly and all 24 noise mutants
@@ -1950,7 +2023,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 13-ann-hnsw | 2026-08-29 |
 | 12-groundedness-scoring | 2026-08-29 |
 | 11-prompt-caching | 2026-08-29 |
-| 10-chunking-strategies | 2026-08-29 |
+| 10-chunking-strategies | 2026-09-04 |
 | 09-concurrency | 2026-08-28 |
 | 08-agent-tool-loop | 2026-08-28 |
 | 07-near-duplicates | 2026-09-03 |
@@ -2117,6 +2190,42 @@ numbers the sentence already prints. this one was 1.95x, and the pair that did
 clear 2x was sitting in the same sentence being called "the same trade", so
 the check that catches it is arithmetic on numbers already published, not a
 rerun. it is the cheapest review pass in the repo and nothing else had run it.
+
+10, second pass. everything the first pass verified still holds — all 65
+committed tests pass, the entry point is byte-identical across reruns, and
+every one of the table's 8 rows and the prose numbers behind them match
+`main.py` from a fresh clone, root row included. the chunkers came back clean
+again on the parts the first pass did not reach: window coverage is exact at
+every tail (the break fires on the first window that reaches the last word, so
+no words are dropped and no window repeats), sentence packing flushes a
+sentence longer than its budget as its own oversized chunk rather than cutting
+it, both survive empty, whitespace-only, single-word and unicode input, and
+`split_sentences` drops no non-whitespace text on any of them. the corpus is
+sound where it matters most: 40 queries, 40 distinct answers, each exactly one
+splitter sentence, each occurring exactly once in its home doc and nowhere
+else, so containment is unambiguous. one thing the first pass recorded is
+worth restating with a number — the abbreviation list never fires on this
+corpus. 240 boundary candidates, 239 accepted, and the single rejection
+("i.e. its database") is caught by the uppercase-or-digit check, not by
+`_ABBREVIATIONS`. the guard is right and unit-tested, it is just not
+load-bearing here.
+
+the defect was one level up from the prose defect the first pass found: not a
+sentence contradicted by its own numbers, but a causal sentence with no number
+under it at all. "the retriever never got a chunk worth ranking" was the
+project's explanation for its headline, and the run says the retriever got it
+14 times out of 17. fixed above. three smaller findings came out of the same
+read and are listed open.
+
+worth recording as a habit: when a metric short-circuits, check what it
+skipped. `_score_query` reads `if relevant:` and returns three zeros without
+touching `ranked` — that branch is where the claim "not a ranking failure"
+came from, and it is also the reason nobody could have seen the ranking. a
+zero that is assigned rather than computed is not evidence about the thing it
+is standing in for, and the fix is usually one field, not a new experiment.
+the first pass had even walked past the number: it verified "the ranked list
+is exactly 10 long for all 40 queries in all 8 configs" and never asked what
+was in it for the queries scored zero.
 
 11 came back clean on the cache model and dirty on one denominator. the
 simulated prefix cache matches the published semantics term for term: reads
