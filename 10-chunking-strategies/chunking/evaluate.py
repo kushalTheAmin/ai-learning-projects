@@ -29,7 +29,9 @@ class QueryResult:
     hit_at_1: bool
     hit_at_k: bool
     answer_split: bool  # no chunk of any doc contains the full answer
+    best_chunk_id: str | None  # the chunk holding the largest piece of the answer
     best_coverage: float  # largest fraction of the answer inside any one chunk
+    best_chunk_rank: int | None  # 1-indexed rank of that chunk, None if unranked
     context_words: int  # words in the top CONTEXT_K chunks
 
 
@@ -111,6 +113,7 @@ def _score_query(
     else:
         rr, hit1, hitk = 0.0, False, False
     context = sum(word_count(texts[chunk_id]) for chunk_id in ranked[:CONTEXT_K])
+    best_id, best_coverage = _best_covering_chunk(query, chunks, doc_texts)
     return QueryResult(
         query=query,
         relevant_chunk_ids=relevant,
@@ -119,26 +122,33 @@ def _score_query(
         hit_at_1=hit1,
         hit_at_k=hitk,
         answer_split=not relevant,
-        best_coverage=_best_coverage(query, chunks, doc_texts),
+        best_chunk_id=best_id,
+        best_coverage=best_coverage,
+        best_chunk_rank=(ranked.index(best_id) + 1 if best_id in ranked else None),
         context_words=context,
     )
 
 
-def _best_coverage(query: Query, chunks: list[Chunk], doc_texts: dict[str, str]) -> float:
-    """Largest fraction of the answer's characters inside any single chunk.
+def _best_covering_chunk(
+    query: Query, chunks: list[Chunk], doc_texts: dict[str, str]
+) -> tuple[str | None, float]:
+    """The chunk holding the most of the answer, and how much of it.
 
-    1.0 when some chunk contains the whole answer; below 1.0 it measures
-    how badly a boundary cut the answer — a split is rarely a clean
-    50/50, and the surviving majority piece is what a retriever (and a
-    reader) would still have to work with.
+    Coverage is 1.0 when some chunk contains the whole answer; below 1.0
+    it measures how badly a boundary cut the answer — a split is rarely a
+    clean 50/50, and the surviving majority piece is what a retriever
+    (and a reader) would still have to work with. The chunk is returned
+    alongside so the ranking can be asked whether it surfaced it: a split
+    answer scores zero without the ranking being consulted at all, which
+    is a fact about the metric rather than about retrieval.
     """
     answer_start = doc_texts[query.doc_id].index(query.answer)
     answer_end = answer_start + len(query.answer)
-    best = 0.0
+    best_id, best = None, 0.0
     for chunk in chunks:
         if chunk.doc_id != query.doc_id:
             continue
         overlap = min(chunk.end, answer_end) - max(chunk.start, answer_start)
-        if overlap > 0:
-            best = max(best, overlap / len(query.answer))
-    return best
+        if overlap > 0 and overlap / len(query.answer) > best:
+            best_id, best = chunk.id, overlap / len(query.answer)
+    return best_id, best

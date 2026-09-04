@@ -9,7 +9,7 @@ from pathlib import Path
 
 from chunking.chunkers import fixed_chunks, sentence_chunks
 from chunking.corpus import load_docs, load_queries, validate
-from chunking.evaluate import ConfigResult, evaluate_config
+from chunking.evaluate import HIT_K, ConfigResult, evaluate_config
 from chunking.retrieval import mean
 from chunking.sentences import split_sentences
 
@@ -64,9 +64,15 @@ def print_split_autopsy(results: dict[str, ConfigResult]) -> None:
         )
         if splits:
             coverage = mean([q.best_coverage for q in splits])
+            retrieved = [q for q in splits if q.best_chunk_rank and q.best_chunk_rank <= HIT_K]
+            first = [q for q in splits if q.best_chunk_rank == 1]
             print(
                 f"  split answers still keep {100 * coverage:.1f}% of their text "
                 f"in the best chunk on average"
+            )
+            print(
+                f"  the best chunk was retrieved anyway for {len(retrieved)} of them "
+                f"at k={HIT_K}, {len(first)} at rank 1"
             )
 
     print("\n== does overlap buy the splits back? (fixed-80 base) ==")

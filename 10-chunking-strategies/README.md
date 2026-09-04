@@ -67,8 +67,11 @@ stuff into a prompt if you passed the top 5 chunks along.
 what the table says:
 
 - boundary placement is most of the story. fixed-80 misses 20 queries at k=5
-  and 17 of those misses are split answers, not ranking failures. the retriever
-  never got a chunk worth ranking.
+  and 17 of those misses are split answers, not ranking failures. what fails is
+  the metric, not the ranking — a split answer has an empty relevant set, so it
+  scores zero without the ranking ever being read. ask the ranking anyway and it
+  did fine: take the chunk holding the biggest piece of each split answer and
+  14 of the 17 land in the top 5 anyway, 7 of them at rank 1.
 - sentence packing costs nothing and fixes all of it. same index size (5391
   words, no duplication), 0% splits at every budget, and sentence-80 beats
   fixed-80 on every quality column: hit@5 0.850 vs 0.500, mrr@10 0.698 vs
@@ -81,9 +84,12 @@ what the table says:
   otherwise.
 - a split is not a total loss, which is why real pipelines get away with fixed
   windows. the best chunk still holds 71.1% of a split answer on average at
-  fixed-80. this projects containment metric scores that as zero; a model
-  reading the chunk might still answer from the surviving piece, and measuring
-  that needs a model in the loop.
+  fixed-80, and it is usually in the reading window: at k=5 that chunk comes
+  back for 16 of fixed-40s 27 splits, 14 of fixed-80s 17 and 8 of fixed-160s 10.
+  this projects containment metric scores all of that as zero. so the cost of a
+  boundary is one step smaller than the table makes it look — retrieval mostly
+  still hands you the chunk, and what is left open is whether a model answers
+  from 71% of a sentence, which is the only half that needs a model in the loop.
 - bigger chunks trade precision for recall and you pay for it in context.
   fixed-160 nearly doubles ctx w@5 vs fixed-80 (755.8 vs 388.2, 1.95x) to buy
   its recall, and sentence-160 pays slightly more than double for the same
@@ -96,6 +102,12 @@ what the table says:
 
 ## fixes
 
+- 2026-09-04 — "the retriever never got a chunk worth ranking" was never
+  measured, and the run refutes it: a split answer scores zero because its
+  relevant set is empty, not because the ranking failed. `QueryResult` now
+  carries `best_chunk_rank` and the autopsy prints it — the chunk holding the
+  biggest piece of the answer comes back at k=5 for 14 of fixed-80s 17 splits,
+  7 at rank 1. no measured number moved, the table is unchanged.
 - 2026-08-29 — the context bullet said fixed-160 "more than doubles" ctx w@5
   vs fixed-80, but the two numbers in the same sentence are 755.8 vs 388.2 —
   1.95x, not over 2x. the pair that does more than double is sentence-160 over
@@ -132,9 +144,10 @@ pipelines) is python-first anyway.
 - multi-sentence answers: at what answer length does sentence packing start
   splitting facts too, and does overlap-on-sentences beat overlap-on-words
   there?
-- the containment cliff: how often does a model actually answer correctly from
-  a 71% chunk? needs a model in the loop, and would turn split% from a proxy
-  into a measured cost.
+- the containment cliff: retrieval clears it most of the time — the 71% chunk
+  is in the top 5 for 14 of fixed-80s 17 splits. what is left is the reader:
+  how often does a model actually answer correctly from a 71% chunk? needs a
+  model in the loop, and would turn split% from a proxy into a measured cost.
 - 02s paired bootstrap on these deltas: is hit@5 0.850 vs 0.775 (sentence-80 vs
   fixed-80/ov-20) a real gap on 40 queries or noise?
 - semantic chunking (split where topic shifts, not where the word counter
