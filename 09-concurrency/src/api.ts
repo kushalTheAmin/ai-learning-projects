@@ -90,6 +90,21 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * One call's passage through the admission queue. Every call that joins the
+ * queue leaves it exactly once — admitted to a server slot, or dequeued by an
+ * abort — so the log reconstructs the queue's contents at any past instant:
+ * a call is in the FIFO at t when `queuedAtMs <= t < leftQueueAtMs`.
+ */
+export interface AdmissionRecord {
+  /** Instant the call joined the admission queue. */
+  queuedAtMs: number;
+  /** Instant it left: admitted to a slot, or dequeued by an abort. */
+  leftQueueAtMs: number;
+  /** True when it left by cancellation rather than admission (never served). */
+  cancelled: boolean;
+}
+
 export interface ApiStats {
   calls: number;
   failedCalls: number;
@@ -102,6 +117,8 @@ export interface ApiStats {
   cancelledInQueue: number;
   /** Longest the admission queue ever got, cancelled waiters included while they sat in it. */
   maxQueueDepth: number;
+  /** Every call's queue entry and exit, in exit order. */
+  admissions: AdmissionRecord[];
 }
 
 export class SimulatedApi {
@@ -116,6 +133,7 @@ export class SimulatedApi {
     queueWaitsMs: [],
     cancelledInQueue: 0,
     maxQueueDepth: 0,
+    admissions: [],
   };
 
   constructor(
@@ -170,10 +188,20 @@ export class SimulatedApi {
     } catch (err) {
       if (err instanceof AcquireCancelledError) {
         this.stats.cancelledInQueue++;
+        this.stats.admissions.push({
+          queuedAtMs: queuedAt,
+          leftQueueAtMs: this.clock.now(),
+          cancelled: true,
+        });
         throw new ApiError("cancelled", "call cancelled while queued for a server slot");
       }
       throw err;
     }
+    this.stats.admissions.push({
+      queuedAtMs: queuedAt,
+      leftQueueAtMs: this.clock.now(),
+      cancelled: false,
+    });
     this.stats.queueWaitsMs.push(this.clock.now() - queuedAt);
     this.stats.calls++;
     this.stats.inputTokens +=
@@ -220,6 +248,7 @@ export class SimulatedApi {
     return {
       ...this.stats,
       queueWaitsMs: [...this.stats.queueWaitsMs],
+      admissions: [...this.stats.admissions],
       maxQueueDepth: this.slots.maxQueue(),
     };
   }

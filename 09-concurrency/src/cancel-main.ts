@@ -9,7 +9,14 @@
  * in-service work is unkillable?
  */
 import type { ApiOptions } from "./api.js";
-import { runStorm, summarize, recoveryLagMs, timeline, type StormPolicy } from "./storm.js";
+import {
+  runStorm,
+  summarize,
+  recoveryLagMs,
+  timeline,
+  queueCompositionAt,
+  type StormPolicy,
+} from "./storm.js";
 import { DEFAULT_SEED } from "./experiment.js";
 
 const DIP_START_MS = 20_000;
@@ -76,6 +83,7 @@ async function main(): Promise<void> {
 
   console.log(`\n== experiment 1: the same 15s dip, abandon vs cancel per policy ==`);
   const dipRows: string[][] = [];
+  const queueRows: string[][] = [];
   const timelines = new Map<string, string>();
   for (const policy of POLICIES) {
     for (const mode of MODES) {
@@ -102,6 +110,16 @@ async function main(): Promise<void> {
         lag === undefined ? "NEVER" : seconds(lag),
         seconds(s.drainedAtMs),
         s.usdPer1kDone === undefined ? "-" : `$${s.usdPer1kDone.toFixed(2)}`,
+      ]);
+      const q = queueCompositionAt(result, DIP_END_MS, TIMEOUT_MS);
+      queueRows.push([
+        policy.name,
+        mode.name,
+        String(q.queued),
+        String(q.timedOutAlready),
+        pct(q.timedOutAlreadyPct),
+        String(q.clientGoneAtExit),
+        pct(q.clientGoneAtExitPct),
       ]);
       if (policy.name === "immediate-x4") {
         const bins = timeline(result.records, TIMELINE_BIN_MS, ARRIVAL_WINDOW_MS);
@@ -137,6 +155,17 @@ async function main(): Promise<void> {
         "$/1k ok",
       ],
       dipRows,
+    ),
+  );
+
+  console.log(
+    `\n== the admission queue at the instant the dip ends (t=${seconds(DIP_END_MS)}) ==\n` +
+      `"gone at exit" = still queued now, and the ${TIMEOUT_MS}ms timeout fires before a slot reaches it`,
+  );
+  console.log(
+    table(
+      ["policy", "mode", "queued", "timed out", "share", "gone at exit", "share"],
+      queueRows,
     ),
   );
 

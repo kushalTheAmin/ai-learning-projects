@@ -500,13 +500,41 @@ Two different stories in one table, and telling them apart is the point.
 
 For the sane policies cancellation is a rescue. no-retry goes 66.9% to
 84.4% ok and its recovery lag goes 15.0s to 0.0s: every task arriving after
-the dip ends succeeds. The mechanism is the queue max column. In abandon
-mode the dip leaves 259 requests in the FIFO, two thirds of them ghosts
-whose clients gave up, and the server spends 15 post-dip seconds serving
-the dead before it can serve the living. In cancel mode the queue can hold
-at most one timeout's worth of live attempts, because anything older has
-aborted its way out; the dip ends, the queue is 25 deep instead of 259, and
-the backlog is gone before the next arrival times out. jitter+budget10 gets
+the dip ends succeeds. The mechanism is the queue max column, and the block
+under it says what that queue is made of:
+
+```
+== the admission queue at the instant the dip ends (t=35.0s) ==
+"gone at exit" = still queued now, and the 1000ms timeout fires before a slot reaches it
+         policy     mode  queued  timed out  share  gone at exit   share
+       no-retry  abandon     256        231  90.2%           256  100.0%
+       no-retry   cancel      25          0   0.0%             3   12.0%
+   immediate-x4  abandon    1478       1353  91.5%          1478  100.0%
+   immediate-x4   cancel     125          0   0.0%            90   72.0%
+   fixed-500-x4  abandon    1352       1227  90.8%          1352  100.0%
+   fixed-500-x4   cancel     125          0   0.0%            90   72.0%
+        expo-x4  abandon    1151       1026  89.1%          1151  100.0%
+        expo-x4   cancel     125          0   0.0%            90   72.0%
+      jitter-x4  abandon    1321       1194  90.4%          1321  100.0%
+      jitter-x4   cancel     127          0   0.0%            94   74.0%
+jitter+budget10  abandon     298        271  90.9%           298  100.0%
+jitter+budget10   cancel      27          0   0.0%             4   14.8%
+```
+
+In abandon mode the dip leaves 256 requests in the FIFO at the instant it
+ends — 231 of them, 90.2%, already past their 1000ms timeout, and all 256
+released to a slot too late for anyone to still be waiting. The backlog is
+not mostly dead, it is entirely dead, and the server spends 15 post-dip
+seconds serving it before it can serve the living. That is true of every
+abandon row: the already-dead share never drops below 89.1% and the
+gone-at-exit share is 100.0% in all six. In cancel mode the queue can hold
+at most one timeout's worth of attempts, because anything older has aborted
+its way out — the same instant finds 25 queued with not one of them timed
+out and only 3 that will go dead before a slot arrives, the queue max is 25
+instead of 259, and the backlog is gone before the next arrival times out.
+259 is the run's peak depth and it lands at 35.24s, a fraction after the
+dip ends; 256 is what is actually sitting there when the server speeds back
+up. jitter+budget10 gets
 the same rescue, 60.1% to 84.5% with recovery 21.3s to 0.0s, and lands
 within a rounding error of no-retry cancel. Budget caps the volume, cancel
 caps the queue, and together they turn the 15s outage into exactly a 15s
@@ -729,6 +757,12 @@ extension's backoff policies come from 06-rate-limiting, the seeded rng from
 
 ## fixes
 
+- 2026-09-05 — the cancellation section read the post-dip backlog as "259
+  requests in the FIFO, two thirds of them ghosts whose clients gave up" —
+  two thirds was the ok column next to it, not a ghost share. the api logs
+  queue entry and exit now and experiment 1 prints the split: 256 queued at
+  the dip end, 90.2% already timed out, 100% dead before a slot reaches
+  them. no measured number moved
 - 2026-09-05 — the breaker section closed on "first attempts are 80% of the
   flood" and nothing in the run measured that share. it is 24.4% uncapped,
   95.8% under the budget and 100.0% behind the gate. `summarize` reports it

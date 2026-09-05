@@ -401,6 +401,48 @@ export function summarize(result: StormResult): StormSummary {
   };
 }
 
+export interface QueueComposition {
+  /** Calls sitting in the server's admission FIFO at the instant. */
+  queued: number;
+  /** Of those, the ones whose client timeout had already fired. */
+  timedOutAlready: number;
+  /** Of those, the ones the queue released only after their client had gone. */
+  clientGoneAtExit: number;
+  timedOutAlreadyPct: number;
+  clientGoneAtExitPct: number;
+}
+
+/**
+ * What the admission FIFO is holding at an instant, split by whether anyone is
+ * still waiting for it. A call's client timeout runs from the instant the call
+ * joins the queue, so `timedOutAlready` is the backlog already dead at `atMs`
+ * and `clientGoneAtExit` is the backlog that will be dead by the time a slot
+ * reaches it — the eventual ghost share in abandon mode, and in cancel mode
+ * the share that aborts its way out instead.
+ */
+export function queueCompositionAt(
+  result: StormResult,
+  atMs: number,
+  timeoutMs: number,
+): QueueComposition {
+  let queued = 0;
+  let timedOutAlready = 0;
+  let clientGoneAtExit = 0;
+  for (const a of result.apiStats.admissions) {
+    if (a.queuedAtMs > atMs || a.leftQueueAtMs <= atMs) continue;
+    queued++;
+    if (atMs - a.queuedAtMs >= timeoutMs) timedOutAlready++;
+    if (a.leftQueueAtMs - a.queuedAtMs >= timeoutMs) clientGoneAtExit++;
+  }
+  return {
+    queued,
+    timedOutAlready,
+    clientGoneAtExit,
+    timedOutAlreadyPct: queued === 0 ? 0 : (timedOutAlready / queued) * 100,
+    clientGoneAtExitPct: queued === 0 ? 0 : (clientGoneAtExit / queued) * 100,
+  };
+}
+
 /**
  * Recovery lag: how long after the dip ends the last task failure arrives.
  * A failure arriving within `guardMs` of the arrival horizon means the run
