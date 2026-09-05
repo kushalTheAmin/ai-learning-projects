@@ -225,8 +225,8 @@ Fixed items stay listed with their fix date so the history reads in one place.
   to their pre-fix runs. the root index row quotes no share, so nothing to
   update there, and no other project reports a first-attempt share, so nothing
   to port. found and fixed 2026-09-05
-- [high] 09 — the cancellation section reads the post-dip backlog as one third
-  live and it is essentially all dead. "in abandon mode the dip leaves 259
+- [fixed 2026-09-05] 09 — the cancellation section reads the post-dip backlog
+  as one third live and it is essentially all dead. "in abandon mode the dip leaves 259
   requests in the FIFO, two thirds of them ghosts whose clients gave up" —
   measured on the same seeded run, at the instant the dip ends the FIFO holds
   256 requests of which 231, 90.2%, have already passed their 1000ms timeout,
@@ -242,6 +242,47 @@ Fixed items stay listed with their fix date so the history reads in one place.
   `SimulatedApi`'s admission semaphore, so the fix needs the api to expose the
   split, an admission log of queuedAt/admittedAt being enough; that is how it
   was measured here. found 2026-09-05
+
+  fixed 2026-09-05. every number in the finding reproduced exactly on the
+  seeded run. the fix is one measurement and the prose it corrects.
+  `ApiStats` gains an `admissions` log — one `{queuedAtMs, leftQueueAtMs,
+  cancelled}` record per call, pushed on both exits from the queue, so the
+  FIFO's contents at any past instant are `queuedAtMs <= t < leftQueueAtMs`
+  and cancel mode reconstructs as cleanly as abandon mode.
+  `queueCompositionAt(result, atMs, timeoutMs)` reads it back and splits the
+  backlog two ways: `timedOutAlready` (client already gone at t) and
+  `clientGoneAtExit` (client gone by the time a slot arrived — the eventual
+  ghost share in abandon mode, the abort share in cancel mode). cancel-main
+  prints the split for all twelve rows as a block under experiment 1's table,
+  and the readme quotes it and rewrote the sentence around it. the block is
+  worth more than the one row it was needed for: the already-dead share never
+  drops below 89.1% on any abandon row and gone-at-exit is 100.0% on all six,
+  while every cancel row has exactly 0 already timed out — the depth bound is
+  visible as a composition, not just as a smaller number in the queue max
+  column. the corrected sentence also separates two instants the old one
+  conflated: 259 is the run's peak depth at t=35.24s, 256 is what is sitting
+  in the FIFO when the dip ends. new tests/queue-composition.test.ts, 14
+  tests: three pin the log itself (one record per call with entry before
+  exit and the cancelled count agreeing, the log's own peak depth equal to
+  the semaphore's `maxQueueDepth` swept over every entry instant, empty
+  before the first arrival and after the drain), six pin the measurement
+  (256/231/90.2% and the >80% invariant that refutes the retired claim,
+  100.0% gone-at-exit, the same shape across all four policies, the 256 vs
+  259 instant split, zero already-timed-out on every cancel row, and cancel's
+  25 deep with 3 going dead), two hold the entry point and the readme block
+  character for character, and three hold the prose off whitespace-normalized
+  text so a line wrap cannot make them pass (23's trap), with the `## fixes`
+  section exempt since it quotes the sentence it retired and one test
+  asserting the quote is still there. 137 tests → 151. no measured number
+  moved: `npm start`, `start:flaky`, `start:storm` and `start:storm-breaker`
+  print byte-identical output to their pre-fix runs and `start:cancel` differs
+  by exactly the new block, so every existing table is untouched. the revert
+  check splits cleanly in a fresh clone — reverting src/ alone fails the 11
+  measurement and output tests with all 140 others green, reverting README.md
+  alone fails exactly the 3 prose and block tests. the root index row quotes
+  the 259 → 25 queue max, which is the max column and still right, so nothing
+  to update there. no other project models a server-side queue, so nothing to
+  port.
 - [low] 09 — the breaker entry point prints one column name in two units.
   `fastfail` is `pct(s.fastFailPct)` in experiments 1, 2 and 3 and
   `String(s.fastFailedTasks)` in experiment 4, so the same header reads 14.8%
