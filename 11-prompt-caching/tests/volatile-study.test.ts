@@ -229,13 +229,23 @@ describe("runVolatilePosition", () => {
     }
   });
 
-  it("drops the aware cost monotonically as the volatile block moves deeper", () => {
-    for (let i = 1; i < awareRows.length; i++) {
-      expect(awareRows[i]!.costRatioVsNone).toBeLessThanOrEqual(
-        awareRows[i - 1]!.costRatioVsNone + 1e-12,
+  it("drops the aware cost as the volatile block moves deeper, down to the minimum", () => {
+    const toMinimum = awareRows.slice(0, awareRows.findIndex((r) => r.positionLabel === "42") + 1);
+    for (let i = 1; i < toMinimum.length; i++) {
+      expect(toMinimum[i]!.costRatioVsNone).toBeLessThanOrEqual(
+        toMinimum[i - 1]!.costRatioVsNone + 1e-12,
       );
     }
     expect(awareRows[awareRows.length - 1]!.costRatioVsNone).toBeLessThan(0.35);
+  });
+
+  it("turns back up at the tail, where the last request's write is never read", () => {
+    // the curve is not monotone to the end: the deepest breakpoint on the
+    // final request writes at 1.25x with no later request to read it back
+    const min = awareRows.find((r) => r.positionLabel === "42")!;
+    const tail = awareRows.find((r) => r.positionLabel === "tail")!;
+    expect(tail.costRatioVsNone).toBeGreaterThan(min.costRatioVsNone);
+    expect(min.totals.readTokens).toBe(tail.totals.readTokens);
   });
 
   it("beats the oblivious strategy at every position with a stable prefix to save", () => {

@@ -58,6 +58,8 @@ position final idx  strategy     input     ratio    hit rate  uncached/read/writ
 30       30         aware        $0.0316   0.341x    75.8%    6872/35097/4319
 38       38         incremental  $0.0820   0.886x    31.7%    0/14663/31625
 38       38         aware        $0.0283   0.306x    80.2%    4010/37140/5138
+42       42         incremental  $0.0820   0.886x    31.7%    0/14663/31625
+42       42         aware        $0.0277   0.299x    81.2%    3108/37591/5589
 tail     46         incremental  $0.0820   0.886x    31.7%    0/14663/31625
 tail     46         aware        $0.0279   0.301x    81.2%    2780/37591/5917
 stable   -          incremental  $0.0229   0.255x    86.5%    0/38802/6046
@@ -67,7 +69,7 @@ three findings.
 
 **the curve only exists if placement responds to it.** the oblivious incremental strategy prints the identical row at every position past the static prefix: 0.886x, hit rate 31.7%, at position 2 and at the tail alike. its breakpoints sit at the static prefix and the last block, so the only entry it can ever read back is the 1333-token static prefix, and the moving tail breakpoint writes 31625 tokens of history at 1.25x that nobody will ever read. the volatile blocks position is invisible to it because no breakpoint sits between the static prefix and the poison. and when the block leads the request (position 0 or 1) even the static hit dies and the row lands on the familiar pure-tax number, exactly 1.250x with 0 hits.
 
-**the aware curve falls monotonically toward the stable floor.** 0.722x with the block right after the system prompt, then 0.647x, 0.522x, 0.417x, 0.341x, 0.306x as it moves deeper, 0.301x at the tail, against 0.255x for the same conversation with no volatile block at all. at the tail the aware breakpoint rides just under the block: reads carry the entire history (37591 tokens) and only the volatile block plus the fresh user message bill uncached. so a per-request state block costs almost nothing if it renders last, but the same block rendered right after the system prompt costs $0.0668 against $0.0279, a 2.4x swing from nothing but assembly order. the operational rule falls straight out: render volatile content as late in the request as possible, and put a breakpoint directly in front of wherever it ends up.
+**the aware curve falls steeply, then turns back up just before the tail.** 0.722x with the block right after the system prompt, then 0.647x, 0.522x, 0.417x, 0.341x, 0.306x as it moves deeper — and it bottoms at 0.299x at position 42, not at the tail, which prints 0.301x. against 0.255x for the same conversation with no volatile block at all. the read saturates at 42: reads carry 37591 tokens there and no deeper breakpoint adds one, because what the last request reads back is the entry the request before it wrote, and that entry stopped growing. so past 42 the only thing still moving is the last request's own write — 328 tokens at the tail, billed at 1.25x, that no later request ever reads because there is no later request. that premium is the entire gap: 328 x $2/MTok x 0.25 = $0.000164, exactly $0.0279 minus $0.0277. the same block rendered right after the system prompt still costs $0.0668 against $0.0277, a 2.4x swing from nothing but assembly order, so the operational rule survives with a caveat: render volatile content late and put a breakpoint directly in front of wherever it ends up — the last five positions sit within 0.6% of each other, and the deepest breakpoint on the final request of any conversation is a bet nothing collects on.
 
 **the minimum cacheable prefix can eat your last stable breakpoint.** at position 1 the only stable prefix is the tools block alone, 882 tokens by this estimator, under the 1024-token minimum. the aware strategys one legal breakpoint silently doesnt cache and its row prints exactly 1.000x: placement-aware code did everything right and got nothing, with no error anywhere, because below-minimum prefixes just quietly decline to cache. aware at position 0 prints the same 1.000x for the cleaner reason that nothing stable exists at all, and that 1.000x floor is still cheaper than the oblivious 1.250x, since the worst caching strategy under total volatility is any caching at all.
 
@@ -84,6 +86,13 @@ three findings.
 this is the day-job side of the portfolio: cache accounting is the kind of thing that ships inside a typescript api gateway or agent runtime, and the project imports the token estimator from 08 and the seeded rng from 05 rather than reimplementing either. strict mode, no `any`, exhaustive small tests on the billing arithmetic, since the whole value of a cost model is that the arithmetic binds.
 
 ## fixes
+
+- 2026-09-05 — "the aware curve falls monotonically toward the stable floor"
+  was read off nine sampled positions that step 38 straight to the tail, and
+  the curve turns in the gap — swept at every index it bottoms at 42 and rises
+  back to the tail, the whole rise being the last request's own write at 1.25x
+  that nothing ever reads. the sweep prints position 42 now and the paragraph
+  says why. no existing row moved, new floor 0.299x against 0.301x at the tail
 
 - 2026-08-29 — the volatile header experiment divided by the *stable*
   workload's no-caching cost, so it priced one traffic shape against another

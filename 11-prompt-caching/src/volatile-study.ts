@@ -93,6 +93,9 @@ export const SWEEP_POSITIONS: ReadonlyArray<{ label: string; position: number }>
   { label: "22", position: 22 },
   { label: "30", position: 30 },
   { label: "38", position: 38 },
+  // 42 is where the read saturates: past it the only thing still moving is
+  // the last request's own write, so the curve turns back up before the tail.
+  { label: "42", position: 42 },
   { label: "tail", position: TAIL_POSITION },
 ];
 
