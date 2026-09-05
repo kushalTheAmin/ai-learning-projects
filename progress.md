@@ -188,6 +188,74 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-05] 11 — the position extension published the aware curve as
+  monotone and the tail as its floor, and the curve turns before the tail.
+  "the aware curve falls monotonically toward the stable floor ... 0.301x at
+  the tail" is the second of the extension's three findings and the sentence
+  the operational rule hangs off, and it was read off nine sampled positions
+  whose grid steps 0, 1, 2, 6, 14, 22, 30, 38, tail — a step of 8 that lands
+  on 38 and then jumps clean over the interior to 46. swept at every index the
+  aware curve bottoms at 0.299286x at position 42 and rises monotonically over
+  the last four to 0.301058x at the tail. the mechanism is exact and it is the
+  project's own thesis turned on itself: from 42 on the read saturates at
+  37591 tokens, because what the last request reads back is the entry the
+  request before it wrote and that entry has stopped growing, so no deeper
+  breakpoint can buy another read token. the only thing still moving past 42
+  is the final request's own write — 0 tokens at 42, then 104, 152, 205, 328
+  at the tail — billed at 1.25x and never read, because there is no later
+  request to read it. the gap is that premium and nothing else: 328 x $2/MTok
+  x 0.25 = $0.000164, exactly $0.027871 minus $0.027707, confirmed at all four
+  positions past the minimum. the committed test made it worse rather than
+  catching it — "drops the aware cost monotonically as the volatile block
+  moves deeper" walked `awareRows`, which is the nine sampled rows, so it
+  pinned the sampling and read as if it pinned the curve. found and fixed
+  2026-09-05
+
+  the fix is one sweep position and the prose it corrects. `SWEEP_POSITIONS`
+  gains `{ label: "42", position: 42 }` between 38 and tail, so the printed
+  table shows the minimum sitting above the tail row and the turn is visible
+  in the published output rather than an argument in prose. the readme
+  paragraph now names the minimum, explains the saturation, and prices the
+  rise as the last request's unread write; the operational rule survives with
+  the caveat that the last five positions are within 0.6% of each other. new
+  tests/volatile-tail-turn.test.ts, 17 tests: four pin the turn off a dense
+  scan of every position 0-46 (argmin is 42 not the tail, the tail is strictly
+  more expensive and by more than a printed rounding step, the last four rise
+  monotonically, and the published nine-point grid is monotone over a curve
+  that is not — the finding restated as an invariant), five pin the mechanism
+  (read saturation at 37591 from 42 on, every earlier request's write
+  identical past 42 with only the last one moving, the gap equal to the write
+  premium at all four positions, the 0.6% spread, and the deeper write buying
+  no extra hit or read token), two hold the published sweep, two hold the
+  entry point and its readme block character for character, and four hold the
+  prose off whitespace-normalized text so a line wrap cannot
+  make them pass (23's trap), with the `## fixes` section exempt since it
+  quotes the sentence it retired and one test asserting the quote is still
+  there. the existing monotonicity test was rewritten rather than deleted: it
+  now asserts the fall down to the minimum and a second test asserts the turn,
+  which is the assertion it should always have carried. 79 tests → 97. no
+  measured number moved — every pre-existing row of the sweep is character for
+  character what it was, `npm start` is byte-identical to its pre-fix run, and
+  `npm run start:volatile` differs by exactly the two new rows. the revert
+  check splits cleanly in a fresh clone: reverting src/volatile-study.ts alone
+  fails the 5 sweep, entry-point and turn tests with 92 green, reverting
+  README.md alone fails exactly the 3 prose tests. the root index row sold
+  0.301x at the tail as the cheap end of the swing, so it was updated to the
+  0.299x minimum with the turn noted; the 2.4x swing figure holds either way
+  (0.722/0.299 = 2.41). no other project sweeps a position curve, so nothing
+  to port.
+- [low] 11 — the stable control row is a ratio against a different
+  denominator. every volatile position prices against its own no-caching
+  baseline of 46288 prospective tokens, and the `stable` row prices against
+  the block-free conversation's 44848 — 1440 fewer, exactly the twelve
+  120-token volatile blocks. so the readme's "0.299x ... against 0.255x for
+  the same conversation with no volatile block at all" reads as a placement
+  gap and is partly just the extra tokens in the denominator. the row is
+  labelled a control, the per-position baseline rule is stated directly above
+  the table, and the dollar columns ($0.0277 vs $0.0229) are printed beside
+  the ratios, so it is disclosed rather than claimed — but the two ratios are
+  not on the same scale and the prose sets them side by side as if they were.
+  found 2026-09-05
 - [fixed 2026-09-05] 09 — the breaker extension's closing sentence put a
   number on a share nothing in the run measured. "evidence beats volume
   accounting on this pulse because evidence acts on first attempts too, and
@@ -2399,7 +2467,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 14-context-window | 2026-08-30 |
 | 13-ann-hnsw | 2026-08-29 |
 | 12-groundedness-scoring | 2026-08-29 |
-| 11-prompt-caching | 2026-08-29 |
+| 11-prompt-caching | 2026-09-05 |
 | 10-chunking-strategies | 2026-09-04 |
 | 09-concurrency | 2026-09-05 |
 | 08-agent-tool-loop | 2026-09-05 |
@@ -3269,6 +3337,36 @@ landing twice in one project, and it sharpens into a rule worth keeping: a
 share is the easiest kind of number to write from intuition and the easiest to
 check, so any fraction in prose that no column prints is a finding until it is
 printed.
+
+11 came back clean everywhere except the shape of one curve. this was the
+first look at the position extension, which landed 2026-09-02, four days after
+the base project's only review. all 79 committed tests pass, typecheck is
+clean, both entry points are byte-identical across reruns and from a fresh
+clone, and every number in the readme matches what the two entry points print
+today — the sweep block checked line by line against stdout, every dollar
+figure and ratio in the prose checked against the printed set, mechanically.
+the accounting holds where the study leans on it: the write multipliers are
+exactly 1.25x and 2x and the pure-tax rows land on 1.250x and 2.000x to three
+decimals, reads refresh the ttl with the entry's own ttl rather than the
+request's, the 20-block lookback walks exactly 20, prefix keys are
+length-prefixed so block boundaries cant collide, the tools block really is
+882 tokens against the 1024 floor the position-1 row turns on, and the
+oblivious strategy really does print one identical row at every position past
+the static prefix — checked at all 45 of them, not the seven the table
+sampled. robustness is better than most of the repo: empty request lists,
+empty conversations, a single block, zero-length block text, a fifth
+breakpoint, an unconfigured ttl, and negative or non-integer sweep positions
+all either degrade cleanly or throw a named error.
+
+what was wrong was a claim about a curve read off the points that were
+sampled. the grid steps 38 straight to the tail and the curve turns inside
+that gap, and the committed test walked the same nine sampled rows, so the
+test agreed with the readme about a shape neither of them had looked at. that
+is a new rule worth keeping alongside 09's: a claim about the shape of a curve
+— monotone, flat, a floor, an optimum — is a claim about every point on it,
+so it has to be checked at a resolution the published grid doesnt choose. the
+sampled rows are evidence for the rows; the word "monotonically" is a claim
+about the ones in between.
 
 ## MECHANISMS
 
