@@ -188,6 +188,76 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-05] 08 — the drift section published a failure mechanism the
+  run refutes, and the run had been printing the refutation the whole time.
+  the readme said "rotating three walks past the guard entirely and dies in
+  the feedback cap at 7", the tradeoffs bullet said a rotation "walks past
+  both" keys, and the open questions called the rotate-3 drifter one that
+  "beats both guard keys" — a false premise that was doing real work, since it
+  is what motivated the proposed wasted-budget guard. the signature guard does
+  catch it. `shape-drift-rotate3` under guarded-sig fails `loop-detected` at 7
+  model calls, and the drift table two blocks above the sentence prints
+  `guarded-sig ... loop-detected=8` against `feedback-exhausted=6` for the
+  other two policies — 8 failures, 8 of them the guard, none the cap. measured
+  across the sweep the behaviour is exact arithmetic: a rotation of c distinct
+  signatures trips a limit-L guard on emission (L-1)*c+1, confirmed on all
+  three cycle lengths in the suite (rotate3 c=3: 4 at limit 2, 7 at limit 3;
+  alternate c=2: 3, 5, 7 at limits 2, 3, 4; value-drift c=1: 2, 3, 4, 5, 6 at
+  limits 2-6), with the 6-round feedback cap killing whatever is still running
+  at emission 7. so rotate-3 at limit 3 lands exactly on 7 — a tie with the
+  cap, not an escape. what is true is the price: 7 model calls either way, so
+  the guard buys nothing on that task, which is the observation the sentence
+  was reaching for and got the mechanism wrong. the correction also turned up
+  the other half, which the readme did not have at all: raising the limit is
+  what actually loses the rotation. at limit 4 rotate-3's trip round moves to
+  10, past the cap, so it dies feedback-exhausted and the guard goes blind to
+  it — and that saturation is already derivable from the published sweep,
+  whose stubborn-model-calls column steps +9, +6, +4, +4 rather than +6 a row
+  precisely because both shape drifters stop moving once they hit 7. that is a
+  real caveat on the readme's limit-4 recommendation and it now carries it.
+  the fix is the readme alone, no code and no new measurement — every figure
+  in the section is the one it always was and `npm start` prints
+  character-for-character what it printed before. new
+  tests/rotationIsCaught.test.ts, 10 tests: six pin the run (rotate-3 is
+  loop-detected at 7 under limit 3, the (L-1)*c+1 trip rule across three cycle
+  lengths and five limits, the escape to the cap at limit 4, guarded-sig's
+  failReasons being exactly `{loop-detected: 8}` with no cap failure anywhere,
+  and rotate-3 at limit 3 matching an unguarded run in calls, tokens-in and
+  tokens-out), and four hold the prose off whitespace-normalized text so a
+  line wrap cannot make them pass (23's trap) — the two retired sentences
+  banned from the live readme, the corrected mechanism and trip rule present,
+  and the limit-4 caveat present. the prose tests exempt the `## fixes`
+  section, which quotes what it retired, and one test asserts the quote is
+  still there. 151 tests → 161. the revert check in a clean clone is clean:
+  restoring README.md alone fails exactly those 4 prose tests with all 157
+  others green. no other project has a loop guard — nothing to port. found and
+  fixed 2026-09-05
+- [low] 08 — the result study's transient bullet quotes one of two tasks as if
+  it were both. "reject converts a wrong answer into a fast clean failure (17
+  tokens-in)" is `a-transient-lookup`; the other transient task,
+  `a-transient-calc`, rejects at 73 tokens-in, and the grid right above prints
+  both. the "wrong answer" half is loose in the other direction: under
+  validation off `a-transient-lookup` is `loop-detected`, not a wrong answer —
+  only `a-transient-calc` ships one. report.ts generates the same sentence for
+  the printed output, so the fix is one line of prose in each place, and no
+  published number moves. found 2026-09-05
+- [low] 08 — "the stubborn burn is nearly 40% output" reads as a token share
+  and is a dollar share. measured: feedback's 3 stubborn tasks are 3528 input
+  and 441 output tokens, so output is 11.1% of the tokens and 38.5% of the
+  $0.017199 bill. the sentence sits inside a dollar argument (it is explaining
+  why the 80.9% token saving is only 73.6% in dollars) so the reading that
+  makes it true is the one in context — an ambiguous word rather than a false
+  claim, same class as 10's "trade precision for recall". worth one word.
+  found 2026-09-05
+- [low] 08 — `corruptRegistry`'s execution counter counts executions that
+  returned `ok: false`. the increment sits above the `if (!result.ok ...)`
+  early return (`resultStudy.ts:75-77`), so a transient corruption whose first
+  execution was a tool-reported error would spend execution 0 on it and hand
+  the caller a clean value on the retry that was supposed to be the corrupted
+  one. no committed result task calls a tool that can fail (no unknown city,
+  no div-by-zero, `fetchTransientFailures: 0`), so nothing published moves;
+  the counter should advance only on the results the corruption actually
+  rewrites. found 2026-09-05
 - [fixed 2026-09-04] 06 — the aimd rate trace was a diagnostic instrument that
   changed the run it measured, so every published aimd number was an artifact
   of the sampling interval. `AimdPacer.currentRatePerSec()` called
@@ -2211,7 +2281,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 11-prompt-caching | 2026-08-29 |
 | 10-chunking-strategies | 2026-09-04 |
 | 09-concurrency | 2026-08-28 |
-| 08-agent-tool-loop | 2026-08-28 |
+| 08-agent-tool-loop | 2026-09-05 |
 | 07-near-duplicates | 2026-09-03 |
 | 05-token-streaming | 2026-09-04 |
 | 03-hybrid-search | 2026-09-03 |
@@ -3028,6 +3098,32 @@ screen, but the ratios it publishes are wall-clock quotients labelled as moving
 and 110.1x. the root readme carries two of those numbers as headline facts.
 that is the same class of defect as 19's bare gate rates and 16's cost table:
 a number quoted to a precision the measurement does not have.
+
+08 came back clean on every number and dirty on one mechanism. all 151
+committed tests pass, typecheck is clean, two runs of `npm start` are
+byte-identical, and all 53 table lines across the four fenced blocks are
+character for character what the entry point prints today — checked
+mechanically. the machinery holds up where it matters: the loop guard counts
+only invalid emissions so a legitimate repeat call cannot trip it, the issue
+signature sorts its (path, code) pairs and drops values and invented key names
+as documented, the caching model's read/write split telescopes correctly
+(read + write equals tokens-in for all three policies, and the effective-in
+column reproduces write*1.25 + read*0.1 to the rounding), the clean twin
+reuses the flawed run's seed so the extra-ms column really is marginal, and
+the result study's five corruption families land exactly where the prose says
+— empty slips through as Number("")=0 while garbage becomes NaN and dies one
+hop later, the ratios 374/17 = 22x and 15341/17 = 902.4x both check out.
+what was wrong was a causal story: the readme said a rotating drifter walks
+past the signature guard when the guard catches it, and the drift table two
+blocks up had been printing `loop-detected=8` the entire time. fixed above.
+
+that one is worth remembering as a habit, and it is the same lesson 05's
+availability fix wrote down from the other side. there the finding was checked
+against the source but not against a run, and shipped half a fix. here the
+readme was written from what the mechanism should do rather than from what the
+run reported, and the run's own summary line contradicted it in the same
+screenful. both directions have the same rule: a claim about mechanism is a
+claim that has to be read off the output, not off the code that produced it.
 
 ## MECHANISMS
 
