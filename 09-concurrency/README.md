@@ -596,13 +596,13 @@ npm run start:storm-breaker
 ### 1. the same 15s dip, budget vs breaker vs both
 
 ```
-          policy     ok   amp  wasted  fastfail  trips  probefail  denied  recovery  drained  $/1k ok
-        no-retry  66.9%  1.00   33.1%      0.0%      -          -       0     15.0s    90.1s    $2.73
-       jitter-x4  22.6%  4.10   94.5%      0.0%      -          -       0     NEVER   250.1s   $33.21
- jitter+budget10  60.1%  1.04   42.4%      0.0%      -          -     897     21.3s    90.1s    $3.18
-    no-retry+brk  85.2%  0.88    2.9%     12.2%      2        0/2       0      0.0s    90.1s    $1.89
-   jitter-x4+brk  85.2%  0.88    2.9%     14.8%      2        0/2       0      0.0s    90.1s    $1.89
-jitter+bgt10+brk  85.2%  0.88    2.9%     13.3%      2        0/2      34      0.0s    90.1s    $1.89
+          policy     ok   amp  1st att  wasted  fastfail  trips  probefail  denied  recovery  drained  $/1k ok
+        no-retry  66.9%  1.00   100.0%   33.1%      0.0%      -          -       0     15.0s    90.1s    $2.73
+       jitter-x4  22.6%  4.10    24.4%   94.5%      0.0%      -          -       0     NEVER   250.1s   $33.21
+ jitter+budget10  60.1%  1.04    95.8%   42.4%      0.0%      -          -     897     21.3s    90.1s    $3.18
+    no-retry+brk  85.2%  0.88   100.0%    2.9%     12.2%      2        0/2       0      0.0s    90.1s    $1.89
+   jitter-x4+brk  85.2%  0.88   100.0%    2.9%     14.8%      2        0/2       0      0.0s    90.1s    $1.89
+jitter+bgt10+brk  85.2%  0.88   100.0%    2.9%     13.3%      2        0/2      34      0.0s    90.1s    $1.89
 ```
 
 The top three rows are the storm extension's rows reproduced to the digit,
@@ -630,7 +630,11 @@ comes around, the breaker that watched five 40ms-spaced timeouts is already
 open. The budget row's 34 denials against 897 says the same thing from the
 other side, the breaker leaves the budget almost nothing to deny. Evidence
 beats volume accounting on this pulse because evidence acts on first
-attempts too, and first attempts are 80% of the flood.
+attempts too, and the `1st att` column says first attempts are nearly the
+whole flood a budgeted client offers — 95.8% of jitter+budget10's attempts,
+so denying retries is a lever on the other 4.2% and nothing else. Uncapped
+the split inverts, 24.4% first attempts against 75.6% retries, and every
+breaker row reads 100.0%: behind the gate not one retry reaches the wire.
 
 ### 2. does the probe reopen the storm? yes, and its priced
 
@@ -725,6 +729,10 @@ extension's backoff policies come from 06-rate-limiting, the seeded rng from
 
 ## fixes
 
+- 2026-09-05 — the breaker section closed on "first attempts are 80% of the
+  flood" and nothing in the run measured that share. it is 24.4% uncapped,
+  95.8% under the budget and 100.0% behind the gate. `summarize` reports it
+  now and experiment 1 prints it as `1st att` — no measured number moved
 - 2026-08-28 — the batch sweep called its latency column `item p50` but
   measured a call's duration, which leaves out the client queue the batching
   removes — so the readme read it as "past batch 8 you are trading a lot of

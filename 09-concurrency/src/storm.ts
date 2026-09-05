@@ -335,6 +335,10 @@ export interface StormSummary {
   failed: number;
   successPct: number;
   attemptsStarted: number;
+  /** Attempts that were a task's first: the load no retry cap can reach. */
+  firstAttempts: number;
+  /** Fraction of started attempts that were a task's first. */
+  firstAttemptPct: number;
   /** Attempts per task: the load multiplier the retry loop imposed. */
   amplification: number;
   wastedCompletions: number;
@@ -361,6 +365,9 @@ export interface StormSummary {
 export function summarize(result: StormResult): StormSummary {
   const tasks = result.records.length;
   const succeeded = result.records.filter((r) => r.ok).length;
+  // A task that reached the wire at all spent exactly one first attempt; a
+  // task shed at the gate before its first attempt spent none.
+  const firstAttempts = result.records.filter((r) => r.attempts >= 1).length;
   const latencies = result.records
     .filter((r) => r.ok)
     .map((r) => r.latencyMs!)
@@ -371,6 +378,9 @@ export function summarize(result: StormResult): StormSummary {
     failed: tasks - succeeded,
     successPct: tasks === 0 ? 100 : (succeeded / tasks) * 100,
     attemptsStarted: result.attemptsStarted,
+    firstAttempts,
+    firstAttemptPct:
+      result.attemptsStarted === 0 ? 0 : (firstAttempts / result.attemptsStarted) * 100,
     amplification: tasks === 0 ? 0 : result.attemptsStarted / tasks,
     wastedCompletions: result.wastedCompletions,
     wastedPct:
