@@ -188,6 +188,86 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-05] 09 — the breaker extension's closing sentence put a
+  number on a share nothing in the run measured. "evidence beats volume
+  accounting on this pulse because evidence acts on first attempts too, and
+  first attempts are 80% of the flood" is the sentence carrying why a gate
+  beats a retry budget, and 80% is no policy's figure in the dip grid.
+  measured, first attempts are 24.4% of started attempts under unbudgeted
+  jitter-x4 (retries are the other 75.6%), 95.8% under jitter+budget10, and
+  100.0% under all three breaker policies, where not one retry ever reaches
+  the wire. both readings that could rescue the sentence refute it: against
+  the storm's 125/s flood it is inverted, first attempts being a fifth of it
+  rather than four fifths, and against the budgeted client — the comparison
+  the paragraph is actually making, since the sentence before it is about the
+  budget's 34 denials — the number is 95.8% and the point gets sharper, a
+  volume budget's whole lever being the 4.2% of offered attempts that are
+  retries while the gate sits in front of all of it. the fix is one
+  measurement and the prose it corrects: `StormSummary` gains `firstAttempts`
+  and `firstAttemptPct`, counted as the records that reached the wire at least
+  once (a task shed at the gate before its first attempt spent none), breaker
+  experiment 1 prints the share as a `1st att` column, and the sentence quotes
+  the column. new tests/first-attempt-share.test.ts, 9 tests: five pin the
+  measurement (the field agrees with the records for all six dip policies,
+  95.8% and its 4.2% complement on the budget row, 24.4% uncapped, exactly
+  100.0% with firstAttempts === attemptsStarted on all three breaker rows, and
+  the finding restated as an invariant — no policy in the grid sits between
+  70% and 90%), two run the entry point and hold the readme block to what it
+  prints, and two hold the prose off whitespace-normalized text so a line wrap
+  cannot make them pass (23's trap), with the `## fixes` section exempt since
+  it quotes the sentence it retired. all 9 fail on the old code and the revert
+  check splits cleanly in a fresh clone: reverting storm.ts and
+  storm-breaker-main.ts fails the 7 code and output tests with all 128
+  pre-existing green, reverting README.md alone fails exactly the 3 prose and
+  block tests. 128 tests → 137. no measured number moved — every other column
+  of every table is character for character what it was, and `npm start`,
+  `start:flaky`, `start:storm` and `start:cancel` print byte-identical output
+  to their pre-fix runs. the root index row quotes no share, so nothing to
+  update there, and no other project reports a first-attempt share, so nothing
+  to port. found and fixed 2026-09-05
+- [high] 09 — the cancellation section reads the post-dip backlog as one third
+  live and it is essentially all dead. "in abandon mode the dip leaves 259
+  requests in the FIFO, two thirds of them ghosts whose clients gave up" —
+  measured on the same seeded run, at the instant the dip ends the FIFO holds
+  256 requests of which 231, 90.2%, have already passed their 1000ms timeout,
+  and all 256 are admitted late enough that the client is gone before the
+  server serves them, so the eventual ghost share is 100%. at the run's actual
+  queue peak, 259 at t=35.24s, the already-timed-out share is 90.3%. 66.9% is
+  the ok column of the row the sentence sits beside, which is the success
+  fraction and not the ghost fraction. the mechanism the sentence argues is
+  right and the number understates it: cancel mode takes queue max 259 → 25
+  precisely because the whole backlog is dead work, and a two-thirds backlog
+  would make cancellation a smaller win than the table already shows. nothing
+  prints the composition today — the queue's contents are private to
+  `SimulatedApi`'s admission semaphore, so the fix needs the api to expose the
+  split, an admission log of queuedAt/admittedAt being enough; that is how it
+  was measured here. found 2026-09-05
+- [low] 09 — the breaker entry point prints one column name in two units.
+  `fastfail` is `pct(s.fastFailPct)` in experiments 1, 2 and 3 and
+  `String(s.fastFailedTasks)` in experiment 4, so the same header reads 14.8%
+  in one table and 1180 in another. no prose misreads it — the false-trip
+  bullet calls 1180 "more than half the run", a count read as a count, and
+  1180/2250 is 52.4% — but a reader comparing tables is comparing a rate
+  against a total. found 2026-09-05
+- [low] 09 — the retry budget earns per arrival, not per first attempt.
+  `RetryBudgetOptions.ratio` is documented as "budget earned per first
+  attempt" and `runStorm` calls `budget.earn()` at the top of `runTask`,
+  ahead of the breaker gate, so a task shed with zero wire attempts still
+  credits the balance. the two readings coincide for every breakerless policy,
+  which is why the storm study is untouched; only `jitter+bgt10+brk`'s 34
+  denials sit on the wider base, and "10% of offered load", the readme's
+  wording everywhere else, is the reading the code implements. found
+  2026-09-05
+- [low] 09 — breaker section 3 says ok "goes 23.2% to 78.6% and 4.1% to 37.8%
+  at half the attempts", and half is the 125% row only: amp is 0.49 there
+  against 0.83 at 104%. found 2026-09-05
+- [low] 09 — experiment 2's `call p50/p95` are item-weighted, pushed once per
+  item in the batch rather than once per call, so a ragged last batch carries
+  less weight than a full one. only the batch-32 row is ragged (240 items,
+  seven calls of 32 and one of 16), so the direction and every published
+  figure stand, but "how long one call takes once a worker picks it up" is the
+  duration of the call carrying a random item, not of a random call. found
+  2026-09-05
 - [fixed 2026-09-05] 08 — the drift section published a failure mechanism the
   run refutes, and the run had been printing the refutation the whole time.
   the readme said "rotating three walks past the guard entirely and dies in
@@ -2280,7 +2360,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 12-groundedness-scoring | 2026-08-29 |
 | 11-prompt-caching | 2026-08-29 |
 | 10-chunking-strategies | 2026-09-04 |
-| 09-concurrency | 2026-08-28 |
+| 09-concurrency | 2026-09-05 |
 | 08-agent-tool-loop | 2026-09-05 |
 | 07-near-duplicates | 2026-09-03 |
 | 05-token-streaming | 2026-09-04 |
@@ -3124,6 +3204,30 @@ readme was written from what the mechanism should do rather than from what the
 run reported, and the run's own summary line contradicted it in the same
 screenful. both directions have the same rule: a claim about mechanism is a
 claim that has to be read off the output, not off the code that produced it.
+
+09 came back clean on every number and dirty on two shares. all 128 committed
+tests pass, typecheck is clean, repeated runs of every entry point are
+byte-identical, and all 177 table lines across the readme's fenced blocks are
+character for character what the five entry points print today — checked
+mechanically, not by eye. the mechanisms hold where the study leans on them:
+the fifo semaphore hands a permit straight to the next waiter and detaches its
+abort listener at handoff, the micro-batcher's stale virtual timer rechecks
+batch identity before firing, flake draws are one per flaky item per call in
+call order and never short-circuited so enabling flake leaves the latency
+stream bit-identical, and the flaky study's paired trial seeds do what they
+claim — the `1st fail` column is identical across all four strategies in every
+one of the ten configs. the breaker's gate wiring reproduces the storm
+extension's three breakerless rows to the digit, which is the check that
+matters most there. what was wrong was two numbers written from what the
+mechanism ought to look like rather than read off the run: the breaker
+section's "first attempts are 80% of the flood" (24.4% uncapped, 95.8%
+budgeted, 100.0% behind the gate — fixed above) and the cancellation section's
+"two thirds of them ghosts" (90.2% already timed out at the dip end, 100%
+eventually, open above as the next high). that is 08's lesson from last run
+landing twice in one project, and it sharpens into a rule worth keeping: a
+share is the easiest kind of number to write from intuition and the easiest to
+check, so any fraction in prose that no column prints is a finding until it is
+printed.
 
 ## MECHANISMS
 
