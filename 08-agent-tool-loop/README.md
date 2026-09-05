@@ -147,10 +147,15 @@ not free: it kills both slow correctors (`slow-sig-corrector-calc`,
 `slow-sig-corrector-city`), tasks the feedback policy completes, because a model
 three rounds from correct and a model that will never correct emit identical
 signatures for the first three rounds. completion drops 4/10 to 2/10 on this
-deliberately adversarial suite. the shape drifters show the key's edge:
-alternating two broken shapes gets caught at the 5th emission instead of the
-3rd, rotating three walks past the guard entirely and dies in the feedback cap
-at 7, the same price as no guard.
+deliberately adversarial suite. the shape drifters show the key's edge and
+where it runs out: alternating two broken shapes gets caught at the 5th
+emission instead of the 3rd, rotating three at the 7th. the guard does fire on
+the rotation - all 8 of guarded-sig's failures are loop-detected, none reach
+the cap - but it fires on the round the cap would have fired anyway, so
+rotate-3 costs the same price as no guard. the rule is arithmetic: a rotation
+of c shapes trips a limit-L guard on emission (L-1)*c+1, and the 6-round
+feedback cap kills whatever is still going at 7. rotate-3 at limit 3 lands
+exactly on 7 - a tie, not an escape.
 
 the interesting knob turns out to be the limit, not the key:
 
@@ -166,9 +171,14 @@ limit  ok     correctors-killed  stubborn-model-calls  stubborn-tokens  total-to
 at limit 4 the signature guard spares every corrector in the suite (the slow
 correctors emit 3 same-signature calls, never 4) and still caps the stubborn
 drifters at 30 model calls against feedback's 42, 44.2% of the stubborn tokens
-saved with zero completion loss. the sweep says the guard key decides what you
-can see and the limit decides how long you wait, and on this suite waiting one
-extra round buys back every false positive.
+saved with zero completion loss. what waiting costs is the longest rotation:
+at limit 4 rotate-3's trip round moves to 10, past the cap, so it dies
+feedback-exhausted at 7 and the guard buys nothing on it at all. that
+saturation is already visible in the sweep's own stubborn-model-calls column -
+it steps +9, +6, +4, +4 instead of +6 a row, because the two shape drifters
+stop moving once they hit the cap. the sweep says the guard key decides what
+you can see and the limit decides how long you wait, and on this suite waiting
+one extra round buys back every false positive and gives up the rotation.
 
 the check that had to pass before any of this counts: on the original 25 tasks,
 same seeds, the signature guard completes the same 21/25 as the exact guard and
@@ -341,9 +351,10 @@ it is not a groundedness check.
 - the guard key is a visibility choice, measured above: exact identity only
   sees verbatim repeats, the issue signature sees same-way-broken drift but
   confuses a slow corrector with a stubborn model until the limit expires, and
-  a failure that rotates enough distinct shapes walks past both. no key
-  computed from the current call alone can see "this conversation is not
-  converging"
+  a failure that rotates enough distinct shapes outruns the signature key too -
+  not by evading it but by pushing its trip round out past whatever cap sits
+  above it. no key computed from the current call alone can see "this
+  conversation is not converging"
 - the cached pricing is the best case for caching: always warm, breakpoint
   after every request, nothing evicted. real ttls, concurrent tasks racing the
   first write, and per-breakpoint minimum token counts all push the real bill
@@ -360,6 +371,14 @@ unions over message types, and async loop control, and the strict compiler
 holds the message-passing honest end to end.
 
 ## fixes
+
+- 2026-09-05 — the drift section said rotating three broken shapes "walks past
+  the guard entirely and dies in the feedback cap at 7", and the open questions
+  called it a drifter that "beats both guard keys". it doesnt - the signature
+  guard catches it on the 7th emission, which the run has been printing as
+  loop-detected=8 the whole time. now stated as a tie: a c-shape rotation trips
+  a limit-L guard at (L-1)*c+1, rotate-3 at limit 3 lands on 7 where the cap
+  already sits, and at limit 4 it escapes for real. no number moved
 
 - 2026-08-28 — each flawed task is priced against its own clean twin, but the
   twin ran on its own seed, so the two runs drew independent latency jitter
@@ -380,11 +399,13 @@ holds the message-passing honest end to end.
   construction. with correction times drawn from a distribution the sweep
   becomes a survival analysis, and the right limit is a quantile of it, which
   needs real correction-rate data
-- the rotate-3 drifter beats both guard keys. a wasted-budget guard (abort
-  after k invalid emissions per intent regardless of key) would catch it, but
-  that is just a tighter feedback cap wearing a different name; whether any
-  per-call key short of a convergence measure separates rotation from progress
-  is open
+- the rotate-3 drifter ties the signature guard rather than beating it: at
+  limit 3 it trips on emission 7, the same round the cap fires, and at limit 4
+  and up the cap gets there first. so the open part is the longer rotation, not
+  this one. a wasted-budget guard (abort after k invalid emissions per intent
+  regardless of key) would catch any of them at any limit, but that is just a
+  tighter feedback cap wearing a different name; whether any per-call key short
+  of a convergence measure separates rotation from progress is open
 - the signature ignores invented key names by design, so a model hallucinating
   a different bogus field each round is caught. the same collapsing would
   misfire on a tool whose schema legitimately varies by a discriminated union
