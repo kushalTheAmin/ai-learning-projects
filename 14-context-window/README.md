@@ -87,6 +87,12 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
 
 ## fixes
 
+- 2026-09-06 — the shrink-repack bullet quoted "2 to 3 per 20-conversation
+  cell, pinned by a test" and nothing in the project printed that count — the
+  test it named only checked one cell was above zero. the study now prints a
+  shrinks column and the bullet reads off it: 0 to 6 across the twelve cells
+  above, exactly 0 in three of them. no retention or cost number moved
+
 - 2026-08-30 — the buried-fact retraction above only reached the readmes —
   progress.md still carried the retracted mechanism in two live places, the
   completed row calling it "a mean-dilution tax under sentence scoring" and the
@@ -117,38 +123,38 @@ the summarize policy above is stateless: every call it re-reads every evicted tu
 npm run start:irreversible
 ```
 
-what came out, share 25%, both regimes (work/conv is tokens handed to the sentence ranker per conversation, the stand-in for what an llm summarizer would have to re-read; drop/conv is sentences discarded per conversation; sum-tok is the running summary size after the last call):
+what came out, share 25%, both regimes (work/conv is tokens handed to the sentence ranker per conversation, the stand-in for what an llm summarizer would have to re-read; drop/conv is sentences discarded per conversation; shrinks is the number of shrink repacks in the whole 20-conversation cell, a count not a mean, because the counts are small; sum-tok is the running summary size after the last call):
 
 ```
 === standard regime (30 exchanges): recompute vs incremental at summary share 25% ===
-policy              budget   overall    short   medium     long   work/conv   cmp/conv   drop/conv   sum-tok
-recompute-luhn-25%     400     42.1%   100.0%    26.3%     0.0%       21297       25.0           -         -
-increm-luhn-25%        400     42.1%   100.0%    26.3%     0.0%        3038       23.4        68.5      71.1
-recompute-luhn-25%     800     71.3%   100.0%    98.8%    15.0%       14231       19.1           -         -
-increm-luhn-25%        800     69.6%   100.0%    98.8%    10.0%        4017       17.6        48.6     171.0
-recompute-luhn-25%    1600     99.6%   100.0%   100.0%    98.8%        3121        5.8           -         -
-increm-luhn-25%       1600     99.6%   100.0%   100.0%    98.8%        2195        5.2        13.1     370.4
-recompute-rarity-25%     400     60.0%   100.0%    53.8%    26.3%       21297       25.0           -         -
-increm-rarity-25%      400     53.3%   100.0%    53.8%     6.3%        3031       23.3        67.8      72.1
-recompute-rarity-25%     800     85.8%   100.0%   100.0%    57.5%       14231       19.1           -         -
-increm-rarity-25%      800     82.1%   100.0%   100.0%    46.3%        3992       17.5        49.9     167.8
-recompute-rarity-25%    1600    100.0%   100.0%   100.0%   100.0%        3121        5.8           -         -
-increm-rarity-25%     1600    100.0%   100.0%   100.0%   100.0%        2186        5.2        13.3     368.2
+policy              budget   overall    short   medium     long   work/conv   cmp/conv   drop/conv   shrinks   sum-tok
+recompute-luhn-25%     400     42.1%   100.0%    26.3%     0.0%       21297       25.0           -         -         -
+increm-luhn-25%        400     42.1%   100.0%    26.3%     0.0%        3038       23.4        68.5         6      71.1
+recompute-luhn-25%     800     71.3%   100.0%    98.8%    15.0%       14231       19.1           -         -         -
+increm-luhn-25%        800     69.6%   100.0%    98.8%    10.0%        4017       17.6        48.6         3     171.0
+recompute-luhn-25%    1600     99.6%   100.0%   100.0%    98.8%        3121        5.8           -         -         -
+increm-luhn-25%       1600     99.6%   100.0%   100.0%    98.8%        2195        5.2        13.1         0     370.4
+recompute-rarity-25%     400     60.0%   100.0%    53.8%    26.3%       21297       25.0           -         -         -
+increm-rarity-25%      400     53.3%   100.0%    53.8%     6.3%        3031       23.3        67.8         2      72.1
+recompute-rarity-25%     800     85.8%   100.0%   100.0%    57.5%       14231       19.1           -         -         -
+increm-rarity-25%      800     82.1%   100.0%   100.0%    46.3%        3992       17.5        49.9         2     167.8
+recompute-rarity-25%    1600    100.0%   100.0%   100.0%   100.0%        3121        5.8           -         -         -
+increm-rarity-25%     1600    100.0%   100.0%   100.0%   100.0%        2186        5.2        13.3         0     368.2
 
 === long regime (60 exchanges): recompute vs incremental at summary share 25% ===
-policy              budget   overall    short   medium     long   work/conv   cmp/conv   drop/conv   sum-tok
-recompute-luhn-25%     400     40.8%   100.0%    22.5%     0.0%       91255       54.3           -         -
-increm-luhn-25%        400     40.8%   100.0%    22.5%     0.0%        6754       52.9       157.9      66.8
-recompute-luhn-25%     800     70.8%   100.0%    98.8%    13.8%       76056       48.2           -         -
-increm-luhn-25%        800     70.8%   100.0%    98.8%    13.8%       10667       46.8       137.9     170.4
-recompute-luhn-25%    1600     97.5%   100.0%   100.0%    92.5%       48979       35.2           -         -
-increm-luhn-25%       1600     96.7%   100.0%   100.0%    90.0%       14600       34.2        98.8     369.8
-recompute-rarity-25%     400     66.3%   100.0%    58.8%    40.0%       91255       54.3           -         -
-increm-rarity-25%      400     51.7%   100.0%    51.2%     3.8%        6767       52.9       157.6      67.8
-recompute-rarity-25%     800     92.9%   100.0%   100.0%    78.8%       76056       48.2           -         -
-increm-rarity-25%      800     87.5%   100.0%    98.8%    63.7%       10614       46.9       139.2     167.4
-recompute-rarity-25%    1600    100.0%   100.0%   100.0%   100.0%       48979       35.2           -         -
-increm-rarity-25%     1600     99.6%   100.0%   100.0%    98.8%       14563       34.2       100.8     368.9
+policy              budget   overall    short   medium     long   work/conv   cmp/conv   drop/conv   shrinks   sum-tok
+recompute-luhn-25%     400     40.8%   100.0%    22.5%     0.0%       91255       54.3           -         -         -
+increm-luhn-25%        400     40.8%   100.0%    22.5%     0.0%        6754       52.9       157.9         2      66.8
+recompute-luhn-25%     800     70.8%   100.0%    98.8%    13.8%       76056       48.2           -         -         -
+increm-luhn-25%        800     70.8%   100.0%    98.8%    13.8%       10667       46.8       137.9         0     170.4
+recompute-luhn-25%    1600     97.5%   100.0%   100.0%    92.5%       48979       35.2           -         -         -
+increm-luhn-25%       1600     96.7%   100.0%   100.0%    90.0%       14600       34.2        98.8         1     369.8
+recompute-rarity-25%     400     66.3%   100.0%    58.8%    40.0%       91255       54.3           -         -         -
+increm-rarity-25%      400     51.7%   100.0%    51.2%     3.8%        6767       52.9       157.6         3      67.8
+recompute-rarity-25%     800     92.9%   100.0%   100.0%    78.8%       76056       48.2           -         -         -
+increm-rarity-25%      800     87.5%   100.0%    98.8%    63.7%       10614       46.9       139.2         2     167.4
+recompute-rarity-25%    1600    100.0%   100.0%   100.0%   100.0%       48979       35.2           -         -         -
+increm-rarity-25%     1600     99.6%   100.0%   100.0%    98.8%       14563       34.2       100.8         1     368.9
 ```
 
 reading it:
@@ -156,7 +162,7 @@ reading it:
 - **irreversibility is priced in long-lag retention, and only where the summary was earning anything.** rarity at budget 400 in the long regime loses 14.6 points overall (66.3% recompute vs 51.7% incremental), and the whole loss is the long-lag column collapsing from 40.0% to 3.8%. same cell under luhn: gap 0.0 points, because luhn's summary was keeping repeated chatter rather than facts, so there was nothing to lose. a policy has to be good before irreversibility can hurt it
 - **the gap grows with pressure and shrinks with slack.** rarity gaps run 6.7 / 3.7 / 0.0 points across budgets 400 / 800 / 1600 in the standard regime, and 14.6 / 5.4 / 0.4 in the long one. at 1600 nearly everything survives in the raw tail anyway, so the summary is decoration and both shapes agree
 - **what recompute pays for those points is the actual story.** at budget 400 in the long regime it re-reads 13.5x the tokens (91255 vs 6767 per conversation), at 800 it is 7.2x, at 1600 3.4x. and recompute's bill grows with conversation length while incremental's per-call bill is bounded by summary size plus newly evicted text: the standard regime costs recompute 21297 work tokens per conversation, the long regime 91255, 4.3x for 2x the exchanges. that superlinear growth is exactly why nobody ships the recompute shape, and now the retention it buys has a number attached
-- **a transiently long user turn permanently shrinks the summary.** when a call arrives with less room and nothing new to fold, the running summary must repack itself down to the smaller block, and the sentences it sheds do not come back when the next call has normal room again (2 to 3 such shrink repacks per 20-conversation cell here, pinned by a test). the stateless policy just repacks bigger next call and never notices
+- **a transiently long user turn permanently shrinks the summary.** when a call arrives with less room and nothing new to fold, the running summary must repack itself down to the smaller block, and the sentences it sheds do not come back when the next call has normal room again. the shrinks column says how often that actually bites, and the answer is rarely and unevenly — 0 to 6 per 20-conversation cell across the twelve rows above, exactly 0 in three of them, so this is something a run can go without doing at all. it scales with the block rather than the regime: at share 50% in the long regime the same two cells take 11 and 7, because a bigger summary is a bigger thing to have to fit back into a shrunken block. the stateless policy just repacks bigger next call and never notices
 
 the share sweep at budget 800 in the long regime sharpens the first point. under rarity the recompute advantage grows with the share, because a bigger summary block is a bigger fraction of retention riding on the summarizer: recompute-rarity-50% holds 98.8% overall while increm-rarity-50% holds 89.6%, a 9.2-point gap at the same budget. and in the one corner where the summary holds nearly nothing (luhn at share 10%), incremental actually wins by half a point, 76.3% vs 75.8%: a fact sentence that survives an early packing is locked in for good, while recompute re-ranks the whole pool every call and can drop it later. irreversibility cuts both ways, it just cuts against you far more often
 

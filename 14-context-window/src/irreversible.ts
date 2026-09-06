@@ -34,6 +34,8 @@ interface Row {
   workPerConv: number;
   compactionsPerConv: number;
   droppedPerConv: number | null;
+  /** Shrink repacks in the whole cell, not per conversation: the counts are small. */
+  shrinkRepacks: number | null;
   finalSummaryTokens: number | null;
 }
 
@@ -48,6 +50,7 @@ function fromRecompute(r: CellResult, convCount: number): Row {
     workPerConv: r.summaryWorkTokens / convCount,
     compactionsPerConv: r.compactions / convCount,
     droppedPerConv: null,
+    shrinkRepacks: null,
     finalSummaryTokens: null,
   };
 }
@@ -63,6 +66,7 @@ function fromIncremental(r: IncrementalCellResult, convCount: number): Row {
     workPerConv: r.summaryWorkTokens / convCount,
     compactionsPerConv: r.compactions / convCount,
     droppedPerConv: r.droppedSentences / convCount,
+    shrinkRepacks: r.shrinkRepacks,
     finalSummaryTokens: r.meanFinalSummaryTokens,
   };
 }
@@ -79,6 +83,7 @@ function header(): void {
       "work/conv".padStart(10),
       "cmp/conv".padStart(9),
       "drop/conv".padStart(10),
+      "shrinks".padStart(8),
       "sum-tok".padStart(8),
     ].join("  "),
   );
@@ -96,6 +101,7 @@ function printRow(r: Row): void {
       f0(r.workPerConv).padStart(10),
       f1(r.compactionsPerConv).padStart(9),
       (r.droppedPerConv === null ? "-" : f1(r.droppedPerConv)).padStart(10),
+      (r.shrinkRepacks === null ? "-" : String(r.shrinkRepacks)).padStart(8),
       (r.finalSummaryTokens === null ? "-" : f1(r.finalSummaryTokens)).padStart(8),
     ].join("  "),
   );

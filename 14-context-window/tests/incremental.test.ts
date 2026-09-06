@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { estimateTokens } from "../../08-agent-tool-loop/src/messages.js";
 import { runCell } from "../src/experiment.js";
@@ -178,6 +179,106 @@ describe("irreversibility", () => {
     const convs = generateConversations(20260828, 20, { exchanges: 30, factCount: 12 });
     const r = runIncrementalCell({ summaryShare: 0.25, summarizer: "rarity" }, "inc", 400, convs);
     expect(r.shrinkRepacks).toBeGreaterThan(0);
+  });
+});
+
+// The README used to quote "2 to 3 such shrink repacks per 20-conversation
+// cell here, pinned by a test". No entry point printed the count, the test it
+// named only asserted one cell is above zero, and the run says 0 to 6 across
+// the twelve published cells with three of them at exactly 0. These tests own
+// the number: they recompute every published cell and hold the README to it.
+const PUB_SEED = 20260828;
+const PUB_CONVS = 20;
+const REGIME_BUDGETS = [400, 800, 1600] as const;
+const SCORERS = ["luhn", "rarity"] as const;
+
+const standardConvs = generateConversations(PUB_SEED, PUB_CONVS, { exchanges: 30, factCount: 12 });
+const longConvs = generateConversations(PUB_SEED + 1_000_003, PUB_CONVS, { exchanges: 60, factCount: 12 });
+
+function shrinks(convs: typeof standardConvs, summarizer: "luhn" | "rarity", share: number, budget: number): number {
+  return runIncrementalCell({ summaryShare: share, summarizer }, "inc", budget, convs).shrinkRepacks;
+}
+
+/** Rows of the README's three printed tables, keyed by the block heading. */
+function readmeBlocks(): Map<string, string[][]> {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+  const blocks = new Map<string, string[][]>();
+  let current: string[][] | null = null;
+  for (const line of readme.split("\n")) {
+    const heading = line.match(/^=== (.+) ===$/);
+    if (heading !== null) {
+      current = [];
+      blocks.set(heading[1] as string, current);
+      continue;
+    }
+    if (current !== null && /^(increm|recompute)-/.test(line)) current.push(line.trim().split(/\s+/));
+  }
+  return blocks;
+}
+
+const SHRINK_COL = 9;
+
+describe("the shrink-repack count is printed and quoted as the run has it", () => {
+  test("the twelve published share-25% cells run 0 to 6, three of them at zero", () => {
+    const counts: number[] = [];
+    for (const convs of [standardConvs, longConvs]) {
+      for (const scorer of SCORERS) {
+        for (const budget of REGIME_BUDGETS) counts.push(shrinks(convs, scorer, 0.25, budget));
+      }
+    }
+    expect(counts).toEqual([6, 3, 0, 2, 2, 0, 2, 0, 1, 3, 2, 1]);
+    expect(Math.min(...counts)).toBe(0);
+    expect(Math.max(...counts)).toBe(6);
+    expect(counts.filter((c) => c === 0)).toHaveLength(3);
+  });
+
+  test("the count climbs with the summary share, it is not a fixed rate", () => {
+    const atShare = (share: number): number[] => SCORERS.map((s) => shrinks(longConvs, s, share, 800));
+    expect(atShare(0.1)).toEqual([0, 1]);
+    expect(atShare(0.25)).toEqual([0, 2]);
+    expect(atShare(0.5)).toEqual([11, 7]);
+  });
+
+  test("every incremental row in the README carries its own cell's shrink count", () => {
+    const blocks = readmeBlocks();
+    const cases: { block: string; label: string; budget: number; count: number }[] = [];
+    for (const [block, convs] of [
+      ["standard regime (30 exchanges): recompute vs incremental at summary share 25%", standardConvs],
+      ["long regime (60 exchanges): recompute vs incremental at summary share 25%", longConvs],
+    ] as const) {
+      for (const scorer of SCORERS) {
+        for (const budget of REGIME_BUDGETS) {
+          cases.push({ block, label: `increm-${scorer}-25%`, budget, count: shrinks(convs, scorer, 0.25, budget) });
+        }
+      }
+    }
+    expect(cases).toHaveLength(12);
+    for (const c of cases) {
+      const rows = blocks.get(c.block);
+      expect(rows, `README has no block "${c.block}"`).toBeDefined();
+      const row = (rows as string[][]).find((r) => r[0] === c.label && r[1] === String(c.budget));
+      expect(row, `${c.block}: no row for ${c.label} at ${c.budget}`).toBeDefined();
+      expect((row as string[])[SHRINK_COL], `${c.block} ${c.label}@${c.budget}`).toBe(String(c.count));
+    }
+  });
+
+  test("recompute rows have no shrink cell, the mechanism is incremental-only", () => {
+    for (const rows of readmeBlocks().values()) {
+      for (const row of rows.filter((r) => (r[0] as string).startsWith("recompute-"))) {
+        expect(row[SHRINK_COL], row.join(" ")).toBe("-");
+      }
+    }
+  });
+
+  test("the README bullet states the measured spread, not a fixed 2 to 3", () => {
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+    const bullet = readme.split("\n").find((l) => l.includes("permanently shrinks the summary"));
+    expect(bullet, "README has no shrink-repack bullet").toBeDefined();
+    expect(bullet).not.toContain("2 to 3");
+    expect(bullet).not.toContain("pinned by a test");
+    expect(bullet).toContain("0 to 6");
+    expect(bullet).toContain("exactly 0 in three of them");
+    expect(bullet).toContain("11 and 7");
   });
 });
 
