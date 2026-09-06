@@ -188,6 +188,80 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [high] 14 — "the whole loss is the long-lag column" is not what the two rows
+  under it print. the irreversibility extension's headline bullet reads
+  "rarity at budget 400 in the long regime loses 14.6 points overall (66.3%
+  recompute vs 51.7% incremental), and the whole loss is the long-lag column
+  collapsing from 40.0% to 3.8%". the 14.6 points are 35 probes of 240. the
+  long-lag column gives up 29 of them (32 hits to 3 of 80). the medium column
+  gives up the other 6 — 58.8% to 51.2%, printed in the same two rows two
+  lines above the sentence — so a sixth of the loss lands outside the column
+  the bullet says carries all of it, and a 7.5-point drop in a medium column
+  is not a rounding artifact: it is twice the whole rarity@800 standard-regime
+  gap the same section treats as a real effect. the root README index row
+  states it harder still, "irreversibility is priced entirely in long-lag
+  retention", so the front page carries the same overreach. the fix is the
+  magnitude word and a test pinning the per-bucket split, in both readmes.
+  found 2026-09-06
+- [medium] 14 — the main readme's caveat calls the stateless summarize numbers
+  "an upper bound for extractive summarization at each budget", and the
+  extension measures a cell where the bound does not hold. `src/policies.ts`
+  and `src/incremental.ts` say the same thing in their docstrings ("an upper
+  bound in two directions at once"). the share sweep prints increm-luhn-10% at
+  76.3% against recompute-luhn-10% at 75.8% in the long regime, and the
+  extension's own prose explains why — a fact locked into an early packing
+  survives re-rankings that recompute can still lose it to, "irreversibility
+  cuts both ways". one cell of twelve and half a point, so the caveat is
+  nearly right, but it is stated as a structural guarantee in three places and
+  the project has a counterexample it printed itself. found 2026-09-06
+- [low] 14 — no test ties `src/irreversible.ts`'s printed table to the library
+  it prints. the shrink-column fix binds the readme to recomputed
+  `runIncrementalCell` values, which is the pattern the rest of the repo uses,
+  but reverting `irreversible.ts` alone and leaving the fixed readme in place
+  leaves all 104 tests green — checked in the gate clone. the entry point runs
+  `main()` at import, so a test cannot reach its row formatter without running
+  the whole 5-second study. extracting the formatter, or running the entry
+  point once in a test and diffing its blocks against the readme, would close
+  it. same standing gap the 2026-08-30 review noted for `main.ts`.
+  found 2026-09-06
+- [fixed 2026-09-06] 14 — the shrink-repack bullet quoted a rate per cell that
+  no run printed and that the run refutes. "a transiently long user turn
+  permanently shrinks the summary ... (2 to 3 such shrink repacks per
+  20-conversation cell here, pinned by a test)" is the only quantification the
+  extension gives for how often that mechanism fires, and three things are
+  wrong with it at once. `runIncrementalCell` has counted `shrinkRepacks`
+  since the extension landed, but `irreversible.ts` never printed the column,
+  so the number had no owner in any output — 15's shape, a readme figure no
+  entry point produces, one project over. the test it names,
+  `shrink repacks happen in the real workload too`, asserts only
+  `shrinkRepacks > 0` on the single rarity-25%@400 standard cell, so "pinned
+  by a test" pins a sign, not a rate. and the rate is wrong: across the twelve
+  published share-25% cells the count runs 6, 3, 0, 2, 2, 0 (standard) and 2,
+  0, 1, 3, 2, 1 (long) — 0 to 6, with three cells where the mechanism never
+  fires at all, so half the published rows sit outside the quoted range and a
+  quarter of them contradict it outright. it is not even a per-cell constant
+  to quote: it scales with the summary block, 0 and 1 at share 10%, 0 and 2 at
+  25%, 11 and 7 at share 50% in the long regime, which is the shape the bullet
+  should have had. found and fixed 2026-09-06
+
+  the fix prints the count and reads the bullet off it. `Row` gains
+  `shrinkRepacks`, null on recompute rows the way `droppedPerConv` and
+  `finalSummaryTokens` already are, and `header`/`printRow` gain a `shrinks`
+  column between drop/conv and sum-tok; the readme's two pasted regime tables
+  are the new output verbatim and the column gloss says it is a whole-cell
+  count rather than a per-conversation mean, so it cannot become 09's
+  one-name-two-units finding. the bullet now says 0 to 6 across the twelve
+  rows above, exactly 0 in three of them, and that it scales with the block
+  (11 and 7 at share 50%) rather than with the regime. five new tests in
+  tests/incremental.test.ts, 99 → 104: the twelve counts pinned exactly with
+  min/max/zero-count asserted, the share ladder pinned at 10/25/50%, every
+  `increm-` row in both pasted tables checked field by field against a fresh
+  `runIncrementalCell` for that cell, every `recompute-` row asserted to carry
+  `-` in the shrink cell, and the bullet held to the measured spread with
+  "2 to 3" and "pinned by a test" both forbidden. no measured number moved:
+  retention, work, drop and sum-tok are byte-identical, the only new output is
+  the column. revert check in a fresh clone: reverting `irreversible.ts` and
+  `README.md` together fails exactly the two binding tests with 19 green.
 - [fixed 2026-09-06] 13 — the ablation read its 145 stranded nodes as the
   cause of the naive recall drop, and the column it read them off walks from a
   node no layer-0 search ever starts at. "on tight clusters the naive rule
@@ -2589,7 +2663,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 17-confidence-calibration | 2026-08-31 |
 | 16-llm-as-judge | 2026-08-31 |
 | 15-embedding-quantization | 2026-08-30 |
-| 14-context-window | 2026-08-30 |
+| 14-context-window | 2026-09-06 |
 | 13-ann-hnsw | 2026-09-06 |
 | 12-groundedness-scoring | 2026-09-06 |
 | 11-prompt-caching | 2026-09-05 |
@@ -3543,6 +3617,30 @@ starts at the entry point the way a flight starts at the gate, and the leg
 being measured begins somewhere else. the 2026-08-29 fix on this same walk
 moved the start node once already and stopped at the first plausible answer;
 checking a start node means running the thing and looking at where it began.
+
+14, second pass, came back clean on everything it prints and dirty on a number
+it did not print. all 99 committed tests passed before the fix, typecheck is
+clean, both entry points are byte-identical across reruns, and every line of
+every pasted table in the readme appears verbatim in `npm start` /
+`npm run start:irreversible` output — checked mechanically, line by line,
+rather than by eye. the extension's arithmetic ties out where it is checkable:
+the 14.6 / 5.4 / 0.4 and 6.7 / 3.7 / 0.0 gap ladders are the tables' own
+subtractions, 91255 / 21297 really is 4.3x for 2x the exchanges, the 13.5x /
+7.2x / 3.4x work ratios are the printed pairs, and the 9.2-point rarity-50%
+gap and the 76.3% / 75.8% lock-in cell are both real. the shrink-repack
+mechanism itself is sound — a repack can only be forced by a call whose user
+turn is longer than the one that last packed the summary, which is exactly the
+transient the bullet describes.
+
+what was wrong was the one figure attached to it. the count existed in the
+result object and never reached an output stream, so it drifted where nothing
+could see it, and the sentence naming a test as its pin named a test that
+checks a sign. the rule this adds to 15's: a readme number needs an owner in
+*output*, not just in code — a field computed and returned but never printed
+is exactly as unowned as a figure copied by hand from another project, and
+"pinned by a test" in the prose is a claim about the suite that has to be read
+against the suite. the second half is 09's whole-column rule again: the quoted
+range came from three cells that agree, and half the published rows disagree.
 
 ## MECHANISMS
 
