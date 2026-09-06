@@ -188,6 +188,59 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-06] 12 — the reading of the numeric gate row described a
+  detector the project does not have. "the numeric gate is the opposite
+  temperament: precision 1.000 at FPR 0.000, catching only claims whose
+  numbers the context never states" is the second of the reading's four
+  bullets and the sentence that tells a reader what the gate's column means,
+  and the gate is `min(sentence_cosine, numeric_match)` — two channels, not
+  one. at its tuned threshold 0.328 it flags 8 claims: 6 are number swaps the
+  numeric channel zeroes outright (c01-4, c02-4, c04-3, c05-4, c08-4, c09-4,
+  all `numeric_match` 0.000 against cosines of 0.672 to 0.957), and the other
+  2 are c07-6 and c09-5, fabrications carrying no digits at all, so
+  `numeric_match` returns its no-evidence 1.000 and they fall under the
+  threshold on cosine alone (0.297 and 0.309). so a quarter of what the gate
+  catches is not numeric, and the sentence is refuted by the project's own
+  published `fabricated 2/6 (0.33)` cell two lines above it in the category
+  table — a reader taking the sentence at face value reads that cell as two
+  fabrications with invented figures in them, which is exactly backwards. the
+  readme already contradicted itself: the tradeoffs section explains the same
+  two flags correctly, "the gated methods flag only 2 of 6 fabrications at
+  their threshold because a fabricated sentence shares topic words with the
+  context", which is the cosine channel named properly. the same two claims
+  are the `negation_aware` column's fabricated cell for the same reason, so
+  the misreading covers two of the four published columns. no committed test
+  touched the sentence, and `test_numeric_gate_has_a_clean_precision_point`
+  pins precision 1.000 and FPR 0.000 — the half of the bullet that is true —
+  which is what let the false half sit next to a green suite. found and fixed
+  2026-09-06
+
+  the fix is prose only, the code was already right and no measured number
+  moved. the corrected bullet names the mechanism (`min(cosine, numeric)`),
+  gives the split as 6 of 8 flags numeric, names c07-6 and c09-5 and why they
+  pass the numeric check with 1.000, points at the fabricated 2/6 cell as
+  those two, notes it is the same two in both gated columns, and keeps the
+  c06-5 miss and the fraction-is-the-wrong-aggregate point that closed the
+  bullet before. every number it quotes is already printed by `main.py`, so
+  nothing new needed measuring. new tests/test_gate_channels.py, 12 tests:
+  seven pin the split (the gate flags exactly 8, the two cosine-channel ids
+  are exactly {c07-6, c09-5} and each has `sentence_cosine` under the
+  threshold, both state no number at all so `numeric_match` is 1.0, they are
+  exactly the two fabrications, the other 6 are number swaps at
+  `numeric_match` 0.0, a pure `numeric_match` detector at the same threshold
+  catches 6 and misses both — the finding restated as an invariant — and
+  `negation_aware`'s fabricated cell is the same two on the same channel),
+  and five pin the readme off whitespace-normalized text so a line wrap
+  cannot make them pass (23's trap), with the `## fixes` section cut out
+  since it quotes the sentence being retired and one test asserting the quote
+  is still there. the revert check splits cleanly in a fresh clone: reverting
+  README.md alone fails exactly the 3 prose tests with all 84 others green.
+  75 tests → 87. `python main.py` is byte-identical to its pre-fix run and
+  both readme code blocks are still character for character what it prints.
+  the root index row says the gate "adds a precision-1.000 detector for
+  swapped numbers", which is true and does not claim exclusivity, so it was
+  left alone. no other project stacks a min-gate over a similarity score, so
+  there is nothing to port.
 - [fixed 2026-09-05] 11 — the position extension published the aware curve as
   monotone and the tail as its floor, and the curve turns before the tail.
   "the aware curve falls monotonically toward the stable floor ... 0.301x at
@@ -2466,7 +2519,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 15-embedding-quantization | 2026-08-30 |
 | 14-context-window | 2026-08-30 |
 | 13-ann-hnsw | 2026-08-29 |
-| 12-groundedness-scoring | 2026-08-29 |
+| 12-groundedness-scoring | 2026-09-06 |
 | 11-prompt-caching | 2026-09-05 |
 | 10-chunking-strategies | 2026-09-04 |
 | 09-concurrency | 2026-09-05 |
@@ -3367,6 +3420,33 @@ is a new rule worth keeping alongside 09's: a claim about the shape of a curve
 so it has to be checked at a resolution the published grid doesnt choose. the
 sampled rows are evidence for the rows; the word "monotonically" is a claim
 about the ones in between.
+
+12 came back clean on every number and dirty on one description of a
+mechanism. all 75 committed tests pass, `python main.py` is byte-identical
+across reruns and from a fresh clone, and both readme code blocks are
+character for character what it prints — checked mechanically, not by eye,
+along with every loose figure quoted in the prose. the arithmetic ties out in
+both directions: each method's precision, recall, FPR and J reconstruct
+exactly from its own category rows, so the two published tables agree with
+each other. the machinery holds where the project leans on it — `auc` is the
+Mann-Whitney form with half credit for ties and reads the same statistic as
+20's `rocAuc` under each project's own score direction, the threshold sweep
+covers every distinct flagging including flag-nothing at the minimum score,
+ties go to the lowest threshold as the docstring promises, and the tokenizer,
+tf-idf and sentence splitter are imported from 02 and 10 rather than
+reimplemented, so there is no metric drift to find. every claim-level
+specific in the readme reproduces: c06-5 really does score 0.500 on two
+figures, c04-5 and c09-6 really are bag-identical reorderings at cosine
+1.000, c07-4 really is a deletion whose tokens are a strict subset.
+
+what was wrong was a sentence describing a two-channel detector as if it had
+one channel — and the cell that refutes it was printed two lines above it,
+and the correct explanation was already written four bullets down in the
+tradeoffs section. no measurement was missing; the reading just didnt look at
+what it was reading. the rule this adds to 09's and 11's: when a scorer is a
+composition (`min`, a gate, a cap), a sentence about what it catches has to
+say which term did the catching, because the composition will quietly catch
+things on the term nobody is talking about.
 
 ## MECHANISMS
 
