@@ -97,12 +97,16 @@ reading it:
   hallucinations by also flagging every paraphrase, synthesis and negated
   paraphrase in the dataset (FPR 0.720). the only claims they trust are the
   verbatim copies
-- the numeric gate is the opposite temperament: precision 1.000 at FPR 0.000,
-  catching only claims whose numbers the context never states. it catches 6 of
-  7 number swaps; the miss is c06-5, which quotes one real number and one
-  invented one, so half its numbers check out and the score (0.5) clears the
-  threshold. a fraction is the wrong aggregate for evidence of fabrication,
-  one bad number should be enough
+- the numeric gate is the opposite temperament: precision 1.000 at FPR 0.000.
+  but it is `min(cosine, numeric)`, so it flags through two channels and only
+  6 of its 8 flags are numeric — the other two are c07-6 and c09-5,
+  fabrications with no digits in them at all, which pass the numeric check
+  with 1.000 and fall under the threshold on cosine alone. thats the
+  fabricated 2/6 cell, and its the same two claims in both gated columns. on
+  the numeric channel it catches 6 of 7 number swaps; the miss is c06-5, which
+  quotes one real number and one invented one, so half its numbers check out
+  and the score (0.5) clears the threshold. a fraction is the wrong aggregate
+  for evidence of fabrication, one bad number should be enough
 - negation parity buys 7/7 on negation flips and pays exactly the price the
   code promises: all 4 supported claims that legitimately restate a positive
   sentence in negative form ("two migrations never execute at the same time")
@@ -143,6 +147,12 @@ opinion in typescript.
 
 ## fixes
 
+- 2026-09-06 — the reading of the numeric gate row described it as
+  "catching only claims whose numbers the context never states", and the
+  fabricated 2/6 cell one table up refutes that — the gate is
+  `min(cosine, numeric)`, and 2 of the 8 claims it flags (c07-6, c09-5) carry
+  no digits at all and fall on the cosine channel. the bullet now names both
+  channels and the split. no measured number moved, the code was already right
 - 2026-08-29 — the number extractor read digits out of the middle of a token,
   so "p99" handed the numeric gate a 99 that isnt a quantity anyone asserted —
   and since the context says "p99" too, that phantom number always checked out.
