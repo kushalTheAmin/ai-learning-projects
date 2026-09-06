@@ -87,6 +87,12 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
 
 ## fixes
 
+- 2026-09-06 — the irreversibility bullet said "the whole loss is the long-lag
+  column" for the 14.6-point rarity@400 cell, and the two rows above it print
+  medium lag giving up 6 of the 35 probes. now says mostly, with the 29/6 split
+  and the medium column named, in this readme, the root index row and the repo
+  ledger. no measured number moved
+
 - 2026-09-06 — the shrink-repack bullet quoted "2 to 3 per 20-conversation
   cell, pinned by a test" and nothing in the project printed that count — the
   test it named only checked one cell was above zero. the study now prints a
@@ -159,7 +165,7 @@ increm-rarity-25%     1600     99.6%   100.0%   100.0%    98.8%       14563     
 
 reading it:
 
-- **irreversibility is priced in long-lag retention, and only where the summary was earning anything.** rarity at budget 400 in the long regime loses 14.6 points overall (66.3% recompute vs 51.7% incremental), and the whole loss is the long-lag column collapsing from 40.0% to 3.8%. same cell under luhn: gap 0.0 points, because luhn's summary was keeping repeated chatter rather than facts, so there was nothing to lose. a policy has to be good before irreversibility can hurt it
+- **irreversibility is priced mostly in long-lag retention, and only where the summary was earning anything.** rarity at budget 400 in the long regime loses 14.6 points overall (66.3% recompute vs 51.7% incremental) — 35 probes of 240, and 29 of them are the long-lag column collapsing from 40.0% to 3.8%. the other 6 are medium lag, 58.8% to 51.2%, printed in the same two rows: a sixth of the loss lands outside the column, and 7.5 points of medium is not a rounding artifact — it is bigger than the whole rarity@400 gap in the standard regime that the next bullet reads as a real effect. same cell under luhn: gap 0.0 points, because luhn's summary was keeping repeated chatter rather than facts, so there was nothing to lose. a policy has to be good before irreversibility can hurt it
 - **the gap grows with pressure and shrinks with slack.** rarity gaps run 6.7 / 3.7 / 0.0 points across budgets 400 / 800 / 1600 in the standard regime, and 14.6 / 5.4 / 0.4 in the long one. at 1600 nearly everything survives in the raw tail anyway, so the summary is decoration and both shapes agree
 - **what recompute pays for those points is the actual story.** at budget 400 in the long regime it re-reads 13.5x the tokens (91255 vs 6767 per conversation), at 800 it is 7.2x, at 1600 3.4x. and recompute's bill grows with conversation length while incremental's per-call bill is bounded by summary size plus newly evicted text: the standard regime costs recompute 21297 work tokens per conversation, the long regime 91255, 4.3x for 2x the exchanges. that superlinear growth is exactly why nobody ships the recompute shape, and now the retention it buys has a number attached
 - **a transiently long user turn permanently shrinks the summary.** when a call arrives with less room and nothing new to fold, the running summary must repack itself down to the smaller block, and the sentences it sheds do not come back when the next call has normal room again. the shrinks column says how often that actually bites, and the answer is rarely and unevenly — 0 to 6 per 20-conversation cell across the twelve rows above, exactly 0 in three of them, so this is something a run can go without doing at all. it scales with the block rather than the regime: at share 50% in the long regime the same two cells take 11 and 7, because a bigger summary is a bigger thing to have to fit back into a shrunken block. the stateless policy just repacks bigger next call and never notices

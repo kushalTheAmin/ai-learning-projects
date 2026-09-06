@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { estimateTokens } from "../../08-agent-tool-loop/src/messages.js";
-import { runCell } from "../src/experiment.js";
+import { rate, runCell, type Rate } from "../src/experiment.js";
 import { IncrementalAssembler } from "../src/incremental.js";
 import { runIncrementalCell } from "../src/irreversibility.js";
 import { assembleContext, renderTurn, type Turn } from "../src/policies.js";
-import { generateConversations } from "../src/workload.js";
+import { generateConversations, type LagBucket } from "../src/workload.js";
 
 const SYSTEM = "you are the on-call assistant.";
 
@@ -279,6 +279,102 @@ describe("the shrink-repack count is printed and quoted as the run has it", () =
     expect(bullet).toContain("0 to 6");
     expect(bullet).toContain("exactly 0 in three of them");
     expect(bullet).toContain("11 and 7");
+  });
+});
+
+// The headline irreversibility bullet used to say the 14.6-point loss at
+// rarity-25%@400 in the long regime was "the whole loss is the long-lag column
+// collapsing from 40.0% to 3.8%". It is 35 probes of 240, the long-lag column
+// gives up 29 of them and the medium column the other 6 — a sixth of the loss
+// outside the column the bullet handed all of it to. These tests own the
+// split: they recompute it and hold both READMEs to the magnitude word.
+const LOSS_CELL = { share: 0.25, scorer: "rarity" as const, budget: 400 };
+
+interface Split {
+  lost: number;
+  probes: number;
+  points: string;
+  byBucket: Record<LagBucket, { lost: number; rec: string; inc: string }>;
+}
+
+function lossSplit(convs: typeof standardConvs, scorer: "luhn" | "rarity", share: number, budget: number): Split {
+  const rec = runCell({ name: "summarize-evicted", summaryShare: share, summarizer: scorer }, "rec", budget, convs);
+  const inc = runIncrementalCell({ summaryShare: share, summarizer: scorer }, "inc", budget, convs);
+  // Same arithmetic as the entry point's formatter, so the strings this
+  // compares against the README are the ones the run printed into it.
+  const pct = (r: Rate): string => `${(100 * rate(r)).toFixed(1)}%`;
+  const byBucket = {} as Split["byBucket"];
+  for (const b of ["short", "medium", "long"] as const) {
+    byBucket[b] = { lost: rec.byBucket[b].hits - inc.byBucket[b].hits, rec: pct(rec.byBucket[b]), inc: pct(inc.byBucket[b]) };
+  }
+  return {
+    lost: rec.overall.hits - inc.overall.hits,
+    probes: rec.overall.total,
+    points: ((100 * (rec.overall.hits - inc.overall.hits)) / rec.overall.total).toFixed(1),
+    byBucket,
+  };
+}
+
+describe("the irreversibility loss is not all long-lag", () => {
+  const split = lossSplit(longConvs, LOSS_CELL.scorer, LOSS_CELL.share, LOSS_CELL.budget);
+
+  test("the headline cell loses 35 probes: 29 long-lag and 6 medium", () => {
+    expect(split.probes).toBe(240);
+    expect(split.lost).toBe(35);
+    expect(split.points).toBe("14.6");
+    expect(split.byBucket.long).toEqual({ lost: 29, rec: "40.0%", inc: "3.8%" });
+    expect(split.byBucket.medium).toEqual({ lost: 6, rec: "58.8%", inc: "51.2%" });
+    expect(split.byBucket.short.lost).toBe(0);
+    expect(split.byBucket.long.lost + split.byBucket.medium.lost).toBe(split.lost);
+  });
+
+  test("the medium drop is bigger than effects the same section treats as real", () => {
+    // 7.5 points of medium, against the 6.7-point whole-cell rarity@400 gap in
+    // the standard regime that the gap-with-pressure bullet reads as a finding.
+    const standardGap = Number(lossSplit(standardConvs, "rarity", 0.25, 400).points);
+    const mediumDrop = 58.75 - 51.25;
+    expect(mediumDrop).toBeGreaterThan(standardGap);
+  });
+
+  test("medium lag gives up probes in a second cell too, it is not one stray row", () => {
+    const cells = REGIME_BUDGETS.map((b) => lossSplit(longConvs, "rarity", 0.25, b));
+    expect(cells.map((c) => c.byBucket.medium.lost)).toEqual([6, 1, 0]);
+    expect(cells.map((c) => c.byBucket.long.lost)).toEqual([29, 12, 1]);
+  });
+
+  test("the project README bullet splits the loss instead of handing it all to long lag", () => {
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+    const bullet = readme.split("\n").find((l) => l.includes("irreversibility is priced"));
+    expect(bullet, "README has no irreversibility-pricing bullet").toBeDefined();
+    expect(bullet).not.toContain("the whole loss");
+    expect(bullet).not.toContain("priced in long-lag retention");
+    expect(bullet).toContain(`${split.lost} probes of ${split.probes}`);
+    expect(bullet).toContain(`${split.byBucket.long.lost} of them`);
+    expect(bullet).toContain(`${split.byBucket.long.rec} to ${split.byBucket.long.inc}`);
+    expect(bullet).toContain(`${split.byBucket.medium.lost}`);
+    expect(bullet).toContain(`${split.byBucket.medium.rec} to ${split.byBucket.medium.inc}`);
+  });
+
+  // progress.md is what the next pass reads to decide what is already known,
+  // so its completed row has to carry the retraction too — the same two-surface
+  // gap the 2026-08-30 buried-fact fix found.
+  test("the ledger's extension row splits the loss the same way", () => {
+    const ledger = readFileSync(new URL("../../progress.md", import.meta.url), "utf-8");
+    const row = ledger.split("\n").find((l) => l.startsWith("| 14-context-window, incremental extension |"));
+    expect(row, "progress.md has no COMPLETED row for the 14 extension").toBeDefined();
+    expect(row).not.toContain("priced in long-lag retention");
+    expect(row).toContain(`${split.lost} probes of ${split.probes}`);
+    expect(row).toContain(`${split.byBucket.long.lost} of them long-lag`);
+    expect(row).toContain(`${split.byBucket.medium.lost} medium`);
+  });
+
+  test("the root README index row states the same magnitude", () => {
+    const root = readFileSync(new URL("../../README.md", import.meta.url), "utf-8");
+    const row = root.split("\n").find((l) => l.includes("(14-context-window/)"));
+    expect(row, "root README has no index row for 14").toBeDefined();
+    expect(row).not.toContain("priced entirely in long-lag");
+    expect(row).toContain(`${split.byBucket.long.lost} of them the long-lag column`);
+    expect(row).toContain(`${split.byBucket.medium.lost} medium-lag`);
   });
 });
 
