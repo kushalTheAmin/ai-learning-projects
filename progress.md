@@ -188,6 +188,62 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-06] 13 — the ablation read its 145 stranded nodes as the
+  cause of the naive recall drop, and the column it read them off walks from a
+  node no layer-0 search ever starts at. "on tight clusters the naive rule
+  strands 145 of 2000 nodes unreachable from the entry point every search
+  starts at, and recall drops to 0.809" is the sentence the whole
+  neighbor-selection ablation hangs off, and both halves of it are wrong in the
+  same direction. a search does start at the top-layer entry point, but it
+  starts its *descent* there: it walks the upper layers greedily and begins its
+  layer-0 beam at whatever node the descent lands on. on the published naive
+  tight-clusters graph that is 74 distinct nodes over 150 queries, sitting in
+  four different layer-0 components — 61, 88, 1855 and 1926 — so the printed
+  1855 is one component of four, and not even the largest: 3 queries start in a
+  component that reaches 1926 nodes, more than the entry point can, and 10
+  start inside a 61 or 88 node pocket they can never leave. and the causal read
+  is off by more than 5x: of the 287 gold neighbors the naive run misses out of
+  1500 slots, only 51 are unreachable from that query's own layer-0 start; the
+  other 236 sit inside the reachable component and the beam simply settles
+  before it walks to them. the 137 queries that do start in the entry point's
+  own 1855-node component still score 0.811, barely off the 0.809 aggregate, so
+  the stranding is not carrying the drop. the 2026-08-29 fix moved this same
+  walk from node 0 to the entry point on exactly this reasoning ("the entry
+  point is where every search begins") and stopped one layer short of the
+  claim's actual referent. the committed test agreed: `test_reachability_is_
+  probed_from_the_search_entry_point` pins the entry-point start as "the only
+  start that measures what a query can get to", which is the false half, and a
+  green suite kept it there. found and fixed 2026-09-06
+
+  the fix adds the start node the search really uses and prints the split.
+  `HnswIndex.layer0_entry(query)` returns the descent endpoint — extracted from
+  `search`, which now calls it, so not one result or distance count moves —
+  and `reachable_on_layer0` gained an optional start (defaulting to the entry
+  point, so the published 3000/2000/1855/1996 cells are untouched) over a new
+  `reachable_from_on_layer0` that returns the id set. main.py prints a new
+  block under the ablation table: 74 distinct starts, the four component sizes,
+  and 1500 gold slots / 287 missed / 51 unreachable / 236 in reach. the readme
+  paragraph now says the naive rule mostly hurts by making the beam settle
+  early rather than by cutting the graph, and the `layer-0 reachable` gloss
+  says it is a structural stat about the graph rather than a ceiling on what a
+  query sees. new tests/test_layer0_start.py, 14 tests: six pin the start node
+  (74 distinct starts, the four component sizes, the entry point's own is
+  neither the only nor the largest, `reachable_on_layer0()` still defaults to
+  it, `search` really does run its beam from `layer0_entry` — the behaviour pin
+  for the extraction — and the 10 pocket queries return only nodes inside their
+  pocket), four pin the attribution and the edge cases (the 1500/51/236 split
+  with unreachability asserted under a fifth of the misses — the finding
+  restated as an invariant — a heuristic graph with one component per start, an
+  empty index returning None, a one-node index starting at itself), and four
+  pin the readme off whitespace-normalized text so a line wrap cannot make them
+  pass (23's trap), with the `## fixes` section cut out since it quotes the
+  sentence being retired. 36 tests → 50. no measured number moved: `python
+  main.py` is line-for-line what it was apart from the new block and the
+  labelled wall-clock columns. the revert check splits cleanly in a fresh
+  clone: reverting ann/hnsw.py alone fails 11 with 39 green, reverting
+  README.md alone fails exactly the 4 prose tests. the root index row chained
+  stranding to 0.809 the same way, so it was updated. no other project builds a
+  proximity graph, so there is nothing to port.
 - [fixed 2026-09-06] 12 — the reading of the numeric gate row described a
   detector the project does not have. "the numeric gate is the opposite
   temperament: precision 1.000 at FPR 0.000, catching only claims whose
@@ -297,6 +353,22 @@ Fixed items stay listed with their fix date so the history reads in one place.
   0.299x minimum with the turn noted; the 2.4x swing figure holds either way
   (0.722/0.299 = 2.41). no other project sweeps a position curve, so nothing
   to port.
+- [medium] 13, and every python project with a `reuse.py` — the sibling-import
+  shim prepends the sibling project's directory to `sys.path`, so the sibling's
+  top-level modules win over the importing project's own. `ann/reuse.py` does
+  `sys.path.insert(0, str(_SIBLING))` for 02-retrieval-eval, and 02 has a
+  `main.py` exactly as 13 does, so inside 13 a plain `import main` resolves to
+  02's file the moment anything has imported `ann.reuse` first — which the test
+  suite does, since test_integration.py is collected before test_layer0_start
+  .py. found the hard way: the new readme test passed alone and failed in the
+  full suite with `module 'main' has no attribute 'miss_attribution'`. worked
+  around in the test by loading main.py through `importlib` off an explicit
+  path rather than by name. the same `insert(0, ...)` is in 10, 12, 15, 17, 19,
+  21, 23, 25 and 26, all of them pointing at a sibling that has its own
+  `main.py`, so any of them can be made to import the wrong file by import
+  order alone. the fix is `sys.path.append` plus package-qualified imports, or
+  loading the sibling by path the way the test now does — one change, ten
+  copies, and it is a repo-wide consistency item rather than a wrong number
 - [low] 11 — the stable control row is a ratio against a different
   denominator. every volatile position prices against its own no-caching
   baseline of 46288 prospective tokens, and the `stable` row prices against
@@ -2518,7 +2590,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 16-llm-as-judge | 2026-08-31 |
 | 15-embedding-quantization | 2026-08-30 |
 | 14-context-window | 2026-08-30 |
-| 13-ann-hnsw | 2026-08-29 |
+| 13-ann-hnsw | 2026-09-06 |
 | 12-groundedness-scoring | 2026-09-06 |
 | 11-prompt-caching | 2026-09-05 |
 | 10-chunking-strategies | 2026-09-04 |
@@ -3447,6 +3519,30 @@ what it was reading. the rule this adds to 09's and 11's: when a scorer is a
 composition (`min`, a gate, a cap), a sentence about what it catches has to
 say which term did the catching, because the composition will quietly catch
 things on the term nobody is talking about.
+
+13 came back clean on the algorithm and dirty on what the ablation's own
+column means. all 36 committed tests pass, `python main.py` reproduces every
+published number character for character apart from the labelled wall-clock
+columns, and the hnsw is the real thing term for term: the level draw is
+floor(-ln(u)/ln(M)), neighbor selection is the paper's algorithm 4 with
+keep-pruned-connections, the descent runs ef=1 per layer, layer 0 caps at 2M,
+squared L2 orders identically to L2 so no root is taken, ties break by id on
+both sides, and the exact baseline is an independent vectorized scan. recall is
+02's `recall_at_k` imported rather than rewritten. queries are drawn separately
+from the base vectors, so nothing from the eval set touches the index. edge
+cases hold: empty index, single vector, k over n, ef under k, duplicate
+vectors all retrievable, nan/inf and wrong-dim rejected. reruns are identical
+and the two-build determinism test compares links node by node.
+
+what was wrong was a column measuring one thing and a sentence claiming it
+measured another, with a causal story bolted on top that the same run refutes
+by more than 5x. the rule this adds to 09's, 11's and 12's: when a published
+number is "reachable from X", X has to be the point the mechanism actually
+starts at, not the point the algorithm's description starts at — a search
+starts at the entry point the way a flight starts at the gate, and the leg
+being measured begins somewhere else. the 2026-08-29 fix on this same walk
+moved the start node once already and stopped at the first plausible answer;
+checking a start node means running the thing and looking at where it began.
 
 ## MECHANISMS
 

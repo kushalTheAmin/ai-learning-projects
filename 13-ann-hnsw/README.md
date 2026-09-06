@@ -39,9 +39,12 @@ clusters connect internally and barely connect to each other, and a query
 landing in the wrong basin cant escape. the papers heuristic keeps a candidate
 only if it is closer to the new node than to every neighbor already kept,
 which suppresses redundant same-direction links and preserves the rare edge
-that crosses a gap. measured below: on tight clusters the naive rule strands
-145 of 2000 nodes unreachable from the entry point every search starts at,
-and recall drops to 0.809, the heuristic keeps the graph whole at 0.997.
+that crosses a gap. measured below: on tight clusters the naive rule drops
+recall to 0.809 where the heuristic holds 0.997, and it does break the graph
+into pieces — but the breakage is the smaller half of the story. only 51 of
+the 287 gold neighbors it misses are unreachable from where that query's
+layer-0 walk starts; the other 236 sit inside reach and the beam settles
+before it gets to them.
 
 ## how to run
 
@@ -92,13 +95,33 @@ uniform            heuristic   0.861       2000 of 2000
 uniform            naive       0.846       1996 of 2000
 ```
 
-`layer-0 reachable` walks layer-0 links out from the entry point, which is
-where every search begins — those links are one-way, shrink drops the
-back-link when a node runs over its degree cap, so the node you start the
-walk from decides the answer.
+`layer-0 reachable` walks layer-0 links out from the top-layer entry point —
+those links are one-way, shrink drops the back-link when a node runs over its
+degree cap, so the node you start the walk from decides the answer. it is a
+structural stat about the graph, not a ceiling on what a query can see: a
+search descends the upper layers first and starts its layer-0 walk wherever
+the descent lands, which on the naive graph is 74 different nodes over 150
+queries.
+
+so the naive row's 0.188 breaks down like this:
+
+```
+layer-0 walks start at the descent endpoint, not the entry point:
+  74 distinct starts over 150 queries, in components of 61 / 88 / 1855 / 1926
+  the entry point's own component is 1855 of 2000
+1500 gold slots, 287 missed:
+  51 unreachable from that query's own layer-0 start
+  236 inside reach, the beam never walked there
+```
+
+four components, one of them bigger than the entry point's own, and ten
+queries start inside a 61 or 88 node pocket they can never leave. that is
+real damage — but 236 of the 287 misses are nodes the walk could have
+reached and didn't, so the naive rule mostly hurts by making the beam settle
+early, not by cutting the graph.
 
 on uniform data the two rules are 0.015 apart, on tight clusters the gap is
-0.188 and the naive graph is literally disconnected. the heuristic is not a
+0.188 and the naive graph is genuinely in pieces. the heuristic is not a
 tuning detail, it is what makes hnsw survive clustered data, and real
 embedding spaces are clustered. also worth seeing: uniform 32-d data is
 harder for both (0.861 at settings where clustered scores 0.997); with no
@@ -135,6 +158,13 @@ distance computations, not 15x faster in this runtime.
 
 ## fixes
 
+- 2026-09-06 — the ablation read its 145 stranded nodes as the reason naive
+  recall drops to 0.809, and `layer-0 reachable` walked from the top-layer
+  entry point, which is where the descent starts, not the layer-0 walk. added
+  `layer0_entry` — the node a search's beam really starts at — and main.py now
+  prints the split: 74 distinct starts in components of 61/88/1855/1926, and
+  of 287 missed neighbors only 51 are unreachable, 236 were in reach. no
+  published number moved, the graph and every table are what they were
 - 2026-08-29 — `reachable_on_layer0` started its walk at node 0, which is just
   the first vector indexed and plays no part in any search. layer-0 links are
   one-way — shrink drops the back-link when a node hits its degree cap — so

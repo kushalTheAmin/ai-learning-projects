@@ -201,11 +201,22 @@ class HnswIndex:
         if self._entry is None:
             return []
         ef = max(ef, k)
-        entry_points = [self._entry]
-        for layer in range(self._max_level, 0, -1):
-            entry_points = [self._search_layer(query, entry_points, 1, layer)[0][1]]
-        found = self._search_layer(query, entry_points, ef, 0)
+        found = self._search_layer(query, [self.layer0_entry(query)], ef, 0)
         return [(node, dist) for dist, node in found[:k]]
+
+    def layer0_entry(self, query: np.ndarray) -> int | None:
+        """The node a search's layer-0 beam actually starts from: the endpoint
+        of the greedy descent through the upper layers. The top-layer entry
+        point is where the descent starts, not where the layer-0 walk does,
+        and on a graph with one-way layer-0 links the two can sit in different
+        components."""
+        query = self._check(query)
+        if self._entry is None:
+            return None
+        node = self._entry
+        for layer in range(self._max_level, 0, -1):
+            node = self._search_layer(query, [node], 1, layer)[0][1]
+        return node
 
     # -- introspection ------------------------------------------------------
 
@@ -223,20 +234,26 @@ class HnswIndex:
     def neighbors(self, node: int, layer: int) -> list[int]:
         return list(self._links[node][layer])
 
-    def reachable_on_layer0(self) -> int:
-        """Nodes reachable from the entry point following layer-0 links.
-        Layer-0 links are not symmetric — shrink can drop the back-link and
-        leave a one-way edge — so the start node decides the answer, and the
-        entry point is where every search begins. Short of len(self) means
-        the beam cannot walk to part of the graph from there."""
-        if self._entry is None:
-            return 0
-        seen = {self._entry}
-        frontier = [self._entry]
+    def reachable_from_on_layer0(self, start: int) -> set[int]:
+        """Node ids reachable from start following layer-0 links. Those links
+        are not symmetric — shrink can drop the back-link and leave a one-way
+        edge — so the start node decides the answer."""
+        seen = {start}
+        frontier = [start]
         while frontier:
             node = frontier.pop()
             for neighbor in self._links[node][0]:
                 if neighbor not in seen:
                     seen.add(neighbor)
                     frontier.append(neighbor)
-        return len(seen)
+        return seen
+
+    def reachable_on_layer0(self, start: int | None = None) -> int:
+        """How many nodes a layer-0 walk from start can get to, defaulting to
+        the top-layer entry point. That default is a structural stat about the
+        graph, not a ceiling on what a query sees: a search descends the upper
+        layers first and begins its layer-0 walk at layer0_entry(query), which
+        can sit in a different component."""
+        if self._entry is None:
+            return 0
+        return len(self.reachable_from_on_layer0(self._entry if start is None else start))
