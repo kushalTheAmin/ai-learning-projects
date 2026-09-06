@@ -188,21 +188,6 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
-- [high] 14 — "the whole loss is the long-lag column" is not what the two rows
-  under it print. the irreversibility extension's headline bullet reads
-  "rarity at budget 400 in the long regime loses 14.6 points overall (66.3%
-  recompute vs 51.7% incremental), and the whole loss is the long-lag column
-  collapsing from 40.0% to 3.8%". the 14.6 points are 35 probes of 240. the
-  long-lag column gives up 29 of them (32 hits to 3 of 80). the medium column
-  gives up the other 6 — 58.8% to 51.2%, printed in the same two rows two
-  lines above the sentence — so a sixth of the loss lands outside the column
-  the bullet says carries all of it, and a 7.5-point drop in a medium column
-  is not a rounding artifact: it is twice the whole rarity@800 standard-regime
-  gap the same section treats as a real effect. the root README index row
-  states it harder still, "irreversibility is priced entirely in long-lag
-  retention", so the front page carries the same overreach. the fix is the
-  magnitude word and a test pinning the per-bucket split, in both readmes.
-  found 2026-09-06
 - [medium] 14 — the main readme's caveat calls the stateless summarize numbers
   "an upper bound for extractive summarization at each budget", and the
   extension measures a cell where the bound does not hold. `src/policies.ts`
@@ -224,6 +209,45 @@ Fixed items stay listed with their fix date so the history reads in one place.
   point once in a test and diffing its blocks against the readme, would close
   it. same standing gap the 2026-08-30 review noted for `main.ts`.
   found 2026-09-06
+- [fixed 2026-09-06] 14 — "the whole loss is the long-lag column" is not
+  what the two rows under it print. the irreversibility extension's headline
+  bullet reads "rarity at budget 400 in the long regime loses 14.6 points
+  overall (66.3% recompute vs 51.7% incremental), and the whole loss is the
+  long-lag column collapsing from 40.0% to 3.8%". the 14.6 points are 35
+  probes of 240. the long-lag column gives up 29 of them (32 hits to 3 of
+  80). the medium column gives up the other 6 — 58.8% to 51.2%, printed in
+  the same two rows two lines above the sentence — so a sixth of the loss
+  lands outside the column the bullet says carries all of it, and a
+  7.5-point drop in a medium column is not a rounding artifact: it is twice
+  the whole rarity@800 standard-regime gap the same section treats as a real
+  effect. the root README index row states it harder still, "irreversibility
+  is priced entirely in long-lag retention", so the front page carries the
+  same overreach. the fix is the magnitude word and a test pinning the
+  per-bucket split, in both readmes. found and fixed 2026-09-06
+
+  done as proposed, with a test that owns the split. the bullet now reads
+  "priced mostly in long-lag retention", quotes the loss as 35 probes of 240
+  with 29 of them the long-lag column collapsing 40.0% to 3.8%, and names
+  the other 6 as medium lag going 58.8% to 51.2% in the same two rows — with
+  the point that 7.5 medium points is bigger than the whole rarity@400
+  standard-regime gap the next bullet reads as a real effect, so it cannot
+  be waved off as rounding. the root README index row loses "entirely" and
+  carries the same 29/6 split, and so does the COMPLETED ledger row for the
+  extension, which stated it the same way — the two-surface gap the
+  2026-08-30 buried-fact fix found, in the same file. six new tests in
+  tests/incremental.test.ts, 104 → 110: the headline cell's decomposition
+  pinned exactly (35 lost, 29 long, 6 medium, 0 short, and long+medium
+  accounting for all of it), the medium drop asserted larger than the
+  standard-regime gap it is compared against, the medium column shown giving
+  up probes in a second cell too (6 / 1 / 0 against long's 29 / 12 / 1
+  across budgets 400 / 800 / 1600, so it is not one stray row), and both
+  readmes and the ledger row held to the recomputed numbers rather than to
+  literal strings. the test's percent formatter goes through experiment.ts's
+  `rate` so it produces the entry point's exact rounding — 41/80 prints
+  51.2%, not 51.3%. no measured number moved and no run output changed; the
+  gate re-ran both entry points in a clean clone and all 47 readme table
+  lines still match character for character. revert check: reverting only
+  the three prose edits fails the three binding tests.
 - [fixed 2026-09-06] 14 — the shrink-repack bullet quoted a rate per cell that
   no run printed and that the run refutes. "a transiently long user turn
   permanently shrinks the summary ... (2 to 3 such shrink repacks per
