@@ -7,7 +7,7 @@ deterministic, so a change that moves recall is a change in behavior.
 import numpy as np
 import pytest
 
-from main import build_flat, flat_recall, flat_truth, reconstruct
+from main import build_flat, flat_recall, flat_truth, reconstruct, scheme_table
 from quantization.rerank import search_with_rerank
 from quantization.reuse import HnswIndex, ann_recall, clustered_dataset, mean
 from quantization.scalar import (
@@ -52,6 +52,58 @@ class TestFlatRecall:
         i4 = total_bytes("int4-asym-dim", N, DIM)
         assert i4 < i8 < fp32
         assert fp32 / i8 > 3.5 and fp32 / i4 > 7.0
+
+
+class TestSchemeTableMemoryColumns:
+    """The memory columns are the project's headline axis, so every cell in
+    them has to come out of `total_bytes`, the truth row included."""
+
+    LABELS = {"float64 truth": "float64"}
+
+    @staticmethod
+    def _rows(text: str) -> list[tuple[str, int, float, float]]:
+        """(scheme, bytes, B/vec, vs fp32) per data row of a printed table."""
+        rows = []
+        for line in text.splitlines():
+            parts = line.split()
+            if len(parts) < 6 or not parts[-1].endswith("x"):
+                continue
+            label = " ".join(parts[:-5])
+            if label == "scheme":
+                continue
+            rows.append(
+                (label, int(parts[-3]), float(parts[-2]), float(parts[-1][:-1]))
+            )
+        return rows
+
+    def test_every_row_prices_itself_with_total_bytes(self, data, capsys):
+        scheme_table("clustered", data)
+        rows = self._rows(capsys.readouterr().out)
+        assert len(rows) == 5, f"expected 5 scheme rows, got {len(rows)}"
+        for label, size, per_vec, _ in rows:
+            scheme = self.LABELS.get(label, label)
+            assert size == total_bytes(scheme, N, DIM), f"{label} bytes"
+            assert per_vec == pytest.approx(size / N, abs=0.05), f"{label} B/vec"
+
+    def test_vs_fp32_is_the_compression_multiple_in_every_row(self, data, capsys):
+        scheme_table("clustered", data)
+        rows = self._rows(capsys.readouterr().out)
+        fp32 = total_bytes("float32", N, DIM)
+        for label, size, _, printed in rows:
+            assert printed == pytest.approx(round(fp32 / size, 2), abs=1e-9), (
+                f"{label} prints {printed}x in the vs fp32 column but is "
+                f"{fp32 / size:.2f}x the size of fp32's {fp32} bytes"
+            )
+
+    def test_a_store_larger_than_fp32_reads_as_larger(self, data, capsys):
+        """float64 is the one row above fp32, so it is the row that catches a
+        cell written with the ratio the wrong way up."""
+        scheme_table("clustered", data)
+        rows = {label: printed for label, _, _, printed in self._rows(capsys.readouterr().out)}
+        assert rows["float64 truth"] < 1.0 < rows["int8-asym-dim"], (
+            "float64 holds twice fp32's bytes, so its vs fp32 cell must sit "
+            f"below 1.00x like a bigger store, not at {rows['float64 truth']}x"
+        )
 
 
 class TestRerankRecovery:

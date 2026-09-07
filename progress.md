@@ -188,6 +188,61 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-07] 15 — the `vs fp32` column carried two opposite
+  conventions and the truth row used the wrong one. every scheme row computes
+  that cell as `fp32 / size`, a compression multiple — 3.56x, 3.99x, 7.96x.
+  the `float64 truth` row hardcodes the string `'2.00x'`, and the formula for
+  that row gives 0.50x, so the one store in the table larger than fp32 printed
+  as the second most compact thing in it, sitting between 1.00x and 3.56x,
+  directly beside a `B/vec` of 256.0 against fp32's 128.0 saying the opposite.
+  memory is this project's headline axis — the whole study is recall against
+  bytes — so a reciprocal in the memory column is the wrong kind of wrong here.
+  nothing published depends on it: neither readme table carries the float64
+  row, which is why nothing caught it. found and fixed 2026-09-07
+
+  fixed as proposed, one line of `main.py`: the cell now goes through the same
+  `fp32 / f64` the rest of the column uses and prints 0.50x, with the repeated
+  `total_bytes('float64', ...)` call lifted to a local so the row reads like
+  its neighbours. three new tests in `tests/test_integration.py`, 67 → 70,
+  under `TestSchemeTableMemoryColumns`: one captures `scheme_table` and checks
+  every row's `bytes` and `B/vec` against `total_bytes`, one checks every
+  `vs fp32` cell against `fp32 / size` including the truth row, and one pins
+  the direction — float64 must read below 1.00x while int8 reads above it, so
+  a ratio written the wrong way up fails on the row that shows it. the parser
+  splits from the right, so the label `float64 truth` keeps its space and its
+  digits. no measured number moved: the entry point diff before and after is
+  exactly the two truth rows, 2.00x to 0.50x, and every other line of both
+  studies is character for character what it was. gate ran from a fresh clone
+  — 70 pass, the run output matches the local run exactly, and every numeric
+  cell in both readme tables is present in it. revert check: reverting only
+  `main.py` and keeping the tests fails two of the three.
+- [low] 15 — "the recall cost is exactly the reconstruction error" (readme,
+  the concept section) sits one paragraph above a table that prints rmse and
+  recall@10 side by side, so it reads as rmse ordering recall — and the
+  clustered rows invert it: int8-sym-vec at rmse 0.0025 scores 0.987 while
+  int8-asym-dim at rmse 0.0020 scores 0.985, more reconstruction error and
+  less recall cost. in context the sentence almost certainly means the
+  narrower and true thing, that nothing but reconstruction costs recall here
+  (no ann step, no approximation in the query), and the counterexample is 3
+  probes of 1500 on one dataset while the uniform rows order the same way the
+  sentence implies — so this is a wording gap, not a refuted mechanism. worth
+  a clause naming which of the two claims it is. found 2026-09-07
+- [low] 15 — no test pins the published readme tables to what `main.py` prints
+  at the published size. the integration tests run N=400, DIM=16 and assert
+  bounds (`>= 0.95`, `< r8 - 0.05`), so the four-row scheme table and the
+  rerank table at N=3000, DIM=32 could all drift and the suite would stay
+  green. the new `TestSchemeTableMemoryColumns` closes the memory columns
+  this way — captures `scheme_table` and checks every cell against
+  `total_bytes` — and the recall and rmse columns could be bound by the same
+  shape. same standing gap the 2026-08-30 review noted for other entry
+  points. found 2026-09-07
+- [low] 15 — the rerank table's C=10 column cannot show rerank doing anything.
+  reordering 10 candidates cannot change recall@10 of the top 10, so C=10 is
+  arithmetically the quantized-only number, and it is: 0.985 and 0.797, the
+  same two values the scheme table prints two sections up. it is a correct and
+  useful baseline column, but it sits under "**rerank fixes that.**" with no
+  note that the first column is the no-op, so the table reads as if rerank at
+  C=10 bought the 0.985. one clause naming it the baseline. found 2026-09-07
 - [medium] 14 — the main readme's caveat calls the stateless summarize numbers
   "an upper bound for extractive summarization at each budget", and the
   extension measures a cell where the bound does not hold. `src/policies.ts`
@@ -2686,7 +2741,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 18-semantic-caching | 2026-08-31 |
 | 17-confidence-calibration | 2026-08-31 |
 | 16-llm-as-judge | 2026-08-31 |
-| 15-embedding-quantization | 2026-08-30 |
+| 15-embedding-quantization | 2026-09-07 |
 | 14-context-window | 2026-09-06 |
 | 13-ann-hnsw | 2026-09-06 |
 | 12-groundedness-scoring | 2026-09-06 |
@@ -3665,6 +3720,36 @@ is exactly as unowned as a figure copied by hand from another project, and
 "pinned by a test" in the prose is a claim about the suite that has to be read
 against the suite. the second half is 09's whole-column rule again: the quoted
 range came from three cells that agree, and half the published rows disagree.
+
+15's second pass came back clean on everything it computes and dirty on one
+cell it prints by hand. the quantizers match the canonical schemes term for
+term — symmetric is max|x|/127 with codes clipped to [-127, 127], the
+per-dimension grid is the affine variant with a real-valued zero point and
+says so in its docstring, int4 is the same grid at 16 levels and the nibble
+pack/unpack round-trips at every odd and even dim tested. the arithmetic
+behind the prose holds where i checked it: the rogue-dimension step really is
+40/127 = 0.315 against an informative span of 1.78, so ~6 of 255 levels; the
+33x in the rogue-vectors section is 0.2051/0.0062 exactly; uniform's value
+range really is narrower than clustered's (0.999 against 1.782), which is the
+reason the readme gives for int4 doing better there; and the additivity claim
+under hnsw checks out at every ef — ann error plus the 0.015 flat-scan
+quantization gap predicts the int8 curve to within 0.002 at all five points.
+hygiene is clean: `fit_grid` only ever sees the corpus, queries stay float and
+are drawn separately, truth is recomputed against the corrupted corpus in both
+failure modes rather than carried over from the clean one, and two runs of the
+entry point are byte-identical. all 24 numeric cells in the two readme tables
+and every figure in the prose match what `main.py` prints today.
+
+what was wrong was in the memory column, which is the axis the whole project
+is about. this is a new shape for the ledger: not a stale number and not an
+overclaim, but a single cell written in the reciprocal of its own column's
+units, and readable as wrong only by holding it against the column beside it.
+the rule it adds: a hand-written cell in a computed column is a fact with no
+owner, same as 14's unprinted field and 15's own copied figure from 13 —
+if four rows of a column come out of a formula, the fifth has to as well, and
+the cheapest test is the one that runs the formula over every row rather than
+checking the one row that looks suspicious. the three findings left open are
+all low and all about how the project reads rather than what it computes.
 
 ## MECHANISMS
 

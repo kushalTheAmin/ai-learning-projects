@@ -79,9 +79,10 @@ def scheme_table(name: str, data: Dataset) -> None:
     n, dim = data.vectors.shape
     truth = flat_truth(data.vectors, data.queries)
     fp32 = total_bytes("float32", n, dim)
+    f64 = total_bytes("float64", n, dim)
     print(f"-- {name}: {n} vectors, dim {dim}, {len(data.queries)} queries --")
     print(f"{'scheme':<14} {'recall@10':>9} {'rmse':>8} {'bytes':>8} {'B/vec':>6} {'vs fp32':>8}")
-    print(f"{'float64 truth':<14} {'1.000':>9} {'0.0000':>8} {total_bytes('float64', n, dim):>8} {total_bytes('float64', n, dim) / n:>6.1f} {'2.00x':>8}")
+    print(f"{'float64 truth':<14} {'1.000':>9} {'0.0000':>8} {f64:>8} {f64 / n:>6.1f} {fp32 / f64:>7.2f}x")
     for scheme in SCHEMES:
         recon = reconstruct(scheme, data.vectors)
         recall = flat_recall(recon, data.queries, truth)

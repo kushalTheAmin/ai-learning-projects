@@ -67,6 +67,12 @@ python because the vectors, the indexes, and the recall metric all live in the p
 
 ## fixes
 
+- 2026-09-07 — the `float64 truth` row printed 2.00x in the `vs fp32` column,
+  and every other cell in that column is fp32 bytes over row bytes — so the
+  one store bigger than fp32 read as the second most compact thing in the
+  table, right next to a B/vec of 256.0 saying the opposite. now computed like
+  the rest of the column, 0.50x. no measured number moved and neither readme
+  table ever carried that row, so nothing published changed
 - 2026-08-30 — the open question weighing int8 against hnsw's ef knob quoted
   13's sweep as "ef 80 to 320 buys 0.5 points for 6x the distance budget", and
   13's table says ef 80 to 320 is 0.1 points for 4.7x — the 0.5 and the 6x
