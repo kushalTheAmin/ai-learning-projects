@@ -188,6 +188,79 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-07] 17 — the signals extension priced the oracle gap against
+  the signal's own aurc. "the best signal sits at 0.0673 against a floor of
+  0.0227, so about two thirds of the achievable mistake-ranking is information
+  none of these signals carries" is (best - oracle) / best = 0.663, and that
+  denominator already contains the irreducible floor, so the gap was measured
+  against a span no ordering could cross. a fraction of the achievable needs
+  the other end of the span: an ordering that knows nothing about correctness
+  answers a random prefix at every coverage, so its expected prefix risk is the
+  base error rate at every k and its aurc is that rate — 0.2050 on test,
+  confirmed empirically at 0.2052 sd 0.0104 over 200 random permutations.
+  against floor-to-baseline the best signal closes 0.755 and leaves 0.245, about
+  a quarter, not two thirds. the tell was already inside the readme: the shift
+  paragraph one section down says "the signals now capture even less of the
+  achievable ordering than in-distribution", which is true under the baseline
+  (0.465 shifted against 0.755 test) and false under the ratio the readme
+  published (0.418 shifted against 0.337 test, i.e. shift capturing more), so
+  the two sentences about the same quantity pointed opposite ways. the right
+  baseline was already named in the project's own test suite —
+  `test_every_signal_beats_a_random_ordering` reads "a constant signal
+  degenerates to input order, whose AURC sits near the overall error rate" —
+  the headline paragraph just never used it. the claim was also copied into the
+  root readme's index row. `random_aurc` is now the baseline, both risk tables
+  print it next to the floor, and no measured aurc moved. found and fixed
+  2026-09-07
+
+- [medium] 17 — the logit margin is recommended without ever being measured.
+  "if you want an ordering that no recalibration can ever touch, the logit
+  margin is it" is the closing recommendation of the reordering section, and
+  the only number attached to it is its pair disagreement under scaling, 0.0000.
+  its aurc is never printed. it is 0.0686 on raw test, worse than all three
+  signals it is offered against (0.0675 / 0.0680 / 0.0673), and at the 5% error
+  budget it answers 0.517 (620 of 1200) against max softmax's 0.552 (662). the
+  invariance is real and the cost of buying it is unpublished, so the sentence
+  reads as a free win. the fix is one row in the section 3 table, not prose.
+  found 2026-09-07
+
+- [medium] 17 — "swaps the filler phrases for vocabulary the model never saw"
+  overstates what the drift bank does, in three places: the readme's shift
+  paragraph, `data.py`'s module docstring ("vocabulary the training set has
+  never seen") and main.py's printed setup line ("unseen filler vocabulary").
+  16 of 56 unique DRIFT_FILLER tokens are in the train vocabulary and 30 of 70
+  token occurrences are, so 57% of occurrences are unseen, not all. worse for
+  the framing, some of the shared ones are class-bearing rather than neutral —
+  'dashboard' is performance's opening phrase, 'two' comes from auth's "two
+  factor codes", plus 'account', 'change', 'shows' — so the drift bank is not
+  the class-neutral thing FILLER is, and it adds label-correlated noise on top
+  of the ambiguity knob the shift experiment says it is varying. the shift
+  result itself is not in question, only what it is attributed to.
+  found 2026-09-07
+
+- [medium] 17 — "all three aurcs improve a hair (0.0675 to 0.0660, 0.0680 to
+  0.0672, 0.0673 to 0.0666), so the reordering it causes is mildly in the right
+  direction" reads a direction off deltas of 0.0015 / 0.0008 / 0.0007 with no
+  uncertainty attached — the same third-decimal scale the readme correctly
+  refuses to read between the signals two paragraphs earlier. the comparison is
+  paired on the same items so it is less noisy than that refusal, but nothing
+  in the project establishes how much less. same unrun paired-bootstrap
+  machinery as the two open questions already logged against this project.
+  found 2026-09-07
+
+- [low] 17 — signals_main section 5 prints 0-indexed ranks against a 1-indexed
+  total: "msp rank 1166 vs margin rank 1108 of 1200". `rank_msp` is filled from
+  `np.arange(N_TEST)`, so the item is the 1167th of 1200 in the reading "of
+  1200" invites. the readme repeats both numbers. cosmetic in effect — the rank
+  split it illustrates is 58 either way. found 2026-09-07
+
+- [low] 17 — `pair_disagreement` materializes two n x n sign matrices per call,
+  1200 x 1200 each, and signals_main calls it 7 times a run. counting inversions
+  over a sort is O(n log n) for the same number. at n=1200 it costs a fraction
+  of a second and the run is still about a second end to end, so this is the
+  only thing in the project that scales badly rather than a problem today.
+  found 2026-09-07
+
 - [fixed 2026-09-07] 16 — the direction extension published the authored-bonus
   sweep as monotone and the table directly above the word steps backwards.
   "monotone, zero at zero, and grows with the bonus" is the sentence that
@@ -2812,7 +2885,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 21-vector-store-persistence | 2026-09-01 |
 | 20-guardrails | 2026-08-31 |
 | 18-semantic-caching | 2026-08-31 |
-| 17-confidence-calibration | 2026-08-31 |
+| 17-confidence-calibration | 2026-09-07 |
 | 16-llm-as-judge | 2026-09-07 |
 | 15-embedding-quantization | 2026-09-07 |
 | 14-context-window | 2026-09-06 |
