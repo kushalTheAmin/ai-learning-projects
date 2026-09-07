@@ -109,9 +109,12 @@ describe("the authored-bonus sweep", () => {
     }
   });
 
-  it("lean grows with the authored bonus", () => {
+  it("lean rises across the grid without being ordered step to step", () => {
     for (const sweep of result.sweeps) {
       const leans = sweep.rows.map((r) => r.positionLean);
+      // The slack below is a noise floor, not a growth claim: each row is one
+      // noise draw at its own bonus, so an adjacent pair can come out
+      // backwards and does. tests/sweep-resolution.test.ts pins which steps.
       for (let i = 1; i < leans.length; i++) {
         expect(leans[i]!).toBeGreaterThan(leans[i - 1]! - 0.02);
       }

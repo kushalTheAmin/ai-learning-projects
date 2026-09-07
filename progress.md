@@ -188,6 +188,79 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-07] 16 — the direction extension published the authored-bonus
+  sweep as monotone and the table directly above the word steps backwards.
+  "monotone, zero at zero, and grows with the bonus" is the sentence that
+  validates the whole lean statistic against ground truth, and the sigma 0.04
+  row it describes reads 0.000 0.013 0.007 0.040 ... — 0.03 to 0.06 goes down.
+  the sigma 0.12 sweep trips too, one step further out, 0.06 to 0.09 reading
+  0.080 to 0.060. the mechanism is `runSweeps` naming each judge
+  `lean-b${bonus}-n${noiseSigma}` while `judgePair` seeds its rng off
+  `judge.name`, so every row of the sweep is an independent noise draw rather
+  than the same draw under a different bonus. measured on the seed-7 core
+  pairs: a row's lean carries an sd of 0.0047 at sigma 0.04 and 0.0172 at
+  0.12, while the true step from bonus 0.03 to 0.06 is only 0.0131 (mean lean
+  0.0082 against 0.0213 over 400 draws), so an adjacent small-bonus pair is
+  about two sd apart and one draw gets it backwards often. over 400 draws the
+  mean curve is monotone at both sigmas, but a whole sweep lands fully
+  monotone only 0.807 of the time at sigma 0.04 and 0.552 at 0.12 — so
+  monotone was never a property one sweep of this size could establish, and
+  seed 7 drew one of the ones that does not. the committed test made it worse
+  rather than catching it: "lean grows with the authored bonus" walked the
+  adjacent pairs with `toBeGreaterThan(leans[i - 1] - 0.02)`, a slack wide
+  enough to admit both backwards steps, so the title claimed growth while the
+  assertion permitted a drop — 11's exact pattern one project over. found and
+  fixed 2026-09-07
+
+  the fix is the prose and the tests, no measured number moved: the sweep is
+  the right shape to publish, it just cannot carry the word. the readme
+  paragraph now names the backwards step, prices it against the row sd, and
+  quotes the 0.807 / 0.552 monotone share, ending on the distinction that
+  survives — the rise across the grid is resolved, the ordering of adjacent
+  small-bonus rows is not. the root readme index row loses "monotonically" and
+  gains the same share. new tests/sweep-resolution.test.ts, 13 tests: three
+  pin the non-monotonicity as an invariant (each sigma's backwards step by
+  name, exactly one drop per sweep, no drop worse than 0.021), two pin the
+  signal that is real (top of grid clears bottom by more than 0.25, and the
+  coarse ordering — every bonus at or above 0.09 above every bonus at or below
+  0.03 — holds where the fine ordering does not), four pin the mechanism off
+  400 replicate sweeps (the null sd, the true 0.03-to-0.06 gap inside three
+  step-sds, the replicate-mean curve monotone at both sigmas, and the 0.807 /
+  0.552 shares), and four hold the prose — the sweep table character for
+  character against what `runDirectionStudy` prints, the retired sentence
+  gone, the new numbers present, and the root readme row — with the `## fixes`
+  section exempt since it quotes the sentence it retired. the existing slack
+  test was retitled and commented rather than deleted: it now says it checks a
+  rise across the grid and names its own slack as a noise floor. 142 tests →
+  155. `npm run start:direction` is byte-identical to its pre-fix run.
+- [medium] 16 — the suppression map is one draw per cell with the same
+  noise-re-rolled-per-row design the sweep fix just priced. `runSuppression`
+  names its judges `suppress-b${bonus}`, so each of the five bonus rows draws
+  its own noise over the same five gap sets, and "the knee sits where gap
+  equals bonus" is read off a single realization per cell. nothing published
+  is wrong — every column of the printed map is monotone in bonus and the
+  committed test allows 0.05 of slack it does not need, because at 200 pairs
+  per cell the signal there (0.485 down to 0.000 across a column) is an order
+  of magnitude above the row noise the sweep was tripped by. so this is the
+  same defect one function over with the numbers still landing right, which is
+  exactly the state the sweep was in until a draw went the other way. worth a
+  replicate count or a shared noise identity across the bonus axis before the
+  map is quoted at finer gaps. found 2026-09-07
+- [low] 16 — "primacy grades 0.990, identical to calibrated, because there is
+  no second answer to prefer" is the sharpest-finding paragraph's evidence for
+  pointwise being blind to position bias, and the identity is a coincidence of
+  two different noise draws. `gradePointwise` seeds off
+  `${judge.name}|point|${itemId}`, and primacy differs from calibrated only in
+  `positionBonus`, which `latentScore` never reads — so the two judges should
+  be the same judge pointwise, and instead they disagree on 4 of 200 items and
+  print pass rates 0.690 and 0.700 one row apart in the same table. the two
+  accuracy cells landing on 0.990 is luck. re-seeded off the spec that
+  actually feeds the score rather than the name, primacy's pointwise
+  predictions are byte-identical to calibrated's, which is the claim stated
+  exactly instead of demonstrated by coincidence. same root cause as the
+  sweep finding above: the rng identity is keyed on `judge.name`, so two
+  judges differing only in a parameter the call site ignores still draw
+  different noise. found 2026-09-07
 - [fixed 2026-09-07] 15 — the `vs fp32` column carried two opposite
   conventions and the truth row used the wrong one. every scheme row computes
   that cell as `fp32 / size`, a compression multiple — 3.56x, 3.99x, 7.96x.
@@ -2740,7 +2813,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 20-guardrails | 2026-08-31 |
 | 18-semantic-caching | 2026-08-31 |
 | 17-confidence-calibration | 2026-08-31 |
-| 16-llm-as-judge | 2026-08-31 |
+| 16-llm-as-judge | 2026-09-07 |
 | 15-embedding-quantization | 2026-09-07 |
 | 14-context-window | 2026-09-06 |
 | 13-ann-hnsw | 2026-09-06 |

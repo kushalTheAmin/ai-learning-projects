@@ -212,10 +212,21 @@ bonus   0.00    0.03    0.06    0.09    0.12    0.15    0.20    0.25    0.30
 lean    0.000   0.013   0.007   0.040   0.070   0.117   0.187   0.253   0.310
 ```
 
-monotone, zero at zero, and grows with the bonus. but the magnitude is not a
-bonus estimate. the expectation this was coded under was that more noise
-dilutes the signal; measured, 3x noise (sigma 0.12) reads the same bonus
-larger, 0.117 to 0.167 at bonus 0.15, 0.070 to 0.120 at 0.12. the mechanism:
+zero at zero and rising across the grid - but not monotone, and the step that
+goes backwards, 0.03 to 0.06, is the sweep reading its own noise rather than
+the bonus. every row is one noise draw at its own bonus, a row's lean carries
+an sd of 0.005 on these 150 pairs, and the true gap between those two bonuses
+is only about 0.013 - so one draw gets that order wrong often. over 400 draws
+the mean curve is monotone at both sigmas, but a whole sweep lands monotone
+only 0.807 of the time at sigma 0.04 and 0.552 at sigma 0.12, and the sigma
+0.12 sweep trips one step further out, 0.06 to 0.09. so the ordering of
+adjacent small-bonus rows is not something one sweep resolves - the rise
+across the grid is.
+
+the magnitude is not a bonus estimate either. the expectation this was coded
+under was that more noise dilutes the signal; measured, 3x noise (sigma 0.12)
+reads the same bonus larger, 0.117 to 0.167 at bonus 0.15, 0.070 to 0.120 at
+0.12. the mechanism:
 a clean pair whose gap exceeds the bonus never flips, so at the cast's small
 noise the bonus only sways the small-gap pairs, and extra noise hands it
 pairs it could not win alone. so lean is a detector with a sign, not a
@@ -341,6 +352,11 @@ both-order dominates anyway.
 
 ## fixes
 
+- 2026-09-07 — the authored-bonus sweep was published as monotone and its own
+  table steps backwards, 0.03 to 0.06. every row is one noise draw at its own
+  bonus, so at the small end the order is noise — a whole sweep lands monotone
+  only 0.807 of the time at sigma 0.04, 0.552 at 0.12. prose corrected, no
+  measured number moved
 - 2026-08-31 — the champion set credited order randomization with 0.485, which
   is the both-order column — randomized order was never run on that set at all,
   so the cheap protocol was being sold on the 2x protocol's number. the harness
