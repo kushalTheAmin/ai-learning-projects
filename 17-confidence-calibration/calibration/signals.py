@@ -104,6 +104,19 @@ def oracle_aurc(correct: np.ndarray) -> float:
     return float((errors / k).mean())
 
 
+def random_aurc(correct: np.ndarray) -> float:
+    """AURC of an ordering that carries no information about correctness.
+    Every prefix is then a random sample of the items, so its expected
+    error rate is the base error rate at every coverage and the expected
+    area is that same rate. This is the other end of the span the oracle
+    floor bounds from below: a signal is worth what it closes of the
+    distance between the two, and a gap read against a signal's own AURC
+    instead is priced against a span no ordering could cross."""
+    if correct.ndim != 1 or correct.shape[0] == 0:
+        raise ValueError("expected a non-empty 1-d correctness array")
+    return float(1.0 - correct.astype(bool).mean())
+
+
 @dataclass(frozen=True)
 class OperatingPoint:
     answered: int

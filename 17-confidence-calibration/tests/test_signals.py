@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from calibration.data import LABELS, generate_tickets, labels_array
+from calibration.data import DRIFT_FILLER, LABELS, generate_tickets, labels_array
 from calibration.features import build_vocabulary, vectorize
 from calibration.metrics import accuracy, predictions, softmax
 from calibration.model import SoftmaxRegression
@@ -17,9 +17,13 @@ from calibration.signals import (
     negative_entropy,
     oracle_aurc,
     pair_disagreement,
+    random_aurc,
     risk_at_coverage,
     risk_coverage,
 )
+from calibration.temperature import fit_temperature
+
+_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_margin_is_top_minus_runner_up():
@@ -211,6 +215,98 @@ def test_signals_disagree_but_only_a_little(trained):
     probs, _, _ = trained
     rate = pair_disagreement(max_softmax(probs), margin(probs))
     assert 0.0 < rate < 0.25
+
+
+def test_random_aurc_is_the_base_error_rate(trained):
+    """An ordering that carries no information answers a random prefix at
+    every coverage, so its expected prefix risk is the base error rate at
+    every k, and its aurc is that rate."""
+    probs, correct, y_test = trained
+    assert random_aurc(correct) == pytest.approx(1.0 - accuracy(probs, y_test))
+
+
+def test_random_aurc_matches_actual_random_orderings(trained):
+    """The analytic baseline against the thing it stands in for."""
+    _, correct, _ = trained
+    rng = np.random.default_rng(5)
+    draws = [aurc(rng.permutation(correct.shape[0]).astype(np.float64), correct)
+             for _ in range(200)]
+    assert np.mean(draws) == pytest.approx(random_aurc(correct), abs=0.01)
+
+
+def test_random_aurc_rejects_empty_input():
+    with pytest.raises(ValueError):
+        random_aurc(np.array([], dtype=bool))
+
+
+def test_oracle_gap_needs_both_ends_of_the_span(trained):
+    """A signal's distance from the oracle floor is a fraction of nothing
+    until you name the other end. The signal's own aurc is not that end:
+    it already contains the floor, so dividing by it prices the gap
+    against a span no ordering could ever cross."""
+    probs, correct, _ = trained
+    best = min(aurc(fn(probs), correct)
+               for fn in (max_softmax, margin, negative_entropy))
+    floor, baseline = oracle_aurc(correct), random_aurc(correct)
+    missed = (best - floor) / (baseline - floor)
+    against_own_aurc = (best - floor) / best
+    assert 0.0 < missed < 1.0
+    # the two normalizations are not interchangeable, which is the bug
+    assert against_own_aurc > missed + 0.2
+
+
+@pytest.fixture(scope="module")
+def published():
+    """The full signals_main.py pipeline: the fraction of the achievable
+    ordering the best signal closes, in-distribution and under shift."""
+    train = generate_tickets(600, seed=101, ambiguity=0.20)
+    val = generate_tickets(400, seed=202, ambiguity=0.20)
+    test = generate_tickets(1200, seed=303, ambiguity=0.20)
+    shifted = generate_tickets(
+        1200, seed=404, ambiguity=0.35, filler_bank=DRIFT_FILLER
+    )
+    vocabulary = build_vocabulary([t.text for t in train])
+    model = SoftmaxRegression(len(vocabulary), len(LABELS))
+    model.fit(
+        vectorize([t.text for t in train], vocabulary),
+        labels_array(train),
+        epochs=3200,
+        lr=0.5,
+        l2=1e-4,
+    )
+    fit_temperature(model.logits(vectorize([t.text for t in val], vocabulary)),
+                    labels_array(val))
+
+    def closed(tickets):
+        probs = softmax(
+            model.logits(vectorize([t.text for t in tickets], vocabulary))
+        )
+        correct = predictions(probs) == labels_array(tickets)
+        best = min(aurc(fn(probs), correct)
+                   for fn in (max_softmax, margin, negative_entropy))
+        floor, baseline = oracle_aurc(correct), random_aurc(correct)
+        return (baseline - best) / (baseline - floor)
+
+    return closed(test), closed(shifted)
+
+
+def test_readme_prices_the_oracle_gap_against_the_uninformative_baseline(published):
+    """The readme publishes how much of the achievable mistake-ranking
+    these signals miss. That fraction must be the one measured against an
+    uninformative ordering, not against the signal's own aurc."""
+    readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+    body = readme.split("## fixes")[0]
+    closed_test, _ = published
+    assert f"{closed_test:.3f}" in body or f"{closed_test:.1%}" in body, closed_test
+    assert "two thirds of the achievable" not in body.lower()
+
+
+def test_shift_costs_the_signals_ordering_under_the_published_normalization(published):
+    """The readme says the signals capture even less of the achievable
+    ordering under shift. Whatever normalization it publishes has to be
+    the one that makes that sentence true."""
+    closed_test, closed_shift = published
+    assert closed_shift < closed_test
 
 
 def test_entry_point_runs_and_reports(capsys):

@@ -24,6 +24,7 @@ from calibration.signals import (
     negative_entropy,
     oracle_aurc,
     pair_disagreement,
+    random_aurc,
     risk_at_coverage,
 )
 from calibration.temperature import fit_temperature
@@ -53,7 +54,14 @@ def print_risk_table(probs: np.ndarray, correct: np.ndarray, title: str) -> None
             f"  {risk_at_coverage(values, correct, c):.3f}" for c in COVERAGES
         )
         print(f"  {name:<12}{cells}    {aurc(values, correct):.4f}")
-    print(f"  oracle aurc at this accuracy: {oracle_aurc(correct):.4f}")
+    floor, baseline = oracle_aurc(correct), random_aurc(correct)
+    best = min(aurc(fn(probs), correct) for _, fn in SIGNALS)
+    print(f"  oracle aurc at this accuracy: {floor:.4f}")
+    print(
+        f"  uninformative-ordering aurc: {baseline:.4f}"
+        f"  (best signal closes {(baseline - best) / (baseline - floor):.3f}"
+        f" of floor-to-baseline)"
+    )
 
 
 def print_budget_row(probs: np.ndarray, correct: np.ndarray) -> None:
