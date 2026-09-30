@@ -111,7 +111,8 @@ function main(): void {
       `(${SPREAD_SEEDS[0]}..${SPREAD_SEEDS[SPREAD_SEEDS.length - 1]}) ==`,
   );
   console.log("config       wrong-min  wrong-med  wrong-max  wrong-mean  zero-seeds       saved%");
-  for (const spread of seedSpread(DEFAULT_TRAFFIC, SPREAD_SEEDS, SPREAD_CONFIGS)) {
+  const bareSpreads = seedSpread(DEFAULT_TRAFFIC, SPREAD_SEEDS, SPREAD_CONFIGS);
+  for (const spread of bareSpreads) {
     console.log(
       [
         `${spread.label} ${spread.threshold.toFixed(2)}`.padEnd(12),
@@ -229,7 +230,8 @@ function main(): void {
     `\n== margin operating points across ${SPREAD_SEEDS.length} seeds (differing-answer scope) ==`,
   );
   console.log("config          wrong-min  wrong-med  wrong-max  wrong-mean  zero-seeds       saved%");
-  for (const spread of seedSpread(DEFAULT_TRAFFIC, SPREAD_SEEDS, marginSpreadConfigs)) {
+  const marginSpreads = seedSpread(DEFAULT_TRAFFIC, SPREAD_SEEDS, marginSpreadConfigs);
+  for (const spread of marginSpreads) {
     console.log(
       [
         `${spread.label} ${spread.threshold.toFixed(2)}`.padEnd(15),
@@ -242,6 +244,71 @@ function main(): void {
       ].join("  "),
     );
   }
+
+  const bare80 = bareSpreads.find((spread) => spread.label === "word" && spread.threshold === 0.8);
+  const margined75 = marginSpreads.find(
+    (spread) => spread.label === "word m.10" && spread.threshold === 0.75,
+  );
+  if (bare80 === undefined || margined75 === undefined) {
+    throw new Error("the paired comparison needs both word 0.80 and word m.10 0.75 in the spreads");
+  }
+  console.log(
+    "\n== the same seeds, paired: word 0.75 margin 0.10 minus bare word 0.80 ==",
+  );
+  console.log(
+    "the two rows above compared draw by draw rather than range against range",
+  );
+  console.log("seed      bare-wrong  marg-wrong  d-wrong  bare-saved  marg-saved  d-saved");
+  const wrongDeltas: number[] = [];
+  const savedDeltas: number[] = [];
+  for (let i = 0; i < SPREAD_SEEDS.length; i++) {
+    const seed = SPREAD_SEEDS[i];
+    const bareWrong = bare80.perSeedWrong[i];
+    const margWrong = margined75.perSeedWrong[i];
+    const bareSaved = bare80.perSeedSaved[i];
+    const margSaved = margined75.perSeedSaved[i];
+    if (
+      seed === undefined ||
+      bareWrong === undefined ||
+      margWrong === undefined ||
+      bareSaved === undefined ||
+      margSaved === undefined
+    ) {
+      continue;
+    }
+    wrongDeltas.push(margWrong - bareWrong);
+    savedDeltas.push(margSaved - bareSaved);
+    console.log(
+      [
+        String(seed).padEnd(8),
+        pad(String(bareWrong), 10),
+        pad(String(margWrong), 11),
+        pad(String(margWrong - bareWrong), 8),
+        pad(pct(bareSaved), 11),
+        pad(pct(margSaved), 11),
+        pad(`${((margSaved - bareSaved) * 100).toFixed(2)}pt`, 8),
+      ].join("  "),
+    );
+  }
+  const wrongBetter = wrongDeltas.filter((delta) => delta < 0).length;
+  const wrongWorse = wrongDeltas.filter((delta) => delta > 0).length;
+  const wrongMean = wrongDeltas.reduce((sum, value) => sum + value, 0) / wrongDeltas.length;
+  const wrongSd = Math.sqrt(
+    wrongDeltas.reduce((sum, value) => sum + (value - wrongMean) ** 2, 0) / (wrongDeltas.length - 1),
+  );
+  const savedMean = savedDeltas.reduce((sum, value) => sum + value, 0) / savedDeltas.length;
+  console.log(
+    `wrong: better on ${wrongBetter}, worse on ${wrongWorse}, tied on ` +
+      `${wrongDeltas.length - wrongBetter - wrongWorse}  ` +
+      `mean ${wrongMean.toFixed(2)}  sd ${wrongSd.toFixed(3)}  ` +
+      `se ${(wrongSd / Math.sqrt(wrongDeltas.length)).toFixed(3)}`,
+  );
+  console.log(
+    `saved: better on ${savedDeltas.filter((delta) => delta > 0).length} of ${savedDeltas.length}  ` +
+      `min ${(Math.min(...savedDeltas) * 100).toFixed(2)}pt  ` +
+      `max ${(Math.max(...savedDeltas) * 100).toFixed(2)}pt  ` +
+      `mean ${(savedMean * 100).toFixed(2)}pt`,
+  );
 }
 
 main();

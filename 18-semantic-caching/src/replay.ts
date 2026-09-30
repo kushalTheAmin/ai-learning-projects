@@ -142,6 +142,12 @@ export interface SeedSpread {
   threshold: number;
   /** Wrong serves on each seed, in SPREAD_SEEDS order. */
   perSeedWrong: number[];
+  /**
+   * Saved-vs-no-cache fraction on each seed, same order. Kept per seed and
+   * not just as a range so two operating points can be compared paired on
+   * the same traffic draws rather than range against range.
+   */
+  perSeedSaved: number[];
   wrongMin: number;
   wrongMedian: number;
   wrongMax: number;
@@ -195,6 +201,7 @@ export function seedSpread(
     label: config.label ?? config.featurizer.name,
     threshold: config.threshold,
     perSeedWrong: [],
+    perSeedSaved: [],
     wrongMin: 0,
     wrongMedian: 0,
     wrongMax: 0,
@@ -203,14 +210,12 @@ export function seedSpread(
     savedMin: 0,
     savedMax: 0,
   }));
-  const savedByConfig: number[][] = configs.map(() => []);
   for (const seed of seeds) {
     const traffic = generateTraffic({ ...base, seed });
     for (let i = 0; i < configs.length; i++) {
       const config = configs[i];
       const spread = spreads[i];
-      const saved = savedByConfig[i];
-      if (config === undefined || spread === undefined || saved === undefined) continue;
+      if (config === undefined || spread === undefined) continue;
       const result = runReplay(
         traffic,
         config.featurizer,
@@ -219,14 +224,12 @@ export function seedSpread(
         config.marginPolicy,
       );
       spread.perSeedWrong.push(result.semanticWrong);
-      saved.push(result.savedVsNoCache);
+      spread.perSeedSaved.push(result.savedVsNoCache);
     }
   }
-  for (let i = 0; i < spreads.length; i++) {
-    const spread = spreads[i];
-    const saved = savedByConfig[i];
-    if (spread === undefined || saved === undefined) continue;
+  for (const spread of spreads) {
     const wrongs = spread.perSeedWrong;
+    const saved = spread.perSeedSaved;
     if (wrongs.length === 0) continue;
     spread.wrongMin = Math.min(...wrongs);
     spread.wrongMax = Math.max(...wrongs);

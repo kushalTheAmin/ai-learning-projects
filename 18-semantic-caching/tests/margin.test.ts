@@ -268,8 +268,11 @@ describe("full-replay facts the readme quotes", () => {
   });
 
   it(
-    "word 0.75 with margin 0.10 beats bare word 0.80 on both axes across all 20 seeds",
+    "word 0.75 with margin 0.10 out-saves bare word 0.80 across all 20 seeds, and out-risks it only on the mean",
     () => {
+      // The savings assertion holds seed by seed; the wrong-serve one is a
+      // comparison of two means and nothing stronger — paired per seed the
+      // margin is worse on 6 of the 20. See margin-vs-threshold.test.ts.
       const margined = seedSpread(DEFAULT_TRAFFIC, SPREAD_SEEDS, [
         { featurizer: word, threshold: 0.75, marginPolicy: differing(0.1), label: "word m.10" },
       ])[0]!;
