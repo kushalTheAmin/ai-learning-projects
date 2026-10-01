@@ -11,7 +11,7 @@
  */
 
 import { loadPiiCorpus, loadPrompts } from "./dataset.js";
-import { evalInjection, evalPii } from "./report.js";
+import { entropyGateProbe, evalInjection, evalPii } from "./report.js";
 import { runPipeline, type PipelineConfig } from "./pipeline.js";
 import type { PiiType } from "./pii.js";
 
@@ -63,6 +63,32 @@ function main(): void {
     `  entropy gate OFF   P ${entropyOff.overall.precision.toFixed(3)}  (fp ${entropyOff.overall.fp}) ` +
       `- a low-entropy placeholder is now flagged as a secret`,
   );
+
+  const gate = entropyGateProbe(corpus);
+  console.log(
+    `\nthe entropy gate's other side (it keeps a token at >= ${gate.threshold.toFixed(3)} bits/char):`,
+  );
+  console.log(
+    `  entropy is capped by log2(distinct characters), so a hex token cannot beat ` +
+      `${gate.hexCeiling.toFixed(3)} - a perfectly balanced one lands exactly on the gate`,
+  );
+  for (const row of gate.tokens) {
+    console.log(
+      `  ${row.label.padEnd(20)} ${row.bits.toFixed(3)}  ${row.clearsGate ? "kept" : "rejected"}`,
+    );
+  }
+  console.log(`  a 20 char token at the candidate regex's own floor, by repeated characters:`);
+  for (const row of gate.atFloor) {
+    console.log(
+      `    ${String(row.repeats)} repeated  ${row.bits.toFixed(3)}  ${row.clearsGate ? "kept" : "rejected"}`,
+    );
+  }
+  for (const gold of gate.goldPrefixless) {
+    console.log(
+      `  the corpus' only prefix-less gold secret: ${String(gold.length)} chars, ` +
+        `${String(gold.distinct)} distinct, ${gold.bits.toFixed(3)} - nothing here prices the recall side`,
+    );
+  }
 
   section("2. PROMPT INJECTION SCORING (attacks vs benign, as a ranker)");
   const attacks = prompts.filter((p) => p.kind === "attack").length;
