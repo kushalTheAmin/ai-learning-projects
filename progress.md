@@ -188,6 +188,87 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-01] 20 — the entropy gate was published as a precision check
+  whose risk was false positives, and it errs the other way. the open question
+  named the example: "real secrets and real prose overlap in entropy near the
+  boundary (a git sha is high entropy and not a secret), so the gate has a
+  false-positive floor a threshold sweep would map". `entropyBitsPerChar` is
+  empirical shannon entropy over the string's own character frequencies, so it
+  is bounded above by log2(distinct characters) — a hex token cannot beat 4.000
+  and the gate keeps a token at >= 4.000, so only a perfectly balanced hex
+  string ever clears it. a real 40 char git sha scores 3.928, a real md5 3.391,
+  and `detectPii` returns nothing for either: the one false positive the readme
+  named is structurally a reject. the direction the gate does err is recall, and
+  at the candidate regex's own 20 character floor it is steep — the length
+  ceiling there is log2(20) = 4.322, so a token drops under the gate as soon as
+  four of its characters repeat (4.322, 4.222, 4.122, 4.022, then 3.922). every
+  hex-shaped credential is invisible to the detector at any length. the ablation
+  table prices only the side that flatters the check ("entropy gate OFF P 0.969,
+  fp 1") and the corpus cannot price the other: its single prefix-less gold
+  secret, pii-10, is 32 characters all distinct at exactly 5.000 bits, the most
+  favorable input that exists. found and fixed 2026-10-01
+
+  the fix is the readme and one printed block, no measured number moved. new
+  `entropyGateProbe` in src/report.ts derives the rows from the same
+  `entropyBitsPerChar` and `detectPii` the detector uses — the hex ceiling from
+  a perfectly balanced hex string, the two real digests, the 20 char floor by
+  repeated characters, and the prefix-less gold secrets found by running
+  `detectPii` with an unreachable gate so only the prefix rules can fire.
+  `npm start` prints it under the ablations. the readme's section 1 now follows
+  the ablation with the cap and what it costs, and the open question is rewritten
+  to ask about a length-aware gate instead of a false-positive sweep. new
+  tests/entropy-gate.test.ts, 10 tests, 86 -> 96: three pin the alphabet cap and
+  that the sha and the md5 are rejects, four pin the recall side (the five floor
+  rows against the real detector, not against arithmetic, and the all-distinct
+  gold secret), three hold the readme prose. gate ran from a fresh clone — 96
+  pass, typecheck clean, run output matches the local run and every readme number
+  is present in it except four prose figures and the 100%/25% rounding the
+  category table already reformatted. revert check: reverting only the readme
+  fails the three prose tests, reverting src/report.ts too fails collection.
+
+- [medium] 20 — the roc-auc gloss drops the tie convention in the one place it
+  decides the number. section 2 says "judged as a ranker, so the number is
+  roc-auc, how often an attack outscores a benign message", and `rocAuc` gives
+  ties half credit, which 12's `auc` docstring states outright ("ties counting
+  0.5") and this one does not. ties are not a rounding detail in the baseline
+  column: 6 of 14 attacks and 10 of 12 benign both score 0, so 60 of the 168
+  pairs are ties and they carry 30 of the 122.5 wins. strictly outscoring, the
+  readme's own words, the baseline is 0.536 and the hardened 0.810, against the
+  published 0.729 and 0.890. the published pair is the correct roc-auc and the
+  gloss is the standard one, but it understates the lift it exists to show —
+  0.161 published against 0.274 strict — and it does so because the baseline's
+  failure mode is "no rule fires at all", which the tie credit rewards. found
+  2026-10-01
+
+- [low] 20 — one abutting character walks the base64 layer. the candidate regex
+  is `[A-Za-z0-9+/]{24,}={0,2}`, so any alphanumeric run touching the blob is
+  swallowed into it, and `Buffer.from(s, "base64")` does not reject a misaligned
+  string, it decodes it to garbage. atk-12 scores 8 because its blob has a space
+  in front of it; the identical payload written "runaWdub3Jl..." scores 0, and so
+  does every one-, two- and three-character prefix tried. the readme's third open
+  question asks what iteration cap makes nesting safe, which is the expensive
+  version of this; the cheap version is a deleted space and no iteration cap
+  helps, the candidate needs to be split on the longest decodable alignment
+  rather than taken whole. found 2026-10-01
+
+- [low] 20 — the one unicode test names the thing it does not test.
+  tests/pii.test.ts has "counts offsets in utf-16 code units past astral and
+  accented characters" over "café ☕ ping jozef@bistro.example now", and nothing
+  in it is astral: ☕ is U+2615 and the accents are precomposed, so every
+  character is one code unit and the test would pass against a code-point
+  implementation too. pii-19's note says the same thing ("offsets must count code
+  units correctly") over the same BMP-only text. the detector is actually right
+  on a surrogate pair — "🙂🙂 mail me at a@b.com ok" returns start 16, which is
+  the code-unit offset — so this is an untested claim, not a defect, and one
+  astral character in the corpus or the test would close it. found 2026-10-01
+
+- [low] 20 — section 3's benign sentence names two of the three types it
+  scrubs. "same 4 pii spans scrubbed out of benign model output (the summarizer
+  echoes the users card and email back, redaction catches them before they
+  leave)" — the four are ben-04's email, ben-06's card and email, and ben-08's
+  ssn. the ssn is the one type the sentence leaves out, and it is the only
+  benign item whose pii is neither a card nor an email. found 2026-10-01
+
 - [fixed 2026-09-30] 18 — the margin section published a mean difference as a
   per-seed dominance. "across the 20 seeds the margin beats the threshold as a
   knob outright: word at 0.75 with margin 0.10 averages 1.00 wrong serves and
@@ -2971,7 +3052,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 23-multi-hop-retrieval | 2026-09-01 |
 | 19-eval-regression | 2026-09-01 |
 | 21-vector-store-persistence | 2026-09-01 |
-| 20-guardrails | 2026-08-31 |
+| 20-guardrails | 2026-10-01 |
 | 18-semantic-caching | 2026-09-30 |
 | 17-confidence-calibration | 2026-09-07 |
 | 16-llm-as-judge | 2026-09-07 |
@@ -3010,6 +3091,21 @@ and roc-auc and the threshold sweep are imported from 20 rather than
 reimplemented, so there is no metric drift to find. what was wrong was the
 escalation section reading two structural zeros as measurements — fixed, and
 the four robustness items behind it are open above.
+
+20 came back clean on every measured number and dirty on the direction of one
+check. the run reproduces character for character: pii precision/recall 1.000 on
+31 gold spans with both ablations at 0.969, roc-auc 0.729 baseline against 0.890
+hardened (both recomputed by hand from the 14 x 12 score matrix, half credit for
+ties), and the pipeline's 7/4/2 and 11/2/1 attack rows traced item by item —
+every verbatim leaker is caught by the canary in both configs, the four attacks
+hardening moves are atk-09 through atk-12, and the residual undetected leak is
+atk-13, a paraphrase scoring 0, exactly as the readme says. the detectors hold on
+their own terms: all six luhn/prefix/ssn-field/octet/boundary guards reject the
+corpus' hard negatives for the stated reason, offsets are code units and survive
+a surrogate pair, every module returns rather than throws on empty input, and
+22's `rocAuc` is an import from this project rather than a second copy, so there
+is no auc drift to find. what was wrong was the one thing the run never prints:
+the entropy gate's cost. fixed above, four smaller items open behind it.
 
 02 came back clean on its own code: tf-idf matches sklearn's TfidfVectorizer to
 1.1e-16 on every committed query, bm25 matches the lucene formula term by term,
