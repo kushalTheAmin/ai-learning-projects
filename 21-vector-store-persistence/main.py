@@ -282,6 +282,23 @@ def experiment_tombstones(base: MutableHnswIndex, queries: np.ndarray) -> None:
     print()
 
 
+def seed_shape_rows(
+    runs: list[list[tuple[float, float]]],
+) -> list[tuple[int, list[tuple[float, float]]]]:
+    """Per tie draw, the attack's rows, paired with the seed that drew it.
+
+    The min-max band is not the shape. A draw that falls at the first batch
+    and then stays flat and a draw that holds and then cliffs give the same
+    band, so which of the two the graph does cannot be read off the band or
+    off any single column.
+    """
+    if len(runs) != len(HUB_TIE_SEEDS):
+        raise ValueError(
+            f"expected {len(HUB_TIE_SEEDS)} runs, one per tie seed, got {len(runs)}"
+        )
+    return list(zip(HUB_TIE_SEEDS, runs))
+
+
 def hub_attack_rows(
     source: MutableHnswIndex,
     queries: np.ndarray,
@@ -374,6 +391,14 @@ def experiment_unlink(
             f"{count:7d} | {span(heuristic_runs, 0)} | {span(heuristic_runs, 1)} | "
             f"{span(naive_runs, 0)} | {span(naive_runs, 1)}"
         )
+
+    print(
+        "the band is not the shape, so the naive column per tie draw "
+        "(recall / live reachability):"
+    )
+    print("tie seed | " + " | ".join(f"{count:13d}" for count in UNLINK_STEPS))
+    for seed, rows in seed_shape_rows(naive_runs):
+        print(f"{seed:8d} | " + " | ".join(f"{r:.3f} / {h:.3f}" for r, h in rows))
     print()
 
 

@@ -111,12 +111,19 @@ batch here, and the tie has to be broken on something: a seed, redrawn five
 times, since breaking it on the node id would quietly remove the earliest
 inserts instead of the hubs. the same attack on a graph built with naive
 M-closest selection (13's ablation, same vectors, same attack, different
-edges) shrugs off 10% and then goes: at 20% removed live reachability falls
-to 0.758 and recall to 0.724, at 30% to 0.633 and 0.597, against an already-
-worse 0.844 start. across the five tie draws that is 0.621 to 0.743
-reachability and 0.597 to 0.723 recall at 30%, where the heuristic graph
-holds reachability 1.000 and recall 0.980 to 0.999, so the gap is much
-wider than the draw. the heuristic's job in 13 was keeping rare
+edges) comes apart, and the five draws disagree about when. at tie seed 0 it
+reads as a cliff — reachability 1.000 through 10% removed, then 0.758 at 20%
+and 0.633 at 30% — but thats one draw of five. 3 of the 5 lose the graph at
+the first batch of 100 (5%): reachability 0.751 at seed 1, 0.882 at seed 2,
+0.872 at seed 4, and by 200 removals only seed 0 is still whole. seed 1 never
+cliffs — 0.751 after 100 and 0.743 after 600, a quarter of the live set gone
+from the first batch and flat from there. the bands over the draws are
+reachability 0.751-1.000 at 100 removals and 0.621-0.743 at 600, recall
+0.755-0.843 and 0.597-0.723, against an already-worse 0.844 start. the
+heuristic graph holds reachability 1.000 and recall 0.980-0.999 at every step
+and every draw, so the gap is much wider than the draw — what the draw
+decides is whether the naive graph looks like it survived the first 10% or
+never did. the heuristic's job in 13 was keeping rare
 cross-cluster edges at build time; this is the same property read as
 redundancy under damage. naive graphs route through fewer, more loaded
 nodes, so taking the loaded ones out cuts the graph in pieces. tombstones,
@@ -214,6 +221,13 @@ rebuilt the index first, and one implementation per language per mechanism
 is a repo rule.
 
 ## fixes
+
+- 2026-10-01 — section 5 read the naive collapse off tie seed 0 and called it
+  "shrugs off 10% and then goes" — thats 1 draw of 5, and the only one still
+  whole at 200 removals. main.py prints the naive column per draw now and the
+  section quotes the bands at every step: 3 of 5 draws are down at the first
+  batch of 100, and seed 1 never cliffs, 0.751 to 0.743 across the whole
+  attack. no measured number moved
 
 - 2026-09-01 — section 5's hub attack was not picking hubs. layer-0 degree
   caps at 32 and 675 of the 2000 nodes sit exactly there, so ranking by

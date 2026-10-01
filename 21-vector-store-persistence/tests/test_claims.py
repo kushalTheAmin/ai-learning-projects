@@ -100,3 +100,46 @@ class TestReadme:
     def test_the_cap_is_named_where_the_attack_is_described(self, numbers):
         section = numbers.split("**5.", 1)[1]
         assert "32" in section, "section 5 must name the layer-0 degree cap"
+
+    def test_the_retired_cliff_claim_is_gone(self, numbers):
+        section = numbers.split("**5.", 1)[1]
+        assert "shrugs off 10%" not in section
+
+    def test_section_five_publishes_the_first_batch_spread(self, numbers):
+        section = numbers.split("**5.", 1)[1]
+        assert "0.751" in section, "section 5 must publish the 100-removal reach min"
+        assert "first batch" in section
+
+    def test_section_five_labels_the_narrative_column_as_one_draw(self, numbers):
+        section = numbers.split("**5.", 1)[1]
+        assert "tie seed 0" in section
+
+
+class TestCollapseShape:
+    """The naive column's shape belongs to the tie draw, not to the graph.
+
+    hub_attack_rows reports one draw. main.py runs five, and the min-max
+    band it prints cannot tell a draw that falls at the first batch and
+    then stays flat from a draw that holds and then cliffs — which is how
+    section 5 came to describe the naive build as shrugging off 10%.
+    """
+
+    def test_one_draw_cannot_establish_the_shape(self, entry_point, naive_index):
+        queries = np.random.default_rng(5).uniform(0.0, 1.0, size=(20, 8))
+        steps = (30, 60)
+        first = [
+            entry_point.hub_attack_rows(naive_index, queries, seed, steps=steps)[0][1]
+            for seed in entry_point.HUB_TIE_SEEDS
+        ]
+        assert min(first) < 0.5 < max(first), f"first-batch spread collapsed: {first}"
+        assert max(first) - min(first) > 0.5
+
+    def test_seed_shape_rows_reports_every_draw_and_every_step(self, entry_point):
+        runs = [[(0.9, 1.0), (0.8, 0.9)] for _ in entry_point.HUB_TIE_SEEDS]
+        rows = entry_point.seed_shape_rows(runs)
+        assert [seed for seed, _ in rows] == list(entry_point.HUB_TIE_SEEDS)
+        assert all(values == [(0.9, 1.0), (0.8, 0.9)] for _, values in rows)
+
+    def test_seed_shape_rows_refuses_a_run_per_seed_mismatch(self, entry_point):
+        with pytest.raises(ValueError, match="runs"):
+            entry_point.seed_shape_rows([[(0.9, 1.0)]])
