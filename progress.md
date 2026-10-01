@@ -228,7 +228,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
   readme fails the three prose tests, reverting only main.py fails the two
   `seed_shape_rows` tests.
 
-- [high] 21 — the repair extension's reselect verdict holds for one of its
+- [fixed 2026-10-01] 21 — the repair extension's reselect verdict held for one of its
   two selection rules and is published for both. "**reselect is worse than
   doing nothing.** re-selecting whole link lists under the cap drops 11137
   surviving edges over the attack and ends at reachability 0.135, far below
@@ -250,6 +250,36 @@ Fixed items stay listed with their fix date so the history reads in one place.
   allowed to subtract connectivity is an attack with good intentions" is the
   naive column's sentence. the root index row repeats the 0.135 without the
   rule. found 2026-10-01
+
+  the fix is both readmes, no measured number moved and no code touched —
+  repair_main.py already printed every variant in its own labelled column, the
+  prose read two of them as one. the verdict headline is now "reselect is worse
+  than doing nothing — when the re-selection is nearest-only", the 11137 edges
+  and 0.135 are attributed to the naive column, and that column is quoted at
+  every step (0.633 / 0.633 / 0.128 / 0.135 against bare's 1.000 / 1.000 /
+  0.758 / 0.633, recall ending 0.549 against 0.597) so "worse than doing
+  nothing" is checkable rather than asserted off the last cell. the heuristic
+  column is published beside it: 11335 dropped edges, reachability 0.759 /
+  0.761 / 0.637 / 0.769, worse than bare at 100, 200 and 400 removed and
+  better at 600, recall at or above bare throughout — which makes the claim
+  step-dependent as well as rule-dependent, as the finding said. "an attack
+  with good intentions" is kept and labelled as the naive column's sentence,
+  and the reading is narrowed to 13's build ablation turning up a fourth time.
+  the cost section's "for a graph worse than bare unlinking" is replaced by
+  what heuristic reselect actually ends on, 0.769 against bare's 0.633, under
+  a fill patch costing a quarter as much and nowhere near the rebuild's 1.000,
+  with naive reselect's 737 per removal for 0.135 named separately. the root
+  index row carries the rule and both outcomes now. six new tests in
+  tests/test_claims.py, 77 -> 83: four pin the repair section's prose against
+  a new `repair_section` fixture, one pins the root index row, and one
+  recomputes both reselect rules on the 300-node naive fixture to pin that
+  they land on opposite sides of bare (0.189 and 0.952 against bare's 0.193)
+  — that last one passes before the fix too, it describes behaviour that was
+  already right. gate ran from a fresh clone: 83 pass, repair_main.py
+  byte-identical to the local run, and all 45 distinct numeric tokens in the
+  readme's repair section appear verbatim in the run output. revert check
+  splits cleanly — reverting only the project readme fails the four prose
+  tests, reverting only the root readme fails the index-row test.
 
 - [medium] 21 — `MutableHnswIndex.restore` validates five header fields
   against `size` and not the sixth. vectors shape, finiteness, link count,
