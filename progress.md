@@ -188,6 +188,94 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-09-30] 18 — the margin section published a mean difference as a
+  per-seed dominance. "across the 20 seeds the margin beats the threshold as a
+  knob outright: word at 0.75 with margin 0.10 averages 1.00 wrong serves and
+  saves 84.6% to 86.6%, while bare word at 0.80 averages 1.15 wrong and saves
+  79.1% to 82.4%. less risk and two to four points more savings at once" is the
+  closing verdict of the project's biggest section, and the root readme index
+  row said the same thing harder — "dominates bare word 0.80 on both axes ...
+  so the margin is the better knob than the threshold it replaces". the savings
+  half is real and per-seed. the risk half is two means 0.15 apart. paired on
+  the same 20 traffic draws the margined config serves fewer wrong answers on 7
+  seeds, more on 6, and the same on 7 — mean difference 0.15 against a paired sd
+  of 1.461, se 0.327, so inside one standard error of zero. two of the four risk
+  columns the run already printed go the other way and were sitting right under
+  the sentence: zero-wrong on 10 seeds of 20 against the bare threshold's 12,
+  median 0.5 against 0.0. "two to four points more savings" was not the paired
+  gap either, it was read off the range endpoints (84.6 - 82.4 = 2.2 and
+  86.6 - 82.4 = 4.2); the paired gap is 3.71 to 5.98 points, mean 4.94, and
+  better on all 20 seeds, so the cost claim was understated by the same mistake
+  that overstated the risk one. the committed test made it worse rather than
+  catching it, 16's exact pattern: titled "word 0.75 with margin 0.10 beats bare
+  word 0.80 on both axes across all 20 seeds" while asserting
+  `margined.wrongMean < bare.wrongMean` for the risk half — a mean comparison
+  under a per-seed title. found and fixed 2026-09-30
+
+  the fix is the prose and the tests, no measured number moved. `seedSpread`
+  already collected per-seed savings into a throwaway local, so it keeps them as
+  `perSeedSaved` and `npm start` prints the two rows compared draw by draw — the
+  per-seed wrong counts, the per-seed savings, both deltas, and the better/worse/
+  tied counts with the mean, sd and se. no extra replays: the two existing
+  spread calls already ran both configs over all 20 seeds. the entry point diff
+  is that one new block and nothing else, character for character. both readmes
+  now split the axes — savings dominate every seed, the risk side is a mean, two
+  columns reverse, and what survives is the tail (worst seed 9 to 6, seeds
+  serving 3 or more from 3 to 1, and where the margin is worse it is worse by 1
+  or 2). the mis-titled test was retitled and commented rather than deleted: it
+  now says it checks savings per seed and risk on the mean, and points at the new
+  file. new tests/margin-vs-threshold.test.ts, 12 tests, 102 -> 114: one pins
+  `perSeedSaved` against the range it summarizes, two pin the cost dominance
+  (every seed, and the 3.71/5.98/4.94 paired gap against the 2.2/4.2 endpoints
+  the retired sentence used), four pin the risk story (the two means, the
+  7/6/7 paired counts, the mean inside one se with sd 1.461, and the two reversed
+  columns), two pin the tail, and three hold the prose in both readmes with the
+  `## fixes` section exempt since it quotes the sentence it retired. gate ran
+  from a fresh clone — 114 pass, typecheck clean, the run output matches the
+  local run exactly and every number in both readmes is present in it except
+  the replay count and one subtraction. revert check: reverting only the readmes
+  fails the three prose tests, reverting the source too fails collection.
+
+- [medium] 18 — "word at 0.75 spans 0 to 25, median 2. the "1 wrong per
+  thousand" above is near the bottom of that" reverses the correction the bullet
+  directly above it makes. the 0.80 bullet gets it right — "so the zero above is
+  the median, not the value" — and one bullet later the default draw's 2 wrong
+  serves at 0.75 is called near the bottom of a 0-to-25 span when it is the
+  median of the distribution: sorted, the 20 seeds read 0 0 1 1 2 2 2 2 2 2 2 2
+  3 3 3 4 4 6 7 25, so 2 is the 50th percentile and eight seeds sit above it. it
+  is near the bottom of the *range*, which is what the sentence literally says
+  and not what a reader takes from it, and the range is only that wide because
+  one seed draws 25. same span-versus-distribution conflation, pointed the other
+  way, two lines apart. found 2026-09-30
+
+- [low] 18 — "every operating point from 0.50 to 0.95 has paraphrase recall at
+  exactly 0.0%, while near-miss false positives only die out at 0.80" is true of
+  word and not of char, and the paragraph it closes quotes both featurizers
+  (99.2% and 98.7% inversion). char's near-miss fpr is 2.2% at 0.80, still 1.1%
+  at 0.85, and only reaches 0.0% at 0.90 — two operating points further out,
+  which matters because char is the featurizer the project later shows serving
+  34 wrong answers at 0.75 where word serves 2. the paraphrase-recall half of
+  the sentence does hold for both. one clause naming which featurizer the 0.80
+  belongs to. found 2026-09-30
+
+- [low] 18 — `inversionRate`'s docstring says "0 would mean some threshold
+  separates the classes perfectly", and the count is strict (`badPair >
+  goodPair`), so a near-miss pair tying a paraphrase pair contributes 0 while
+  leaving no threshold that separates them — 0 means no strict inversion, not
+  perfect separability. the classes overlap heavily on the committed dataset
+  (word: paraphrase max 0.172 against near-miss min 0.067) so the rate is 0.992
+  and nowhere near the boundary, but the sentence is what tells a reader what 0
+  would have meant. `rocAuc`, which this project imports from 20 for the gap
+  study, credits ties 0.5 — two tie conventions in one project. found 2026-09-30
+
+- [low] 18 — `sideStats` reports gapMean/gapMedian/gapMin/gapMax as 0 when every
+  serve on a side lacks a differing-answer competitor, and `main.ts` prints those
+  cells beside a nonzero serve count, so an all-no-competitor side would read as
+  "median gap 0.000" — a measured zero gap — rather than "not measured". not
+  reachable on the committed run, where no-comp is 0 on all four printed rows,
+  but the columns have no way to say no data and the row already carries the
+  no-comp count that would explain them. found 2026-09-30
+
 - [fixed 2026-09-07] 17 — the signals extension priced the oracle gap against
   the signal's own aurc. "the best signal sits at 0.0673 against a floor of
   0.0227, so about two thirds of the achievable mistake-ranking is information
@@ -2884,7 +2972,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 19-eval-regression | 2026-09-01 |
 | 21-vector-store-persistence | 2026-09-01 |
 | 20-guardrails | 2026-08-31 |
-| 18-semantic-caching | 2026-08-31 |
+| 18-semantic-caching | 2026-09-30 |
 | 17-confidence-calibration | 2026-09-07 |
 | 16-llm-as-judge | 2026-09-07 |
 | 15-embedding-quantization | 2026-09-07 |
@@ -3896,6 +3984,50 @@ if four rows of a column come out of a formula, the fifth has to as well, and
 the cheapest test is the one that runs the formula over every row rather than
 checking the one row that looks suspicious. the three findings left open are
 all low and all about how the project reads rather than what it computes.
+
+18's second pass came back clean on every mechanism and dirty on its closing
+verdict. all 102 committed tests pass, typecheck is clean, `npm start` is
+byte-identical across reruns, and every number in both readmes is in the output
+it prints today — checked mechanically against all 95 numeric tokens in the
+project readme, with only the replay count ("about 190") and one subtraction
+(2.1 = 91.0 - 88.9) not appearing verbatim. the cache itself holds up: the
+exact layer is checked before the scan so a normalized repeat can never take a
+neighbour's answer, the nearest-neighbour scan keeps the earliest entry on ties
+so replays are insertion-ordered, the differing-answer margin scope really is
+computable from stored answers alone, a serve with no in-scope runner-up passes
+any margin and the code says out loud that this is where the rule is blind, and
+margin 0 reproduces the no-policy replay exactly. accounting is exact —
+llmCalls + exactHits + semanticCorrect + semanticWrong equals the traffic
+length at every operating point, and refusals sit inside llmCalls. no leakage
+to find: nothing is fitted, the featurizers are pure functions of one string,
+and the pair analysis never touches the traffic. edge cases are covered by the
+committed tests (empty cache, empty traffic, empty query, unicode with an emoji,
+duplicate normalized keys, ties, threshold Infinity and 0). the reuse is real
+reuse — 05's rng, 08's token estimator and pricing, 16's fnv1a, 20's rocAuc —
+so there is no metric drift between this project and its sources.
+
+what was wrong was the sentence the whole margin extension lands on, and the
+shape is one the ledger has now seen three times: 11's curve, 16's sweep, and
+now 18's verdict, each publishing a property one draw cannot establish. the new
+part is the direction. the readme compared two operating points by their
+*summary ranges* — mean 1.00 against 1.15, savings 84.6-86.6 against
+79.1-82.4 — when the run was already generating both configs over the same 20
+seeds and could have been paired. paired, the risk claim evaporates (7 seeds
+better, 6 worse, 7 tied, 0.15 against a paired sd of 1.461) and the cost claim
+gets *stronger* than what was published (3.71 to 5.98 points on every seed, not
+"two to four"). so an unpaired comparison was wrong in both directions at once,
+and the fix made the project's headline number better, not worse.
+
+the rule it adds: when a run already holds per-seed arrays for both things being
+compared, a claim about which is better is a paired claim or it is not a claim —
+and the giveaway is a sentence that reads a direction off two ranges while the
+table under it prints the per-seed columns. two of the four risk columns in that
+very table (zero-wrong seeds 10/20 against 12/20, median 0.5 against 0.0) already
+contradicted the sentence above them. the corollary for tests, which 16 logged
+and this project then repeated anyway: a test titled with a per-seed claim and
+asserting a mean is weaker than no test, because the title is what gets trusted.
+four findings left open — one medium, the same span-versus-distribution slip the
+project's previous fix corrected two lines earlier, and three low.
 
 ## MECHANISMS
 
