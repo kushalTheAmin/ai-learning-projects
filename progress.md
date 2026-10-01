@@ -188,6 +188,94 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-01] 19 — the reading of the gate table summarized its own
+  improvement row as all-pass. the bullet was "everything passes the
+  improvement, and the ci confirms the improvement (interval fully above zero)
+  in only 28.0% [17.5%, 41.7%] of pairs", and the table four lines above it
+  has three non-zero cells in that row: naive-0.01 2.0% [0.4%, 10.5%],
+  naive-0.02 2.0% [0.4%, 10.5%], slice 6.0% [2.1%, 16.2%]. so the slice gate
+  blocks a genuinely better model on 3 of 50 pairs and both naive gates on 1
+  of 50, and the sentence erased all three. this is the project's own thesis
+  turned on itself — the whole argument is that a gate's false alarm rate is
+  its price and has to be printed, and the one row where the model really did
+  improve got its price rounded to zero in prose. the three cells are real
+  comparisons, not table noise: on improved sweep pair 30 (eval seeds 583867
+  and 583868) the aggregate is +0.0208 and the slice gate names two slices at
+  once, arithmetic -0.1250 [-0.2500, -0.0250] and date -0.1250 [-0.2500,
+  -0.0250], both categories that truly gained 4 points; pairs 13 and 34 flag
+  arithmetic the same way; and on pair 37 the aggregate draws -0.0250 off a
+  +4-point model, which is what trips the naive gate. found and fixed
+  2026-10-01
+
+  the fix is one bullet and the readme's fixes section, no measured number
+  moved and no source file changed. the bullet now reads the three cells,
+  names the three gates that really are clean at 0.0% [0.0%, 7.1%] (ci,
+  slice-bonf, slice-bh), and makes the point the old sentence lost —
+  correction kills the improvement false alarms outright here where on noise
+  it only got 16.0% down to 4.0%. eight new tests in tests/test_claims.py,
+  131 -> 139: four pin the readme prose (and the "everything passes" check is
+  scoped above the fixes section, which quotes the retired sentence on
+  purpose), one recomputes the three wilson cells, and three rebuild sweep
+  pairs 30 and 37 from `_pair_seeds` exactly as main.py runs them to hold the
+  false alarms to real comparisons — those last three pass before the fix
+  too, they describe behaviour that was already right. gate ran from a fresh
+  clone: 139 pass, main.py byte-identical to the local run, and all 71
+  numeric tokens in the readme's measured sections appear verbatim in the run
+  output except the derived 0.002 resample resolution. revert check: with
+  only the readme reverted, the four prose tests fail.
+
+- [medium] 19 — "the aggregate is unchanged by construction" is off by 0.2
+  points, because the clip bites. masked-2.0 shifts date -0.24 and the other
+  five +0.048, which sums to zero over six equal-sized categories, but
+  `p_correct` clamps at P_MAX = 0.995 and arithmetic sits at 0.92 + 0.048 =
+  0.968 before the item's difficulty offset (up to +0.08) is added. 22 of the
+  240 items clip under masked-2.0 against 2 under baseline-1.0, so the true
+  expected per-category deltas are arithmetic +0.0397 and unit +0.0445 against
+  a nominal +0.048, and the expected aggregate shift is -0.0020, not zero. the
+  same clip eats the improvement: improved-3.0's "4-point" gain is +0.0386
+  expected, 16 items clipped. model.py's comment is careful and says "the
+  unclipped mean over categories is unchanged", but the readme twice says the
+  aggregate is unchanged by construction and main.py's ground-truth line for
+  the masked scenario says it too. 0.2 points is far inside the ±7 points of
+  rerun noise this project measures, so no published rate is wrong — what is
+  wrong is "by construction", which claims an exact identity the clip breaks.
+  the honest version either says the shift is -0.002 and why, or drops the
+  arithmetic base to 0.90 so nothing clips.
+
+- [medium] 19 — every cross-scenario comparison in the readme is unpaired,
+  while the one in-scenario comparison is carefully paired. `_pair_seeds`
+  keys its seed stream on the scenario label, so the four scenarios draw
+  disjoint eval seeds: noise starts at 796922, masked at 370865, drift at
+  705950, improved at 583807. that makes "on the masked regression the naive
+  gate fails at the same 40.0%, its own false alarm rate" a comparison of
+  20/50 against 20/50 on different runs, and the identity is coincidence; the
+  ci gate's "2.0% false alarms against 4.0% on the masked regression" is
+  1/50 against 2/50 the same way. the readme already knows this argument — it
+  refuses to read 68.0% against 50.0% as two marginal proportions and prints
+  the paired count instead — and the fix is the same fix: run every scenario
+  on one shared baseline seed stream so the noise and masked columns can be
+  differenced pair by pair.
+
+- [medium] 19 — nothing ties the published gate-rate table to a fresh run.
+  tests/test_claims.py pins readme substrings and recomputes `wilson_interval`
+  by hand, test_integration.py pins the headline accuracies exactly, and the
+  2026-10-01 fix above pins two individual sweep pairs — but no test
+  recomputes any of the 24 table cells, so a change to `measure_gate_rates`,
+  `_pair_seeds` or the scenario definitions would move every cell in the
+  readme with a green suite. same gap already logged for 21 and 15. the cheap
+  version is one slow-marked test over the noise scenario at the committed
+  SWEEP_PAIRS and SWEEP_RESAMPLES.
+
+- [low] 19 — "two runs of the exact same model differ by up to 7 points here
+  just from resampling noise" (readme, the concept) is a max over 50 pairs
+  quoted as a bound with no interval. the noise sweep's range is [-0.0708,
+  +0.0542], so the 7 comes from one draw of fifty and the max of a sample
+  grows with the sample; a 51st pair can only widen it. in a project whose
+  thesis is that a sampled number quoted bare is the error, the headline
+  framing number is a bare order statistic. the sd of the aggregate delta
+  under noise, or the 2.5/97.5 range of the fifty deltas, would say the same
+  thing without pretending to be a ceiling.
+
 - [fixed 2026-10-01] 21 — section 5 read the naive build's collapse shape off
   one tie draw of five. the sentence was "the same attack on a graph built
   with naive M-closest selection ... shrugs off 10% and then goes: at 20%
@@ -3181,7 +3269,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 25-query-rewriting | 2026-09-02 |
 | 24-extraction-metrics | 2026-09-01 |
 | 23-multi-hop-retrieval | 2026-09-01 |
-| 19-eval-regression | 2026-09-01 |
+| 19-eval-regression | 2026-10-01 |
 | 21-vector-store-persistence | 2026-10-01 |
 | 20-guardrails | 2026-10-01 |
 | 18-semantic-caching | 2026-09-30 |
@@ -3206,6 +3294,39 @@ so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
 the oldest instead (01, committed 17:44 UTC) rather than run a no-op. Same on
 2026-08-26 — everything was still inside 24 hours, so the oldest unreviewed
 project went first (02, committed 18:10 UTC).
+
+19 came back clean on every number and dirty on one sentence about them.
+all 131 committed tests pass, main.py is deterministic across runs and
+byte-identical from a fresh clone, and every one of the 71 numeric tokens in
+the readme's measured sections appears verbatim in what the entry point
+prints today — the headline 0.8792 -> 0.8375 with its [-0.1042, +0.0208], the
+177/5/24/34 flip table, the date slice at -0.2500 and p=0.0052, all 24 cells
+of the gate-rate table with their wilson intervals, the three discordance
+counts (9 of 34, 6 of 8, 5 of 12, all adding 0), and the three power points.
+checked mechanically, not by eye; the only token not in the output is the
+derived 0.002 resample resolution. the statistics hold on their own terms.
+the imported bootstrap really is 02's object (a test asserts identity, not
+equality), p_ge_zero is the right tail for a candidate-minus-baseline diff so
+small p means the regression survived resampling, bonferroni's cut is
+0.025/6 and bh's rank-k threshold is k times it, and the nesting the
+correction claim rests on is not just observed but forced: at 500 resamples a
+slice clearing p <= 0.0042 puts at most 2 resamples at or above zero, and the
+0.975 percentile reads index 487 of 500, so the plain interval test cannot
+pass where the corrected one fails — which is why "adds 0" shows up in all
+four scenarios. the harness half holds too: the fingerprint refuses a
+cross-dataset comparison, load_run recomputes both the aggregate and the
+per-category accuracies and rejects a record that disagrees with itself, and
+the item-sequence check catches a reordering a matching fingerprint would
+otherwise wave through. wilson is the right interval at these counts and its
+hand-checked values are right. what was wrong was the one row where the
+scripted model actually got better: the reading said everything passes it,
+and the table four lines up has the slice gate failing 6.0% and both naive
+gates 2.0%, so a project built to argue that a gate's false alarm rate is its
+price had rounded that price to zero in prose. fixed above. behind it, three
+mediums worth naming: the P_MAX clip quietly breaks the "unchanged by
+construction" identity by 0.2 points, every cross-scenario comparison is
+unpaired on disjoint seed streams while the in-scenario one is carefully
+paired, and no test ties the 24 table cells to a run.
 
 21 came back clean on every measured number and dirty on the shape of one
 column. both entry points reproduce character for character — the
