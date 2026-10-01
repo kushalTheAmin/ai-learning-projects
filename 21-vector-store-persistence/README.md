@@ -160,13 +160,26 @@ slots on redundant close edges. thats 13's build ablation appearing a third
 time, now inside the delete path, and it means a naive-built graph can be
 kept alive by a heuristic patch.
 
-**reselect is worse than doing nothing.** re-selecting whole link lists
-under the cap drops 11137 surviving edges over the attack and ends at
-reachability 0.135, far below the 0.633 of never repairing at all. any
-distance-ranked selection prefers a close bridge candidate over a far
-surviving edge, and the far edges are exactly what the damaged graph cannot
-afford to lose. a repair that is allowed to subtract connectivity is an
-attack with good intentions.
+**reselect is worse than doing nothing — when the re-selection is
+nearest-only.** under naive selection it drops 11137 surviving edges over
+the attack and sits below bare unlinking at every step, reachability 0.633 /
+0.633 / 0.128 / 0.135 against bare's 1.000 / 1.000 / 0.758 / 0.633, ending
+on recall 0.549 against 0.597. any distance-ranked selection prefers a close
+bridge candidate over a far surviving edge, and the far edges are exactly
+what the damaged graph cannot afford to lose — a repair that is allowed to
+subtract connectivity is an attack with good intentions. that sentence is
+the naive column's. hand the same subtracting policy to the diversity
+heuristic and it drops slightly more surviving edges, 11335, and lands the
+other way round: reachability 0.759 / 0.761 / 0.637 / 0.769, worse than bare
+at 100, 200 and 400 removed and better at 600, with recall at or above bare
+the whole way (0.843 / 0.843 / 0.842 / 0.680 against 0.843 / 0.841 / 0.724 /
+0.597). so the verdict is step-dependent and rule-dependent both —
+subtracting connectivity is catastrophic when the rule is nearest-only and
+merely expensive when it is the heuristic, which is 13's build ablation
+turning up a fourth time rather than a fact about reselection. neither
+column recommends reselect: fill under the same heuristic ends at
+reachability 1.000 for 740641 repair distance computations against
+reselect's 3265282.
 
 **the patch is one hop, and the sharper attack walks through it.** removing
 the 100 earliest inserts cut naive reachability to 0.639 bare; with fill
@@ -188,7 +201,10 @@ actually sells is incrementality: 1234 dists after each delete keeps the
 graph whole continuously, where the rebuild is 570472 in one lump every
 time you need a clean graph right now. naive fill is 483 per removal and
 buys less; reselect with heuristic selection is 5442 per removal, 572.4%
-of the rebuild bill, for a graph worse than bare unlinking.
+of the rebuild bill, and ends at reachability 0.769 — above bare's 0.633 but
+under the fill patch that costs a quarter as much, and nowhere near the
+rebuild's 1.000. reselect with naive selection is 737 per removal to end at
+0.135, below what spending nothing leaves.
 
 ## tradeoffs and where it breaks down
 
@@ -221,6 +237,15 @@ rebuilt the index first, and one implementation per language per mechanism
 is a repo rule.
 
 ## fixes
+
+- 2026-10-01 — the repair extension published "reselect is worse than doing
+  nothing" for both selection rules, and the 11137 dropped edges and 0.135
+  reachability behind it are the naive-selection column alone. the cost
+  section then called heuristic reselect "a graph worse than bare unlinking"
+  when at 600 removed it ends 0.680 / 0.769 against bare's 0.597 / 0.633 —
+  better on both axes. both claims are rule-labelled now and the heuristic
+  column is quoted at every step, worse than bare at 100 / 200 / 400 and
+  better at 600. no measured number moved
 
 - 2026-10-01 — section 5 read the naive collapse off tie seed 0 and called it
   "shrugs off 10% and then goes" — thats 1 draw of 5, and the only one still

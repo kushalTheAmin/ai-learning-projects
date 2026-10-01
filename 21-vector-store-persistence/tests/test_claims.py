@@ -143,3 +143,74 @@ class TestCollapseShape:
     def test_seed_shape_rows_refuses_a_run_per_seed_mismatch(self, entry_point):
         with pytest.raises(ValueError, match="runs"):
             entry_point.seed_shape_rows([[(0.9, 1.0)]])
+
+
+@pytest.fixture(scope="module")
+def repair_section() -> str:
+    """Just '## the repair extension'. The '## fixes' log quotes retired
+    wording on purpose, so it stays out of the fixture."""
+    readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+    body = readme.split("## the repair extension", 1)[1]
+    return body.split("\n## ", 1)[0]
+
+
+def _paragraph_with(section: str, needle: str) -> str:
+    matches = [p for p in section.split("\n\n") if needle in p]
+    assert matches, f"{needle!r} is not in the section at all"
+    return " ".join(" ".join(matches).split())
+
+
+class TestReselectVerdict:
+    """The reselect verdict belongs to one of the two selection rules.
+
+    At 600 removed the run prints no repair 0.597 / 0.633, reselect under
+    nearest-only 0.549 / 0.135 and reselect under the diversity heuristic
+    0.680 / 0.769 — the two rules land on opposite sides of never repairing
+    at all, so the 0.135 headline cannot be published for both.
+    """
+
+    def test_the_unqualified_verdict_is_gone(self, repair_section):
+        assert "**reselect is worse than doing nothing.**" not in repair_section
+
+    def test_the_verdict_names_the_selection_rule(self, repair_section):
+        paragraph = _paragraph_with(repair_section, "0.135")
+        assert "naive selection" in paragraph or "nearest-only" in paragraph, (
+            "the paragraph quoting 0.135 must say which selection rule it measured"
+        )
+
+    def test_the_heuristic_reselect_end_state_is_published(self, repair_section):
+        assert "0.769" in repair_section, "heuristic reselect's end reachability"
+        assert "0.680" in repair_section, "heuristic reselect's end recall"
+
+    def test_the_cost_line_stops_calling_heuristic_reselect_worse_than_bare(
+        self, repair_section
+    ):
+        paragraph = _paragraph_with(repair_section, "572.4%")
+        assert "worse than bare unlinking" not in paragraph, (
+            "heuristic reselect ends above bare on both axes at 600 removed"
+        )
+
+    def test_the_index_row_names_the_rule_behind_the_number(self):
+        row = (_ROOT.parent / "README.md").read_text(encoding="utf-8")
+        row = next(line for line in row.splitlines() if "0.135 reachability" in line)
+        assert "nearest-only" in row or "naive selection" in row
+
+    def test_the_two_reselect_rules_land_on_opposite_sides_of_bare(self, naive_index):
+        """The mechanism behind the prose, on the small fixture: same policy,
+        same batches, opposite verdicts against never repairing at all."""
+
+        def reach(repair: bool, selection: bool | None = None) -> float:
+            index = naive_index.clone()
+            rng = np.random.default_rng(0)
+            done = 0
+            for count in (30, 60):
+                batch = index.highest_degree_live(count - done, rng)
+                done = count
+                if repair:
+                    index.unlink_with_repair(batch, heuristic=selection, reselect=True)
+                else:
+                    index.unlink_many(batch)
+            return index.reachable_live_from_entry() / index.live_count
+
+        bare = reach(False)
+        assert reach(True, False) <= bare < reach(True, True)
