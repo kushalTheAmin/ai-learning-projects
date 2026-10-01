@@ -188,6 +188,107 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-01] 21 — section 5 read the naive build's collapse shape off
+  one tie draw of five. the sentence was "the same attack on a graph built
+  with naive M-closest selection ... shrugs off 10% and then goes: at 20%
+  removed live reachability falls to 0.758 and recall to 0.724, at 30% to
+  0.633 and 0.597", and every number in it is tie seed 0. the min-max table
+  printed directly underneath refuses the shape: naive reachability spans
+  0.751-1.000 at 100 removals and 0.755-1.000 at 200, so the resilience the
+  sentence sells belongs to one draw. per draw it is 1.000 / 0.751 / 0.882 /
+  1.000 / 0.872 after 100 removals and 1.000 / 0.755 / 0.877 / 0.756 / 0.868
+  after 200 — 3 of 5 already down at the first batch, 4 of 5 by the second,
+  and seed 1 never cliffs at all (0.751 after 100, 0.743 after 600, flat
+  across the whole attack). seed 0 is also the most favourable draw exactly
+  where the claim needs resilience, top of the band at 100 and 200, and the
+  least favourable where it needs collapse, recall 0.597 at 600 being the
+  band minimum — so the cliff is the draw's shape, not the graph's. same
+  defect class as the 2026-09-01 fix below, which retired a reachability
+  headline no fair draw reproduced; this is the overreach on the other side,
+  left behind by that fix. found and fixed 2026-10-01
+
+  the fix is one printed block and the readme, no measured number moved. new
+  `seed_shape_rows` in main.py pairs each tie seed with its own rows and
+  `experiment_unlink` prints the naive column per draw under the min-max
+  table, because the band cannot separate a draw that falls at the first
+  batch and stays flat from one that holds and then cliffs. section 5 now
+  labels the seed-0 column as one draw of five, names the three draws already
+  down at 100 removals, and quotes the bands at every step instead of only at
+  30%; the root index row quotes the bands too. six new tests in
+  tests/test_claims.py, 71 -> 77: three hold the readme prose, two pin
+  `seed_shape_rows`, and one recomputes the first-batch spread on the
+  300-node naive fixture (0.193 to 0.956 over the five seeds) to pin that no
+  single draw can establish the shape — that last one passes before the fix
+  too, it describes behaviour that was already right. gate ran from a fresh
+  clone: 77 pass, both entry points byte-identical to the local run apart
+  from the labelled wall clock, and all 162 numeric tokens in the readme's
+  numbers and repair sections appear verbatim in the run output except the
+  two wall-clock figures and four derived ones (44%, 19x, "about 35 seconds",
+  and a project reference). revert check splits cleanly — reverting only the
+  readme fails the three prose tests, reverting only main.py fails the two
+  `seed_shape_rows` tests.
+
+- [high] 21 — the repair extension's reselect verdict holds for one of its
+  two selection rules and is published for both. "**reselect is worse than
+  doing nothing.** re-selecting whole link lists under the cap drops 11137
+  surviving edges over the attack and ends at reachability 0.135, far below
+  the 0.633 of never repairing at all", and in the cost section "reselect
+  with heuristic selection is 5442 per removal, 572.4% of the rebuild bill,
+  for a graph worse than bare unlinking". both numbers in the first sentence
+  are the naive-selection variant, unlabelled, and the second sentence is
+  false of the variant it names: at 600 removed the run prints no repair
+  0.597 / 0.633, reselect naive 0.549 / 0.135, reselect heuristic 0.680 /
+  0.769 — reselect with heuristic selection ends better than bare unlinking
+  on both axes, by 0.083 recall and 0.136 reachability. it is worse than bare
+  at the shallower steps (reachability 0.759 / 0.761 / 0.637 against bare's
+  1.000 / 1.000 / 0.758 at 100 / 200 / 400 removed), so the honest claim is
+  step-dependent as well as rule-dependent and the published one is neither.
+  the takeaway that survives is narrower: subtracting connectivity is
+  disastrous when the selection rule is nearest-only and merely expensive
+  when it is the diversity heuristic, which is 13's build ablation showing up
+  a fourth time rather than a fact about reselection. "a repair that is
+  allowed to subtract connectivity is an attack with good intentions" is the
+  naive column's sentence. the root index row repeats the 0.135 without the
+  rule. found 2026-10-01
+
+- [medium] 21 — `MutableHnswIndex.restore` validates five header fields
+  against `size` and not the sixth. vectors shape, finiteness, link count,
+  every neighbor id, `entry` and every `deleted` id are all checked;
+  `max_level` is assigned straight through. set it above the entry's own
+  layer count and the state loads, then `layer0_entry` descends into
+  `self._links[entry][max_level]` and raises `IndexError: list index out of
+  range` out of `search` rather than `StoreFormatError` — measured on a
+  60-vector store, real max_level 3, forged 6, and it reaches through the
+  file format with a re-signed header. set it below and nothing raises at
+  all: the descent is truncated, the layer-0 beam starts from the top-layer
+  entry, and the index quietly answers from a worse starting node (forcing
+  max_level to 0 on that store returned the same three ids, so the damage is
+  silent and data-dependent). the re-signed-header path is already conceded
+  in the tradeoffs section ("a buggy writer that produces a self-consistent
+  wrong file passes"), but `restore` is public and tests/test_repair.py's
+  `authored_index` builds every topology fixture straight through it with a
+  hand-written `max_level`. found 2026-10-01
+
+- [medium] 21 — nothing ties either entry point's tables to the readme.
+  tests/test_claims.py pins section 5's prose and the attack's determinism
+  and that is the whole of it: sections 1 through 4 and all four repair
+  sections are unpinned, about 150 published numbers across a 2m29s main.py
+  and a repair_main.py, and the only reason this review could confirm them
+  was running both by hand and diffing the output token by token. same shape
+  as the 14 and 15 findings; 10 and 12 have the pattern worth copying. found
+  2026-10-01
+
+- [low] 21 — main.py prints a tombstone row the readme drops, and it is the
+  first point on the curve the open questions ask for. section 4 ends with
+  "70% again with ef doubled to 160: recall 1.000, short 0, 330.8
+  dists/query" and the readme reports none of it, while the fourth open
+  question asks what a search that stops at k live results would show and
+  where "a 70%-dead store forces the beam wide". the printed row answers part
+  of it already: doubling the beam on the 70%-dead store costs 330.8 against
+  304.9, 8.5% more, and moves recall 0.999 to 1.000 — the over-fetch is
+  nearly free at this delete fraction, which is why the fixed-ef story held.
+  found 2026-10-01
+
 - [fixed 2026-10-01] 20 — the entropy gate was published as a precision check
   whose risk was false positives, and it errs the other way. the open question
   named the example: "real secrets and real prose overlap in entropy near the
@@ -3051,7 +3152,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 24-extraction-metrics | 2026-09-01 |
 | 23-multi-hop-retrieval | 2026-09-01 |
 | 19-eval-regression | 2026-09-01 |
-| 21-vector-store-persistence | 2026-09-01 |
+| 21-vector-store-persistence | 2026-10-01 |
 | 20-guardrails | 2026-10-01 |
 | 18-semantic-caching | 2026-09-30 |
 | 17-confidence-calibration | 2026-09-07 |
@@ -3075,6 +3176,30 @@ so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
 the oldest instead (01, committed 17:44 UTC) rather than run a no-op. Same on
 2026-08-26 — everything was still inside 24 hours, so the oldest unreviewed
 project went first (02, committed 18:10 UTC).
+
+21 came back clean on every measured number and dirty on the shape of one
+column. both entry points reproduce character for character — the
+738027-byte store and its 331/512000/225632/64 split, 150/150 identical
+results after a roundtrip and after 100 further adds on both twins, level
+draws diverging on 12 of 100 when the rng state is reset instead of restored,
+all five corruption classes refused, the incremental-vs-rebuild identity
+(8500499 either way at 3000, which is the whole point: a build IS 3000
+inserts, so the 3.09x is against rebuild-per-batch and nothing else), the
+frozen 304.9 dists/query under tombstones against 291.9 down to 212.7
+compacted, and all four repair variants' edge and distance totals. the format
+holds on its own terms: every byte position guarded by the checksum,
+truncation refused at any cut, trailing junk refused, the atomic
+temp-then-rename leaving no .tmp behind, and `restore` rejecting bad links,
+sizes, entries and deleted ids. the delete mechanics hold too — fill is
+provably additive over bare unlinking on the real fixture, the one-hop limit
+is pinned on a four-node line, `exact_live_topk` matches brute force and pays
+no distances, and `ann_recall` is 02's `recall_at_k` with the exact top-k as
+the relevant set, so there is no metric drift to find. what was wrong was
+what the 2026-09-01 seeded tie-break was still allowed to decide: section 5
+read the collapse shape off tie seed 0, the one draw of five holding 1.000
+reachability to 200 removals. fixed above. the sharper residue is in the
+repair extension, where the reselect verdict is published for both selection
+rules and only holds for one — logged high, with three more behind it.
 
 22 was the last project with no review at all, and it came back clean on every
 number and dirty on one claim. all 112 committed tests pass, typecheck is
