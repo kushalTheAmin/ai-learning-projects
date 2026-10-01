@@ -13,11 +13,34 @@ from pathlib import Path
 
 import pytest
 
-from eval_harness.experiments import wilson_interval
-
-README = (Path(__file__).resolve().parents[1] / "README.md").read_text(
-    encoding="utf-8"
+from eval_harness.compare import (
+    compare_runs,
+    gate_ci,
+    gate_naive,
+    gate_slice,
 )
+from eval_harness.correction import gate_slice_bh, gate_slice_bonferroni
+from eval_harness.data import load_golden
+from eval_harness.experiments import _pair_seeds, wilson_interval
+from eval_harness.harness import run_eval
+from eval_harness.model import BASELINE, IMPROVED, stable_u64
+
+ROOT = Path(__file__).resolve().parents[1]
+README = (ROOT / "README.md").read_text(encoding="utf-8")
+
+SWEEP_RESAMPLES = 500
+
+
+def _improved_pair(pair_index: int):
+    """One comparison from the improved sweep, exactly as main.py runs it."""
+    items = load_golden(ROOT / "data" / "golden.jsonl")
+    base_seed, cand_seed = _pair_seeds(50, "improved")[pair_index]
+    return compare_runs(
+        run_eval(BASELINE, items, base_seed),
+        run_eval(IMPROVED, items, cand_seed),
+        n_resamples=SWEEP_RESAMPLES,
+        seed=stable_u64("cmp", "improved", str(pair_index)) % 2**32,
+    )
 
 
 class TestWilsonInterval:
@@ -121,3 +144,67 @@ class TestCorrectionCostIsPaired:
 
     def test_readme_keeps_the_headline_trade(self):
         assert "68.0%" in README and "50.0%" in README
+
+
+class TestImprovementRowIsNotAllPass:
+    """The improvement row of the gate table has three non-zero cells: the
+    slice gate blocks a true 4-point improvement on 3 of 50 pairs and both
+    naive gates on 1 of 50. Summarizing the row as everything passing
+    erases a measured false alarm rate, which is the one thing this project
+    is about."""
+
+    def test_readme_does_not_claim_everything_passes(self):
+        # the fixes section quotes the retired sentence on purpose, so the
+        # check is on the live prose above it
+        live = re.sub(r"\s+", " ", README.split("## fixes")[0])
+        assert "everything passes the improvement" not in live
+
+    def test_readme_quotes_the_slice_gates_improvement_false_alarms(self):
+        flat = re.sub(r"\s+", " ", README)
+        assert "6.0% [2.1%, 16.2%] of pairs (3 of 50)" in flat
+
+    def test_readme_quotes_the_naive_gates_improvement_false_alarms(self):
+        flat = re.sub(r"\s+", " ", README)
+        assert "2.0% [0.4%, 10.5%] (1 of 50)" in flat
+
+    def test_readme_names_the_gates_that_are_actually_clean(self):
+        flat = re.sub(r"\s+", " ", README)
+        assert (
+            "only the ci gate and the two corrected slice gates sit at "
+            "0.0% [0.0%, 7.1%]" in flat
+        )
+
+    def test_the_three_cells_are_the_intervals_the_readme_quotes(self):
+        slice_cell = wilson_interval(3, 50)
+        naive_cell = wilson_interval(1, 50)
+        clean_cell = wilson_interval(0, 50)
+        assert (round(slice_cell[0], 3), round(slice_cell[1], 3)) == (0.021, 0.162)
+        assert (round(naive_cell[0], 3), round(naive_cell[1], 3)) == (0.004, 0.105)
+        assert (round(clean_cell[0], 3), round(clean_cell[1], 3)) == (0.0, 0.071)
+
+
+class TestGatesReallyDoBlockTheImprovement:
+    """The false alarms above are real comparisons, not a table artifact.
+    Two seed pairs out of the improved sweep's fifty, pinned by hand."""
+
+    def test_slice_gate_flags_a_category_that_truly_improved(self):
+        comparison = _improved_pair(30)
+        assert comparison.aggregate.diff > 0.0
+        verdict = gate_slice(comparison)
+        assert not verdict.passed
+        # improved-3.0 gains 4 points in every category, so every slice
+        # named here is a false alarm, and two of six landed at once
+        assert "arithmetic" in verdict.reason
+        assert "date" in verdict.reason
+
+    def test_corrected_gates_let_that_same_pair_through(self):
+        comparison = _improved_pair(30)
+        assert gate_slice_bonferroni(comparison).passed
+        assert gate_slice_bh(comparison).passed
+
+    def test_naive_gate_blocks_a_better_model_on_a_negative_draw(self):
+        comparison = _improved_pair(37)
+        assert comparison.aggregate.diff < -0.01
+        assert not gate_naive(comparison, 0.01).passed
+        # the honest gate reads the same draw as noise, which it is
+        assert gate_ci(comparison).passed

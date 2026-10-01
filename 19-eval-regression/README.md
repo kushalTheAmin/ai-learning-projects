@@ -106,9 +106,16 @@ reading it down:
   [8.3%, 28.5%] false alarms on noise, because six 95% intervals per
   comparison get six chances to be unlucky. multiple comparisons is not a
   footnote, it is a sixth of your green runs turning red.
-- everything passes the improvement, and the ci confirms the improvement
-  (interval fully above zero) in only 28.0% [17.5%, 41.7%] of pairs. even
-  good news is hard to prove at n=240.
+- the improvement row is not all pass. the slice gate blocks a genuinely
+  better model on 6.0% [2.1%, 16.2%] of pairs (3 of 50) and both naive
+  gates on 2.0% [0.4%, 10.5%] (1 of 50) — a slice interval can land below
+  zero on a category that truly gained 4 points, and the aggregate itself
+  draws the odd negative on a model that improved everywhere. only the ci
+  gate and the two corrected slice gates sit at 0.0% [0.0%, 7.1%], so
+  correction kills the improvement false alarms outright here, where on
+  noise it only got 16.0% down to 4.0%. and the ci confirms the
+  improvement (interval fully above zero) in only 28.0% [17.5%, 41.7%] of
+  pairs — even good news is hard to prove at n=240.
 
 ## what correction costs
 
@@ -227,6 +234,12 @@ prevent.
 
 ## fixes
 
+- 2026-10-01 — the improvement row was summarized as "everything passes
+  the improvement" and the table printed right above it disagrees — the
+  slice gate blocks a true 4-point improvement on 6.0% [2.1%, 16.2%] of
+  pairs and both naive gates on 2.0% [0.4%, 10.5%]. the bullet now reads
+  those three cells instead of erasing them, and names the three gates
+  that really are clean. no measured rate moved.
 - 2026-09-01 — every gate rate was a bare point estimate off 50 pairs,
   which is the exact error this project argues against, and it showed:
   the ci gate's drift detection read 6.0% in the table and 23.3% in the
