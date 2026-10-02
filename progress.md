@@ -199,7 +199,10 @@ Fixed items stay listed with their fix date so the history reads in one place.
   seeded, and known, so the metrics can be judged against ground truth").
   62 leaves selected, 61 damaged. a string made entirely of one repeated
   character could never be damaged at all: over 50 seeds the corruptor left a
-  synthetic "aa" leaf untouched on 250 of 250 draws. found and fixed 2026-10-02
+  synthetic "aa" leaf untouched on 250 of 250 draws. not a new discovery — the
+  2026-09-01 review logged the no-op and filed it low on "it does not touch any
+  published number", which is where it went wrong. found 2026-09-01, fixed
+  2026-10-02
 
   the fix is `typo` alone: it still takes exactly one `randInt` draw, then
   walks forward from that index to the first adjacent pair that actually
@@ -252,12 +255,6 @@ Fixed items stay listed with their fix date so the history reads in one place.
   prototype object, and no json value equals either, so the comparison returns
   false where `hasOwn` would too. consistency gap, not a bug, in the one function
   that decides the exact-match column. found 2026-10-02
-
-- [low] 24 — `parseDate` accepts february 29 in every year. `DAYS_IN_MONTH`
-  hardcodes 29 for february with no leap rule, so "2023-02-29" parses to
-  "2023-02-29" and matches "Feb 29, 2023" at L3 — a date layer that refuses
-  slash dates on purpose, rather than guess, quietly admits a day that does not
-  exist. no authored invoice carries one. found 2026-10-02
 
 - [low] 24 — the shuffler's prediction aliases the gold record. `clone(invoice)`
   is built, then `out.line_items = seededShuffle(invoice.line_items, rng)` reads
@@ -2430,14 +2427,25 @@ Fixed items stay listed with their fix date so the history reads in one place.
   narrow — a nonexistent day is treated as real rather than refused, and a
   false match needs both sides to name the same nonexistent day. found
   2026-09-01
-- [low] 24 — `corruptor` is documented as "each leaf independently wrong with
-  p=0.3" but `typo` swaps two adjacent characters, which is a no-op on any
-  string whose chosen pair is a doubled letter ("box of 500", "Müller &
-  Söhne"). so the authored damage rate is an upper bound, not the rate. it
-  does not touch any published number — the 0.728 in the table is measured
-  from the comparison, not derived from p, and the readme's "27% garbage" is
-  1 - 0.728 — but the extractor's own flaw string overstates what it does.
-  found 2026-09-01
+- [fixed 2026-10-02] 24 — `corruptor` is documented as "each leaf
+  independently wrong with p=0.3" but `typo` swaps two adjacent characters,
+  which is a no-op on any string whose chosen pair is a doubled letter ("box of
+  500", "Müller & Söhne"). so the authored damage rate is an upper bound, not
+  the rate. it does not touch any published number — the 0.728 in the table is
+  measured from the comparison, not derived from p, and the readme's "27%
+  garbage" is 1 - 0.728 — but the extractor's own flaw string overstates what
+  it does. found 2026-09-01
+
+  filed low on that reading and the reading was wrong, which is why it sat for
+  a month. "measured from the comparison, not derived from p" is true and does
+  not get you to "touches no published number": the no-op leaf is scored
+  correct, so the comparison itself is one leaf short of the authored damage.
+  at seed 42 it is record 7's `invoice_number` — 62 leaves selected, 61
+  damaged — and making `typo` guarantee the edit moves corruptor from 0.728 to
+  0.723 in all three tables, macro 0.740 to 0.734, and "27% garbage" to 28%.
+  the severity was also under-called: this is the flaw injector, and the
+  project's premise is that the injector is the ground truth. fixed
+  2026-10-02, full write-up at the top of this section
 - [fixed 2026-09-01] 23 — "iter-focus beats iter-append" was published as a
   result, bolded, one of "three results i didnt author on purpose but the
   harness surfaced", with a design lesson hung on it: "the intuition 'keep the
