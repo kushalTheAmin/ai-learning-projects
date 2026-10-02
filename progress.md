@@ -228,7 +228,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
   derived per-query delta 0.133. revert check: with only the bullet reverted,
   the four prose tests fail.
 
-- [high] 23 — the retired ordering is still live in progress.md. the
+- [fixed 2026-10-02] 23 — the retired ordering was still live in progress.md. the
   2026-09-01 fix pulled "iter-focus beats iter-append" out of the readme
   because the gap is +0.010 [-0.011, +0.032], 4 of 24 queries move and t10
   moves the other way — but 23's COMPLETED row here still reads "focus beats
@@ -238,7 +238,37 @@ Fixed items stay listed with their fix date so the history reads in one place.
   2026-08-30: the readme got fixed, the index did not. the row also says
   "recall@5 0.667 single vs 0.958 append and 1.000 focus" without the caveat
   that the 1.000 is one query (t03). the fix is the row, no source and no
-  number. found 2026-10-02
+  number. found and fixed 2026-10-02
+
+  the fix is that one row plus the readme's fixes section, no source file
+  touched and no measured number moved — main.py's output is byte-identical
+  before and after. the row now says the 1.000 is one query (t03) ahead of
+  append, quotes the focus gap as +0.010 [-0.011, +0.032] straddling zero with
+  4 of 24 queries moving and t10 moving the other way, and ends on "the two
+  iterative rows are not an ordering" instead of naming a mechanism. the
+  +0.080 [+0.043, +0.119] clause is now marked as the only gap here that
+  clears zero, which the row never said. six new tests in
+  tests/test_claims.py, 80 -> 86, in a TestLedgerRow class that reads
+  ../progress.md the way 14's tests already read it: four bind the fix (the
+  row must not say "focus beats append" or "re-admit", must carry the interval
+  `compare_rr` computes, must quote "4 of 24" against the count of queries
+  that actually move, and must name t03) and two pass before it too — the row
+  is the only COMPLETED row for 23, and its three recall@5 figures are read
+  off `aggregate` rather than typed, so the row cannot drift from the table.
+  the fixture scopes to the COMPLETED section because the REVIEWED table keys
+  its rows by project name as well. gate ran from a fresh clone: 86 pass,
+  main.py byte-identical to the local run, every number in the readme's
+  measured sections still verbatim in that output. revert check: with only the
+  row reverted, those four fail and the two scope tests still pass.
+
+  the sweep of the rest of the ledger that this finding's shape invites found
+  two more stale rows, logged below under 21 and 18, plus 19's missing
+  intervals. 20's row came back clean — "dropping luhn or the entropy gate
+  each costs one false positive" is the ablation, not the precision claim the
+  2026-10-01 fix retired. 23's own OPEN THREADS and the MECHANISMS section
+  assert nothing about the ordering, and the root readme's takeaway already
+  carries "that is the only gap here that clears zero" with the 4-queries
+  caveat, so line 44 was the one surface left.
 
 - [medium] 23 — `max_terms` is hardcoded 3 everywhere and nothing sweeps it,
   and it is the only thing the oracle gap measures. `extract_bridge_terms`
@@ -304,6 +334,22 @@ Fixed items stay listed with their fix date so the history reads in one place.
   numeric tokens in the readme's measured sections appear verbatim in the run
   output except the derived 0.002 resample resolution. revert check: with
   only the readme reverted, the four prose tests fail.
+
+- [medium] 19 — the row quotes nine gate rates and not one interval, which is
+  the error this project exists to name. the 2026-09-01 fix made every rate in
+  the readme print its 95% wilson interval, because a bare point estimate off
+  50 pairs is what the whole argument is against — the ci gate's drift
+  detection read 6.0% in one table and 23.3% in another, one quantity twice,
+  and the bare numbers hid it. 19's COMPLETED row still reads "false-alarms
+  40.0% while the ci gate holds 2.0%", "passes the ci gate in 96% of pairs",
+  "the slice gate catches 68.0% at a 16.0% noise false-alarm price", "ci
+  detection 6.0%", and the power curve's 23.3% / 46.7% / 93.3% — every one a
+  point estimate off 50 pairs, in the row that is the summary the next project
+  reads before reusing a gate. no number is wrong; what is absent is the
+  uncertainty the project was built to publish, so the row teaches the habit
+  the readme spent a fix correcting. the two rates the argument actually turns
+  on (40.0% vs 2.0%, and 68.0% against its 16.0% price) would carry their
+  intervals in roughly twenty characters each. found 2026-10-02
 
 - [medium] 19 — "the aggregate is unchanged by construction" is off by 0.2
   points, because the clip bites. masked-2.0 shifts date -0.24 and the other
@@ -449,6 +495,29 @@ Fixed items stay listed with their fix date so the history reads in one place.
   readme's repair section appear verbatim in the run output. revert check
   splits cleanly — reverting only the project readme fails the four prose
   tests, reverting only the root readme fails the index-row test.
+
+- [high] 21 — the row still publishes the collapse shape the 2026-10-01 fix
+  retired, word for word. that fix pulled "shrugs off 10% and then goes" out of
+  section 5 because every number in it is tie seed 0 of five — per draw the
+  naive build is at 1.000 / 0.751 / 0.882 / 1.000 / 0.872 after 100 removals,
+  so 3 of 5 are already down at the first batch and seed 1 never cliffs at all
+  (0.751 to 0.743 across the whole attack) — but 21's COMPLETED row here still
+  reads "the same hub attack on a naive M-closest build shrugs off 10% and then
+  goes, 0.758 reachability / 0.724 recall at 20% removed and 0.633 / 0.597 at
+  30%", which is that sentence and those seed-0 numbers intact. this is the
+  same defect as the 23 row fixed above and worse: there the ledger paraphrased
+  a retired ordering, here it quotes the retired sentence verbatim while the
+  readme two folders over says no fair draw reproduces the shape. the row is
+  also the surface that sells the project's closing lesson, "the build-time
+  edge-diversity heuristic re-read as delete tolerance", off that one draw.
+  secondary surface: the readme's own 2026-09-01 fixes entry still ends on "the
+  conclusion holds and arrives later — the naive graph shrugs off 10%, then
+  falls to 0.633 reachability and 0.597 recall at 30% removed", stated as the
+  standing conclusion, which the 2026-10-01 entry directly above it refuses.
+  newer entry first means a reader hits the retraction before the claim, so
+  this one is cosmetic next to the row, but both say the same retired thing.
+  the fix is the row and that one clause, no source and no number — the bands
+  main.py already prints are what the row should quote. found 2026-10-02
 
 - [medium] 21 — `MutableHnswIndex.restore` validates five header fields
   against `size` and not the sixth. vectors shape, finiteness, link count,
@@ -616,6 +685,19 @@ Fixed items stay listed with their fix date so the history reads in one place.
   local run exactly and every number in both readmes is present in it except
   the replay count and one subtraction. revert check: reverting only the readmes
   fails the three prose tests, reverting the source too fails collection.
+
+- [medium] 18 — the row's "word@0.80 saves 81.4% with 0 wrong serves" is the
+  single draw the 2026-08-31 fix spent itself qualifying. that fix retired the
+  readme's zero-wrong operating point because the same config over 20 seeds is
+  zero-wrong on only 12 of them, mean 1.15, up to 9 on the worst — the readme
+  now says it outright, "read 'zero wrong answers at 0.80' as a safety property
+  and youre reading a single draw". the row is scoped by its own "replay of
+  2000 zipf requests:" lead-in, so the 0 is a faithful report of that replay
+  and this is not a wrong number — but the row carries no trace of the spread,
+  and the spread is the one thing 18 exists to teach. a project reading the
+  ledger for an operating point takes 0.80 as safe, which is the reading the
+  fix was written to prevent. "0 wrong serves on this draw, zero-wrong on 12 of
+  20 seeds" is the same length. found 2026-10-02
 
 - [medium] 18 — "word at 0.75 spans 0 to 25, median 2. the "1 wrong per
   thousand" above is near the bottom of that" reverses the correction the bullet
