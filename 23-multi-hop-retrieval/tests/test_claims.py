@@ -23,6 +23,8 @@ import pytest
 
 from multihop.data import load_corpus, load_queries
 from multihop.evaluate import compare_rr, run_all, two_hop, two_hop_rr
+from multihop.pipeline import iterative
+from multihop.reuse import BM25Index
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -170,3 +172,100 @@ class TestReadme:
         body = readme.split("## fixes", 1)[0]
         assert "4 of 24" in body
         assert "t10" in body
+
+
+class TestOracleGap:
+    """Where the oracle's +0.011 over iter-append actually comes from.
+
+    The readme read the gap off bridge coverage: 0.958, so extraction is
+    nearly free, and the one coverage miss is t01. Both halves are true
+    and neither explains the gap. t01 contributes exactly 0.000 to it —
+    append mode keeps the question, so the hop-2 ranking is identical
+    whether the extractor pulls `ledgerd` or `autovacuum`. The whole
+    +0.011 is t16 and t22, two queries where extraction *did* cover the
+    gold bridge and the two padding terms `max_terms=3` bolted on next to
+    it pulled a distractor over the answer doc.
+    """
+
+    def _deltas(self, results):
+        oracle = results["oracle"]
+        append = two_hop(results["iter-append"])
+        assert [o.query.id for o in oracle] == [a.query.id for a in append]
+        return {
+            o.query.id: round(o.rr - a.rr, 4)
+            for o, a in zip(oracle, append)
+            if abs(o.rr - a.rr) > 1e-12
+        }
+
+    def test_the_gap_is_t16_and_t22_and_nothing_else(self, results):
+        assert self._deltas(results) == {"t16": 0.1333, "t22": 0.1333}
+
+    def test_the_coverage_miss_costs_exactly_nothing(self, results):
+        """t01 is the only gold-bridge miss and the oracle gains 0.000 on it."""
+        misses = [
+            r.query.id
+            for r in two_hop(results["iter-append"])
+            if r.bridge_hit is False
+        ]
+        assert misses == ["t01"]
+        assert "t01" not in self._deltas(results)
+
+    def test_the_two_queries_that_move_covered_the_gold_bridge(self, results):
+        """So the gap is not a coverage failure; the extractor found the bridge."""
+        by_id = {r.query.id: r for r in two_hop(results["iter-append"])}
+        for query_id in ("t16", "t22"):
+            assert by_id[query_id].bridge_hit is True
+            assert "chirpline" in by_id[query_id].retrieval.bridge_terms
+            assert len(by_id[query_id].retrieval.bridge_terms) == 3
+
+    def test_padding_terms_are_the_mechanism_not_coverage(self, results):
+        """Same hop-1 doc, same gold bridge, only the padding differs.
+
+        Feeding `iterative` the extractor's own three terms reproduces
+        append's rank-5 answer; dropping the two padding terms and keeping
+        the bridge reproduces the oracle's rank 3. Nothing else changes.
+        """
+        docs = load_corpus()
+        index = BM25Index(docs)
+        queries = {q.id: q for q in load_queries()}
+        by_id = {r.query.id: r for r in two_hop(results["iter-append"])}
+        for query_id, padded in (
+            ("t16", ["chirpline", "alerts", "delivery"]),
+            ("t22", ["sms", "chirpline", "alerts"]),
+        ):
+            question = queries[query_id].question
+            assert by_id[query_id].retrieval.bridge_terms == padded
+            with_padding = iterative(
+                index, docs, question, mode="append", bridge_override=padded
+            )
+            bridge_only = iterative(
+                index, docs, question, mode="append", bridge_override=["chirpline"]
+            )
+            answer = queries[query_id].answer_id
+            assert with_padding.ranking.index(answer) == 4
+            assert bridge_only.ranking.index(answer) == 2
+
+    def test_oracle_never_loses_a_resample(self, results):
+        """Not the two-sided straddle the focus gap is: it is bounded below by zero."""
+        comparison = compare_rr(results, "oracle", "iter-append")
+        assert comparison.p_ge_zero == 1.0
+        assert comparison.ci.lo == 0.0
+
+
+class TestReadmeOracleBullet:
+    def test_does_not_blame_the_gap_on_coverage(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        assert "so scripted extraction is nearly free" not in body
+
+    def test_names_the_two_queries_the_gap_is_made_of(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        assert "t16" in body
+        assert "t22" in body
+
+    def test_says_the_coverage_miss_costs_nothing(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        assert "t01 costs nothing" in body
+
+    def test_names_padding_as_the_price_of_extraction(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        assert "max_terms" in body
