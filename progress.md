@@ -40,7 +40,7 @@ OPEN THREADS for the questions worth answering next.
 | 06-rate-limiting, outage extension | 2026-08-30 | typescript | outage and hint-jitter studies answering 06's two open threads on its unchanged clock and server: simulated hard-outage window [start, end) with instant pre-admission 503s that never drain admission tokens, optionally advertising time-to-recovery, endMs=Infinity as the dead service (advertising then refused at construction) + server-side additive uniform Retry-After jitter from a dedicated rng so enabling it leaves the seeded latency/fault stream bit-identical (main table reproduced exactly) + retry loop extended to honor Retry-After on 503 as well as 429 + outage scenario runner (waste during outage, recovery spike per 100ms anchored at the recovery instant, drain time, give-up latency percentiles, peak attempts/s) + give-up cliff grid over outage duration x policy; measured — jittered hints kill retry-after's residual re-synchronization at every width (collide 12→2 on the steady herd, worst 14 vs 3 across 5 seeds) at no makespan cost that survives the seed sweep (mean 14.21s jittered vs 14.46s exact inside a 9.47-15.73s exact-hint spread, exposing the main table's 9.47s makespan as the best of 5 seeds, ordering right, margin seed luck), a hard outage flips jitter from cure to liability at a fixed retry budget (10s outage: no-jitter 100% vs full jitter 67.5% because short draws burn the budget early, equal jitter's floor holds 100%; no guessing schedule outlives the 22.7s cumulative-backoff cliff), the 20s no-jitter herd survives the outage then loses exactly half to its own 40-wide recovery wall against burst 20, an exact recovery hint recreates the herd it prevented (54/100ms spike, 53 429s) where a 1s-jittered hint spreads it (7/100ms, 2 429s, 82 vs 133 total attempts) and still drains faster (1.89s vs 2.17s), and the dead service prices the missing circuit breaker: every retrying policy burns exactly 9 attempts per request (1080 total), backoff only chooses the shape (fixed-100ms 440 att/s for 2.40s vs exp-no-jitter 160/s for 68.10s) with 11.33-22.70s p50 caller hangs and no learning between sequential requests |
 | 05-token-streaming, resumable extension | 2026-08-29 | typescript | resumable partial-json scanner answering 05's O(n^2) open thread: the same prefix semantics as parsePartialJson but with scan state carried between push calls (container stack holding references into the value tree under construction, string tokens decoded incrementally with an escape-sequence buffer so split \uXXXX and surrogate pairs survive fragment boundaries, number/literal tokens in their own small text buffers, the accumulated text never retained at all, poison-once handling so invalid input never rescans) + a two-price read contract: view() returns the live tree in O(1) beyond dangling-token completion (the completed dangling value is spliced in with a recorded undo reverted on the next call) while snapshot() deep-copies via structuredClone at O(tree) + seeded tool-call-shaped document generator with escapes and non-ascii + replay harness pricing one-materialization-per-fragment across baseline/view/snapshot modes with chars-scanned work accounting; equivalence pinned prefix-by-prefix, per-boundary under seeded chunkings, and through split escapes, statuses included; measured, one value read after every fragment on seeded 1..24-char fragments: no crossover exists, the resumable view wins at every size (0.09ms vs 0.03ms at 266 chars, 3.4x; 2457.96ms vs 3.71ms at 65619 chars, 662.5x) because the baseline feeds 172521764 chars through its scanner at 64KB (2629.1x the document, then roughly the same again in JSON.parse of the repaired text) where the resumable scanner reads each char once, a 1MB stream replays in 69.1ms over 84070 fragments (~0.8us/fragment) against a projected ~629.2s for the baseline by the n^2 law, and the snapshot mode is the honest asterisk: deep copy per fragment is O(tree) again, 669.45ms at 64KB, quadratic in shape, so the win lives in the view contract (the wall-clock ratios quoted here — 3.4x, 662.5x, the ~629.2s projection — were retired on 2026-09-04, see FINDINGS: they are single medians of an unstable clock; the character counts beside them stand) |
 | 25-query-rewriting | 2026-08-29 | python | query rewriting / hyde measured against the raw query over one unchanged bm25 index: scripted hyde stand-in (40 authored hypothetical answers written from the question text alone, per-query sha256 unit draws making hallucination sets nested across rates, the wrong answer fixed as the next sorted query id so sweeping the rate changes only whether the failure fires) + append vs replace search-string modes + prf one-hop expansion via 23's bridge-term extractor with unmatchable-query fallback + generic-filler control arm + expansion-size accounting (distinct search terms added beyond the raw query) + delta-rr split by expansion-source relevance; imports 02's bm25/tokenizer/metrics/paired bootstrap and 23's extractor, data is 03's corpus and golden queries, no new corpus; measured — honest hyde-append lifts mrr@10 0.830→0.983 (paraphrase 0.736→0.967, paired bootstrap +0.153 [+0.046, +0.270] excluding zero) and rescues the oov acronym query "GIL" from 0 to a perfect hit, generic fluent filler is negative value at 0.560 (-0.270, p_le_zero 1.0000) because every added term votes for whatever docs contain it, prf is a near no-op (+0.008, ci lower bound +0.000): 32 of 40 first-search top docs are already gold and their expansions move mean rr exactly +0.000, while the one rescuable query returns no results to extract from — and the hallucination sweep prices the anchor: at a 10% wrong-answer rate replace-mode already loses to the raw query (0.822 vs 0.830) while append holds 0.866, and at 100% append keeps 0.367 on query-term votes where replace craters to 0.057 |
-| 24-extraction-metrics | 2026-08-29 | typescript | json leaf flattening with generic (index-collapsed) paths + field-level extraction scoring (every gold leaf correct/wrong/missing, every predicted leaf correct/wrong/spurious, precision over predicted leaves, recall over gold) + value-normalization ladder L0-L3 (strict, nfkc/casefold/whitespace fold, currency/thousands numeric parse with tolerance, multi-format date to iso refusing ambiguous slash dates) + greedy order-insensitive array alignment scored by per-pair field f1 with deterministic tie-break + per-generic-path tally tables and macro f1 over gold paths + strict deep-equal exact-match accuracy + seeded structured-record flaw family (format drift, leaf dropper, hallucinator, shuffler, lazy truncation, typed corruptor, single-field bungler); imports 05's rng; measured on 12 authored invoices, 224 gold leaves — exact match scores format-drift, tax-bungler, and corruptor identically 0.000 while semantic field F1 reads 1.000/0.946/0.728, the ladder rescues format drift stepwise 0.219→0.397→0.946→1.000 and never moves the corruptor (0.728 flat, the safety check that no layer forgives real errors), alignment recovers the shuffler 0.647→1.000 with delta 0.000 on every other extractor, micro 0.946 hides a 0.000 totals.tax row only the per-path table names, and macro-over-gold-paths is blind to hallucinated structure (hallucinator macro 0.947 above its own micro 0.799 because invented paths have no gold row) |
+| 24-extraction-metrics | 2026-08-29 | typescript | json leaf flattening with generic (index-collapsed) paths + field-level extraction scoring (every gold leaf correct/wrong/missing, every predicted leaf correct/wrong/spurious, precision over predicted leaves, recall over gold) + value-normalization ladder L0-L3 (strict, nfkc/casefold/whitespace fold, currency/thousands numeric parse with tolerance, multi-format date to iso refusing ambiguous slash dates) + greedy order-insensitive array alignment scored by per-pair field f1 with deterministic tie-break + per-generic-path tally tables and macro f1 over gold paths + strict deep-equal exact-match accuracy + seeded structured-record flaw family (format drift, leaf dropper, hallucinator, shuffler, lazy truncation, typed corruptor, single-field bungler); imports 05's rng; measured on 12 authored invoices, 224 gold leaves — exact match scores format-drift, tax-bungler, and corruptor identically 0.000 while semantic field F1 reads 1.000/0.946/0.723, the ladder rescues format drift stepwise 0.219→0.397→0.946→1.000 and never moves the corruptor (0.723 flat, the safety check that no layer forgives real errors), alignment recovers the shuffler 0.647→1.000 with delta 0.000 on every other extractor, micro 0.946 hides a 0.000 totals.tax row only the per-path table names, and macro-over-gold-paths is blind to hallucinated structure (hallucinator macro 0.947 above its own micro 0.799 because invented paths have no gold row) |
 | 23-multi-hop-retrieval | 2026-08-29 | python | iterative two-hop retrieval (retrieve, extract bridge terms from the top doc, requery, round-robin merge with dedup) + tf*idf novel-term bridge extraction with question-term exclusion and deterministic (-score, term) tie-break + oracle-bridge ablation splitting extraction failure from hop-2 ranking failure + append vs focus hop-2 query modes + three-bucket hop-1 drift accounting (gold / answer-leak / true drift) + pair@5 both-gold-docs metric; imports 02's bm25/tokenizer/metrics/paired bootstrap; authored 28-doc two-docs-per-service ops corpus (capability doc and infra doc joined only by a service name) with 24 two-hop queries, 8 single-hop blind controls, and trap distractors; measured — answer recall@5 0.667 single vs 0.958 append and 1.000 focus at exactly 2.00 searches per query, where that 1.000 is one query (t03) ahead of append, paired bootstrap mrr diff +0.080 [+0.043, +0.119] excluding zero and the only gap here that does, bridge coverage 0.958, focus over append is +0.010 [-0.011, +0.032] straddling zero with 4 of 24 queries moving and t10 moving the other way, so the two iterative rows are not an ordering, the one drift firing was a df=1 vocabulary-island echo the interleave dedups away, recall@1 pinned at 0.083 for every system including oracle by the hop1-first merge, controls undamaged at 2x cost |
 | 22-rag-vertical-slice | 2026-08-29 | typescript | vertical rag slice as one live service: node http POST /ask endpoint with strict validation (400 empty/non-string question or bad k, 413 past 500 question chars or 16 KB body, 405/404, unicode fine) + doc-level retrieval over 18's hashed word-feature cosine (one vector per doc, score-desc id-asc ties, all-zero rankings returned and the reader left to refuse) + scripted extractive reader (14's splitter and stopwords, best sentence by fraction of question content words, 0.35 refusal floor, verbatim quote or fixed refusal) + sse server-side event serialization and drain-aware socket writes with 05's bounded AsyncQueue between generation and delivery (wire format roundtrip-pinned against 05's parser over 30 seeded chunkings) + per-request token/cost log via 08's estimator and pricing with a system/question/context split + live-endpoint eval hook over real http (containment against 10's 40 golden queries, misses attributed retrieval-miss vs wrong-sentence vs refusal, keyword/paraphrase split, k sweep) + deterministic first-token byte fraction (client re-encodes parsed events with the server's own serializer, chunk-summed and wire-summed bytes asserted equal) + slow-client backpressure harness (every write blocks one macrotask); data is 10's corpus, no new dataset; measured — hit@k climbs 0.650/0.800/0.900/0.950 across k 1/2/3/5 while answer accuracy crawls 0.350/0.400/0.450/0.475 because extraction among retrieved-gold sits at 0.500 and slips as every extra doc adds distractor sentences, k=1 -> 3 buys 0.100 accuracy for 2.85x input tokens ($0.1228 -> $0.3239 per 40 questions), keyword 0.700 vs paraphrase 0.200 at k=3 with the same lexical machinery failing on both sides of the pipeline, answered-without-gold is 0 in every row (the floor turns misses into refusals, never confident wrong-doc quotes), context is 2318 of 2367 traced input tokens, the first token completes at a mean 23.3% of response bytes, and a 466-piece worst-case dump buffers 465 events / 17668 bytes unbounded vs 8 / 322 bounded(8) with 457 paced pushes, while all 162 fast-client requests hold queue high-water at 0 |
 | 21-vector-store-persistence | 2026-08-29 | python | vector store persistence and mutation over 13's unchanged hnsw (MutableHnswIndex subclasses it, search runs 13's code path): binary file format with length-prefixed sections (json header, raw float64 vectors, u32-framed link lists) and a sha256 trailer verified before any parsing, atomic temp-write-fsync-rename saves + full-state serialization including the rng state (level draws consume it, so growth after load equals growth without a save) + corruption refusal (bit flips, truncation, bad magic, bad version, self-consistent-but-invalid state) + tombstone deletes with over-fetch-and-filter live search + batch hard unlink with one-pass graph-wide edge stripping and entry reassignment + compaction rebuild with id remapping + exact-over-live ground truth + live-from-entry reachability + hub-targeted removal by descending layer-0 degree; measured — a 2000-vector store is 738027 bytes (links are 44% on top of the 512000-byte vectors), roundtrip search identity 150/150 with link-identical continued growth while a reset rng diverges the graph on 12 of 100 new nodes' levels, incremental insert is bit-identical to fresh build at the same order (150/150) and costs 8500499 cumulative dists vs 26299226 rebuild-per-batch (3.09x) with insertion-order recall spread only 0.993-1.000 over 5 shuffles, tombstones hold recall at 0.997+ with zero short results even 70% dead but freeze cost at 304.9 dists/query where a compacted store pays 212.7-291.9 (waste 1.04x-1.43x, break-even 349558 queries at 10% dead collapsing to 18770 at 70%), and hard-unlinking 30% of nodes (even hub-first, degree ties drawn from a seed and swept over five draws) leaves the heuristic-built graph at 0.980-0.999 recall and full reachability while the same hub attack on a naive M-closest build comes apart — live reachability 0.621-0.743 and recall 0.597-0.723 at 30% removed, and the band is not the shape: 3 of the 5 draws are already down at the first batch of 100 (reach 0.751-1.000 at 5%) and seed 1 never cliffs at all, 0.751 to 0.743 across the whole attack, so which draw you take decides whether the naive graph looks like it survived the first 10% or never did — the build-time edge-diversity heuristic re-read as delete tolerance |
@@ -187,6 +187,99 @@ remote and its local copy was removed.
 Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
+
+- [fixed 2026-10-02] 24 — the corruptor did not corrupt every leaf it picked.
+  `typo` damages a string by swapping one adjacent pair, and when the draw
+  landed on a pair of the same character the swap returned the string byte for
+  byte. at seed 42 that is record 7's `invoice_number`, "INV-2024-0008", where
+  the "00" in "0008" swapped with itself: a leaf selected for damage came back
+  identical and scored correct. the metric was right — the value really was
+  unchanged — the flaw injector was wrong, and the injector is the ground truth
+  this whole project rests on ("the flaw class and its rate are authored,
+  seeded, and known, so the metrics can be judged against ground truth").
+  62 leaves selected, 61 damaged. a string made entirely of one repeated
+  character could never be damaged at all: over 50 seeds the corruptor left a
+  synthetic "aa" leaf untouched on 250 of 250 draws. found and fixed 2026-10-02
+
+  the fix is `typo` alone: it still takes exactly one `randInt` draw, then
+  walks forward from that index to the first adjacent pair that actually
+  differs, and falls back to appending "x" for a string with no such pair.
+  consuming the same single draw is what keeps the rest of the roster byte
+  identical — every string whose drawn pair already differed swaps exactly
+  where it did before. one leaf moves, so corruptor goes 61 wrong to 62: micro
+  and macro f1 0.728 → 0.723 in all three tables and macro 0.740 → 0.734, and
+  nothing else in main.py's output changes by a character. three new tests in
+  tests/extractors.test.ts, 63 -> 66: a doubled-character record must get
+  damaged at least once over 50 seeds (0 of 250 before), the roster's wrong
+  count must be 62 (61 before), and record 7 must not get its invoice number
+  back intact. gate ran from a fresh clone: typecheck clean, 66 pass, entry
+  point byte-identical to the local run, and every numeric token in the
+  readme's measured sections appears verbatim in that output except the
+  derived 28 (percent garbage) and the two locale examples 4.800 and 567 in
+  the tradeoffs prose. revert check: with only src/extractors.ts reverted, all
+  three new tests fail.
+
+- [medium] 24 — the macro-blindness paragraph names two of its three
+  spurious-only paths. the readme says the hallucinator's macro sits above its
+  micro "because `po_number` and `line_items[].sku` never exist in gold, so
+  they have no gold path to average over", but the per-path table has three
+  rows with a zero gold side: `po_number` (12 spurious), `line_items[].sku`
+  (41) and `vendor.vat_id` (12). the extractor's own flaw string does list the
+  vat id, so this is the explanation dropping a case, not the roster. the
+  mechanism and the 0.947 are right either way. found 2026-10-02
+
+- [medium] 24 — `corruptLeaves`'s numeric arm has the same no-op shape the
+  string arm just lost. it returns `Math.round(value * (1 + 0.1 * randInt(1,
+  5)) * 100) / 100`, which equals `value` whenever the scaled change rounds
+  away — 0.01 at the 1.1 multiplier gives 0.011, back to 0.01. the authored
+  invoices bottom out at 0.08 (`A5 flyer, 130gsm gloss`), so nothing reproduces
+  from the entry point and no failing test can be written against the current
+  dataset, which is why it was left out of the string fix rather than folded
+  into it. found 2026-10-02
+
+- [medium] 18 — `applyTypo` can be a no-op the same way 24's `typo` was:
+  `swapped` swaps `word[at]` with `word[at + 1]` unconditionally, so a word with
+  a doubled letter can come back unchanged. 18 is not misreporting — it records
+  `typoed` as "true when the typo pass actually changed the text" and its
+  numbers already absorb the misses — so this is not the identical change 24
+  needed and was not made in the same run. worth deciding whether the traffic
+  generator should guarantee the edit or keep reporting it. found 2026-10-02
+
+- [low] 24 — `deepEqual` in json.ts still tests membership with `k in b`, which
+  walks the prototype chain, while the 2026-09-01 fix moved both of compare.ts's
+  membership tests to `Object.hasOwn` for exactly that reason. no wrong answer is
+  reachable: a key resolved off `Object.prototype` yields a function or the
+  prototype object, and no json value equals either, so the comparison returns
+  false where `hasOwn` would too. consistency gap, not a bug, in the one function
+  that decides the exact-match column. found 2026-10-02
+
+- [low] 24 — `parseDate` accepts february 29 in every year. `DAYS_IN_MONTH`
+  hardcodes 29 for february with no leap rule, so "2023-02-29" parses to
+  "2023-02-29" and matches "Feb 29, 2023" at L3 — a date layer that refuses
+  slash dates on purpose, rather than guess, quietly admits a day that does not
+  exist. no authored invoice carries one. found 2026-10-02
+
+- [low] 24 — the shuffler's prediction aliases the gold record. `clone(invoice)`
+  is built, then `out.line_items = seededShuffle(invoice.line_items, rng)` reads
+  the original array, so the predicted line items are the dataset's own
+  `LineItem` objects, not copies. nothing mutates a prediction today and the
+  "extractors never mutate the gold record" test passes, so this is latent.
+  every other extractor rebuilds its items. found 2026-10-02
+
+- [low] 24 — `parseNumeric` takes the minus on only one side of the currency
+  symbol. the regex is `[$€£¥]?\s?-?`, so "$-5.00" parses to -5 and "-$5.00"
+  returns null — and "$-5.00" is the order `moneyString` emits, so the ladder
+  forgives the generator's own negative format and refuses the one a real
+  extractor would write. the tradeoffs bullet lists what the numeric layer
+  refuses (indian grouping, european decimal comma) and does not list this.
+  no authored invoice has a negative amount. found 2026-10-02
+
+- [low] 24 — "a macro-only dashboard would rank the hallucinator second best in
+  the roster". 0.947 is the second-highest distinct macro score but the fourth
+  row: perfect, format-drift and shuffler all sit at 1.000. the point the
+  sentence is making survives — macro puts the field-inventor above lazy
+  (0.943), tax-bungler (0.923) and dropper (0.854) — but "second best" is a
+  rank the table does not show. found 2026-10-02
 
 - [fixed 2026-10-02] 23 — the oracle bullet explained its own gap with the one
   thing that does not cause it. the sentence was "gold bridge coverage is 0.958
@@ -3481,7 +3574,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 22-rag-vertical-slice | 2026-09-02 |
 | 26-reranking | 2026-09-02 |
 | 25-query-rewriting | 2026-09-02 |
-| 24-extraction-metrics | 2026-09-01 |
+| 24-extraction-metrics | 2026-10-02 |
 | 23-multi-hop-retrieval | 2026-10-02 |
 | 19-eval-regression | 2026-10-01 |
 | 21-vector-store-persistence | 2026-10-02 |
@@ -3508,6 +3601,37 @@ so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
 the oldest instead (01, committed 17:44 UTC) rather than run a no-op. Same on
 2026-08-26 — everything was still inside 24 hours, so the oldest unreviewed
 project went first (02, committed 18:10 UTC).
+
+24 came back clean on every published number and dirty on the thing producing
+them. all 63 committed tests pass, typecheck is clean, main.py's typescript
+twin runs byte-identical from a fresh clone, and every numeric token in the
+readme's measured sections appears verbatim in what the entry point prints —
+the 224 gold leaves over 12 invoices, the whole 8-row headline table, the
+ladder's 0.219/0.397/0.946/1.000 climb for format drift, the shuffler's
+0.647 → 1.000 with delta 0.000 on all seven others, tax-bungler's 0.946 micro
+against the 0.000 totals.tax row, lazy's four 0.816 rows, the hallucinator's
+0.665 precision. the comparator itself holds on its own terms: the four leaf
+outcomes partition both sides, precision denominates over predicted leaves and
+recall over gold, a structural type mismatch charges the gold subtree missing
+and the predicted one spurious rather than silently pairing them, greedy
+alignment's tie-break is a total order so repeated runs pair identically, and
+the authored semantic ordering (format-drift = shuffler = perfect >
+tax-bungler > lazy > dropper > hallucinator > corruptor) is exactly the order
+semantic micro f1 recovers. degenerate inputs behave: empty object against
+empty object is 1.000, empty gold against a prediction is 0.000, macro over an
+empty path map is 1.000, duplicate array elements pair in document order.
+
+what was wrong was upstream of all of it. the corruptor's `typo` swaps one
+adjacent character pair, and a pair of the same character swaps to itself — so
+a leaf the extractor had selected for damage came back byte-identical and
+scored correct, in the project whose premise is that you audit a metric against
+damage you authored. 62 selected, 61 damaged, and a string of one repeated
+character could never be damaged at all. fixed above; one leaf moves, corruptor
+0.728 → 0.723. behind it, three mediums worth naming: the macro-blindness
+paragraph names two of its three spurious-only paths and drops `vendor.vat_id`,
+`corruptLeaves`'s numeric arm has the same no-op shape the string arm just lost
+(unreachable on this dataset, so no failing test to write), and 18's
+`applyTypo` has the same swap but already reports whether it landed.
 
 19 came back clean on every number and dirty on one sentence about them.
 all 131 committed tests pass, main.py is deterministic across runs and
