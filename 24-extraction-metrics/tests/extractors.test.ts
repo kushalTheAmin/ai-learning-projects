@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { INVOICES } from "../src/dataset.js";
+import { INVOICES, type Invoice } from "../src/dataset.js";
 import { EXTRACTORS, extractorRng } from "../src/extractors.js";
 import { compare, microMetrics } from "../src/compare.js";
 import { deepEqual, flatten, isPrimitive, type JsonValue } from "../src/json.js";
 import { FULL, STRICT } from "../src/normalize.js";
+import { BASE_SEED } from "../src/report.js";
 
 function extractor(name: string) {
   const found = EXTRACTORS.find((e) => e.name === name);
@@ -113,7 +114,69 @@ describe("hallucinator", () => {
   });
 });
 
+const CORRUPTOR_INDEX = EXTRACTORS.findIndex((e) => e.name === "corruptor");
+
+/** One record whose every string leaf is a run of the same character. */
+const DOUBLED: Invoice = {
+  invoice_number: "aa",
+  date: "2024-01-05",
+  currency: "USD",
+  vendor: { name: "aa", address: "aa" },
+  line_items: [{ description: "aa", qty: 2, unit_price: 1.5, total: 3 }],
+  totals: { subtotal: 3, tax: 0.2, total: 3.2 },
+  notes: "aa",
+};
+
 describe("corruptor", () => {
+  it("damages a string whose adjacent characters are identical", () => {
+    // The swap picks one adjacent pair. Landing on a pair of the same character
+    // used to return the string unchanged, so a leaf the corruptor selected for
+    // damage scored correct and the authored damage rate was not the real one.
+    let changed = 0;
+    let total = 0;
+    for (let seed = 1; seed <= 50; seed++) {
+      const pred = extractor("corruptor").run(DOUBLED, extractorRng(seed, CORRUPTOR_INDEX, 0)) as {
+        invoice_number: string;
+        vendor: { name: string; address: string };
+        line_items: { description: string }[];
+        notes: string;
+      };
+      for (const value of [
+        pred.invoice_number,
+        pred.vendor.name,
+        pred.vendor.address,
+        (pred.line_items[0] as { description: string }).description,
+        pred.notes,
+      ]) {
+        total += 1;
+        if (value !== "aa") changed += 1;
+      }
+    }
+    expect(total).toBe(250);
+    expect(changed).toBeGreaterThan(0);
+  });
+
+  it("gets every leaf it selects wrong on the authored roster", () => {
+    // At the published seed the corruptor selects 62 of the 221 non-null leaves.
+    // Every one of them has to come back wrong, or the roster's known damage is
+    // not what the numbers are measuring.
+    let wrong = 0;
+    INVOICES.forEach((inv, ri) => {
+      const pred = extractor("corruptor").run(inv, extractorRng(BASE_SEED, CORRUPTOR_INDEX, ri));
+      wrong += compare(goldJson(ri), pred, FULL, "aligned").total.wrong;
+    });
+    expect(wrong).toBe(62);
+  });
+
+  it("does not hand record 7 its invoice number back intact", () => {
+    // INV-2024-0008 is the leaf the no-op swap hit at the published seed.
+    const gold = INVOICES[7] as Invoice;
+    const pred = extractor("corruptor").run(gold, extractorRng(BASE_SEED, CORRUPTOR_INDEX, 7)) as {
+      invoice_number: string;
+    };
+    expect(pred.invoice_number).not.toBe(gold.invoice_number);
+  });
+
   it("preserves leaf types and paths while breaking values", () => {
     let wrong = 0;
     INVOICES.forEach((inv, ri) => {

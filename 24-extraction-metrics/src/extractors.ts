@@ -43,15 +43,26 @@ function moneyString(n: number, currency: string): string {
   return `${CURRENCY_SYMBOL[currency] ?? "$"}${sign}${grouped}.${frac}`;
 }
 
-/** Swap two adjacent characters, codepoint-safe. Strings shorter than 2 gain an "x". */
+/**
+ * Swap two adjacent characters, codepoint-safe. Strings shorter than 2 gain an
+ * "x". Swapping a pair of identical characters would return the string intact,
+ * and a leaf this extractor selected for damage has to come back damaged, so
+ * the draw walks forward to the first pair that differs. A string of one
+ * repeated character has no such pair and gains an "x" instead.
+ */
 function typo(s: string, rng: Rng): string {
   const chars = Array.from(s);
   if (chars.length < 2) return s + "x";
-  const i = randInt(rng, 0, chars.length - 2);
-  const tmp = chars[i] as string;
-  chars[i] = chars[i + 1] as string;
-  chars[i + 1] = tmp;
-  return chars.join("");
+  const start = randInt(rng, 0, chars.length - 2);
+  for (let step = 0; step < chars.length - 1; step++) {
+    const i = (start + step) % (chars.length - 1);
+    if (chars[i] === chars[i + 1]) continue;
+    const tmp = chars[i] as string;
+    chars[i] = chars[i + 1] as string;
+    chars[i + 1] = tmp;
+    return chars.join("");
+  }
+  return s + "x";
 }
 
 function seededShuffle<T>(items: T[], rng: Rng): T[] {

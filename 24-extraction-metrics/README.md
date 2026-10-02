@@ -68,13 +68,13 @@ tax-bungler     0.000   0.946  0.946  0.946      0.946  0.946  0.946    0.923
 lazy            0.500   1.000  0.839  0.913      1.000  0.839  0.913    0.943
 dropper         0.000   1.000  0.759  0.863      1.000  0.759  0.863    0.854
 hallucinator    0.000   0.665  1.000  0.799      0.665  1.000  0.799    0.947
-corruptor       0.000   0.728  0.728  0.728      0.728  0.728  0.728    0.740
+corruptor       0.000   0.723  0.723  0.723      0.723  0.723  0.723    0.734
 ```
 
 exact match gives format-drift, tax-bungler, and corruptor the same score,
 0.000, though one of them is a perfect extraction, one has a single wrong
-field, and one is 27% garbage. strict field scoring already separates them
-(0.219 / 0.946 / 0.728) but ranks format-drift as the worst extractor in the
+field, and one is 28% garbage. strict field scoring already separates them
+(0.219 / 0.946 / 0.723) but ranks format-drift as the worst extractor in the
 roster, worse than the one that actively invents numbers. semantic scoring
 (L3 plus alignment) restores the constructed truth: the three extractors that
 preserve every fact score exactly 1.000 and the failure classes line up below
@@ -86,7 +86,7 @@ the ladder shows which forgiveness layer does the work:
 ```
 extractor        L0 exact     L1 text  L2 numeric     L3 date
 format-drift        0.219       0.397       0.946       1.000
-corruptor           0.728       0.728       0.728       0.728
+corruptor           0.723       0.723       0.723       0.723
 ```
 
 format-drift climbs a step per layer and hits exactly 1.000; corruptor never
@@ -136,6 +136,13 @@ sounds like the fix and isnt, recall is undefined on a path gold never has.
   field-level P and R exist to split.
 
 ## fixes
+
+- 2026-10-02 — the corruptor swapped two adjacent characters to damage a string,
+  and a swap that landed on a pair of the same character returned the string
+  intact — so a leaf the extractor had picked for damage scored correct and the
+  authored damage was not the damage being measured. the swap now walks forward
+  to the first pair that actually differs. 62 selected leaves, 62 wrong, up from
+  61 - corruptor f1 0.728 -> 0.723 everywhere and macro 0.740 -> 0.734.
 
 - 2026-09-01 — the comparator decided a field was present with `key in pred`,
   and `in` walks the prototype chain — so a document field named `toString` or
