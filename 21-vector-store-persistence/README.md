@@ -238,6 +238,14 @@ is a repo rule.
 
 ## fixes
 
+- 2026-10-02 — the ledger row in progress.md still published the collapse
+  shape section 5 retired on 2026-10-01, word for word: "shrugs off 10% and
+  then goes" with tie seed 0's 0.758 / 0.724 at 20% removed. the row quotes
+  the bands now — 0.621-0.743 reachability and 0.597-0.723 recall at 30%
+  removed, 3 of the 5 draws down at the first batch of 100 — and the
+  2026-09-01 entry below stops restating the retired shape as the standing
+  conclusion. no measured number moved
+
 - 2026-10-01 — the repair extension published "reselect is worse than doing
   nothing" for both selection rules, and the 11137 dropped edges and 0.135
   reachability behind it are the naive-selection column alone. the cost
@@ -262,10 +270,10 @@ is a repo rule.
   the min-max. the number that came out was the naive graph's live
   reachability "0.638 after just 100 removals": no fair draw reproduces it
   (0.751 to 1.000) and removing the 100 earliest inserts by id alone gives
-  0.639, so that cell was measuring insertion order. the conclusion holds
-  and arrives later — the naive graph shrugs off 10%, then falls to 0.633
-  reachability and 0.597 recall at 30% removed, where the heuristic graph
-  holds 1.000 and 0.983
+  0.639, so that cell was measuring insertion order. what went in instead
+  was "the naive graph shrugs off 10%, then falls to 0.633 reachability and
+  0.597 recall at 30% removed" — tie seed 0 again, retired in turn by the
+  2026-10-01 entry above
 
 ## open questions
 

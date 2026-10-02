@@ -214,3 +214,132 @@ class TestReselectVerdict:
 
         bare = reach(False)
         assert reach(True, False) <= bare < reach(True, True)
+
+
+@pytest.fixture(scope="module")
+def ledger_row() -> str:
+    """The base COMPLETED row for 21 in the repo ledger, one folder up.
+
+    The repair extension has its own row and the REVIEWED table keys its
+    rows by project name too, so scope to COMPLETED and match the name
+    followed by the column break — "21-vector-store-persistence, repair
+    extension" starts with the same text.
+    """
+    ledger = (_ROOT.parent / "progress.md").read_text(encoding="utf-8")
+    completed = ledger.split("## COMPLETED", 1)[1].split("\n## ", 1)[0]
+    rows = [
+        line
+        for line in completed.splitlines()
+        if line.startswith("| 21-vector-store-persistence |")
+    ]
+    assert len(rows) == 1, "progress.md has no single base COMPLETED row for 21"
+    return rows[0]
+
+
+@pytest.fixture(scope="module")
+def index_row() -> str:
+    """21's row in the root index table, which the 2026-10-01 fix did update."""
+    root = (_ROOT.parent / "README.md").read_text(encoding="utf-8")
+    rows = [line for line in root.splitlines() if line.startswith("| 21 |")]
+    assert len(rows) == 1, "the root index has no single row for 21"
+    return rows[0]
+
+
+def _naive_clause(row: str) -> str:
+    """The part of a summary row that prices the attack on the naive build."""
+    marker = "naive M-closest"
+    assert marker in row, f"no naive-build clause in: {row[:80]}"
+    return row.split(marker, 1)[1]
+
+
+_BAND = re.compile(r"0\.\d{3}-0\.\d{3}")
+
+
+class TestLedgerRow:
+    """progress.md has to retract alongside the readme.
+
+    The 2026-10-01 fix pulled "shrugs off 10% and then goes" out of section
+    5 because every number in it is tie seed 0 of five — 3 of the 5 draws
+    are already down at the first batch and seed 1 never cliffs. Section 5
+    and the root index row both publish the bands now; 21's COMPLETED row
+    in the ledger still quoted the retired sentence verbatim, and that row
+    is the summary the next project reads before reusing a mechanism.
+    """
+
+    def test_row_does_not_publish_the_retired_cliff(self, ledger_row):
+        assert "shrugs off 10%" not in ledger_row
+
+    def test_row_does_not_quote_the_one_draw_cells(self, ledger_row):
+        """0.758 / 0.724 at 20% removed is tie seed 0 and nothing else."""
+        clause = _naive_clause(ledger_row)
+        assert "0.758" not in clause
+        assert "0.724" not in clause
+
+    def test_row_quotes_the_bands_the_index_row_quotes(self, ledger_row, index_row):
+        """Two summaries of one attack cannot disagree about its result."""
+        published = _BAND.findall(_naive_clause(index_row))
+        assert published, "the root index row stopped quoting bands"
+        for band in published:
+            assert band in ledger_row, f"the ledger row drops {band}"
+
+    def test_row_bands_come_from_section_five(self, ledger_row, numbers):
+        section = numbers.split("**5.", 1)[1]
+        for band in _BAND.findall(_naive_clause(ledger_row)):
+            assert band in section, f"{band} is not a band section 5 publishes"
+
+    def test_row_says_the_draws_disagree_about_the_first_batch(self, ledger_row):
+        """The band alone reads as a graph that held; 3 of 5 never did."""
+        clause = _naive_clause(ledger_row)
+        assert "3 of the 5" in clause
+        assert "first batch" in clause
+
+    def test_the_first_batch_count_is_out_of_every_draw_the_run_sweeps(
+        self, ledger_row, entry_point
+    ):
+        """The denominator is the seed sweep, so the row cannot quote 3 of 5
+        while the entry point runs some other number of draws."""
+        drawn = re.search(r"(\d+) of the (\d+) draws", _naive_clause(ledger_row))
+        assert drawn, "the row must say how many draws are down at the first batch"
+        down, total = int(drawn.group(1)), int(drawn.group(2))
+        assert total == len(entry_point.HUB_TIE_SEEDS)
+        assert 0 < down < total, "a count that is all or none is not a disagreement"
+
+
+@pytest.fixture(scope="module")
+def fix_entries() -> dict[str, list[str]]:
+    """The '## fixes' log, grouped by date. Two fixes can land on one day,
+    so the value is a list — keying straight to a string would drop one."""
+    readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+    body = readme.split("## fixes", 1)[1].split("\n## ", 1)[0]
+    entries: dict[str, list[str]] = {}
+    for chunk in body.split("\n- ")[1:]:
+        date, rest = chunk.split(" — ", 1)
+        entries.setdefault(date.strip(), []).append(" ".join(rest.split()))
+    return entries
+
+
+class TestFixLogDoesNotRestateRetiredClaims:
+    """The log records a claim coming out, it does not re-publish it.
+
+    The 2026-09-01 entry closed on "the conclusion holds and arrives later
+    — the naive graph shrugs off 10%, then falls to 0.633 reachability and
+    0.597 recall at 30% removed", which is the standing conclusion as of
+    that day and exactly what 2026-10-01 refused. Newest first means the
+    retraction is read first, but the clause still asserts it.
+    """
+
+    def test_the_2026_09_01_entry_is_present(self, fix_entries):
+        assert "2026-09-01" in fix_entries
+
+    def test_it_no_longer_asserts_the_shape_as_the_standing_conclusion(
+        self, fix_entries
+    ):
+        (entry,) = fix_entries["2026-09-01"]
+        assert "the conclusion holds" not in entry
+
+    def test_where_it_quotes_the_shape_it_says_the_shape_was_retired(
+        self, fix_entries
+    ):
+        (entry,) = fix_entries["2026-09-01"]
+        assert "shrugs off 10%" in entry, "the entry should still record what it published"
+        assert "2026-10-01" in entry, "and say which later entry retired it"
