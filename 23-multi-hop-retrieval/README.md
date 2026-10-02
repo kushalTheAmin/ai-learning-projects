@@ -59,6 +59,13 @@ python was the right language: the entire bm25/metrics/bootstrap stack this buil
 
 ## fixes
 
+- 2026-10-02 — progress.md's row for 23 still published "focus beats append
+  because question terms re-admit distractors" — the readme retired that
+  ordering on 2026-09-01 and the ledger kept asserting it as measured, with a
+  mechanism on it. the row now carries the interval, says 4 of 24 queries move
+  and t10 moves the other way, and names t03 as the whole 0.958 -> 1.000
+  recall@5. no measured number moved.
+
 - 2026-10-02 — the oracle bullet read its +0.011 over iter-append off bridge
   coverage and pointed at t01, the one coverage miss. t01 contributes 0.000 —
   the whole gap is t16 and t22, where extraction found the bridge and the two

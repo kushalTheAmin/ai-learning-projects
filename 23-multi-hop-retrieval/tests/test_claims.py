@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from multihop.data import load_corpus, load_queries
-from multihop.evaluate import compare_rr, run_all, two_hop, two_hop_rr
+from multihop.evaluate import aggregate, compare_rr, run_all, two_hop, two_hop_rr
 from multihop.pipeline import iterative
 from multihop.reuse import BM25Index
 
@@ -56,6 +56,22 @@ def results():
 @pytest.fixture(scope="module")
 def readme() -> str:
     return _squash((_ROOT / "README.md").read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def ledger_row() -> str:
+    """The COMPLETED row for 23 in the repo ledger, one project up."""
+    ledger = (_ROOT.parent / "progress.md").read_text(encoding="utf-8")
+    # the REVIEWED table keys its rows by project name too, so scope to the
+    # COMPLETED section before matching or the date row comes back as well
+    completed = ledger.split("## COMPLETED", 1)[1].split("\n## ", 1)[0]
+    rows = [
+        line
+        for line in completed.splitlines()
+        if line.startswith("| 23-multi-hop-retrieval |")
+    ]
+    assert len(rows) == 1, "progress.md has no single COMPLETED row for 23"
+    return rows[0]
 
 
 @pytest.fixture(scope="module")
@@ -269,3 +285,70 @@ class TestReadmeOracleBullet:
     def test_names_padding_as_the_price_of_extraction(self, readme):
         body = readme.split("## fixes", 1)[0]
         assert "max_terms" in body
+
+
+class TestLedgerRow:
+    """progress.md has to retract alongside the readme.
+
+    The 2026-09-01 fix pulled "iter-focus beats iter-append" out of the
+    readme because the gap is +0.010 [-0.011, +0.032], 4 of 24 queries move
+    and t10 moves the other way. The COMPLETED row in the repo ledger kept
+    asserting it as a measured finding with a mechanism on it — "focus beats
+    append because question terms re-admit distractors" — and that row is the
+    summary the next project reads before reusing a mechanism. Same shape as
+    the 14 finding of 2026-08-30: the readme got fixed, the index did not.
+    """
+
+    def _recall5(self, results, name: str) -> str:
+        rows = results[name] if name == "oracle" else two_hop(results[name])
+        return f"{aggregate(rows).recall5:.3f}"
+
+    def test_ledger_has_exactly_one_completed_row_for_23(self, ledger_row):
+        assert ledger_row.startswith("| 23-multi-hop-retrieval |")
+
+    def test_row_does_not_publish_the_focus_ordering_as_a_result(self, ledger_row):
+        """The retired claim, and the mechanism that was hung on it."""
+        assert "focus beats append" not in ledger_row
+        assert "re-admit" not in ledger_row
+
+    def test_row_carries_the_focus_gap_with_its_interval(self, results, ledger_row):
+        comparison = compare_rr(results, "iter-focus", "iter-append")
+        interval = (
+            f"{comparison.diff:+.3f} "
+            f"[{comparison.ci.lo:+.3f}, {comparison.ci.hi:+.3f}]"
+        )
+        assert interval in ledger_row
+
+    def test_row_says_how_wide_the_focus_gap_is_and_which_way_it_points(
+        self, results, ledger_row
+    ):
+        """4 of 24 and t10 are what make the ordering unpublishable."""
+        append = two_hop(results["iter-append"])
+        focus = two_hop(results["iter-focus"])
+        moved = {
+            a.query.id: f.rr - a.rr
+            for a, f in zip(append, focus)
+            if abs(f.rr - a.rr) > 1e-12
+        }
+        against = [qid for qid, delta in moved.items() if delta < 0.0]
+        assert f"{len(moved)} of {len(append)}" in ledger_row
+        assert against == ["t10"]
+        assert "t10" in ledger_row
+
+    def test_row_names_the_one_query_behind_the_recall_headline(
+        self, results, ledger_row
+    ):
+        """The 1.000 against append's 0.958 is t03 and nothing else."""
+        append = two_hop(results["iter-append"])
+        focus = two_hop(results["iter-focus"])
+        differing = [a.query.id for a, f in zip(append, focus) if a.hit5 != f.hit5]
+        assert differing == ["t03"]
+        assert "t03" in ledger_row
+
+    def test_row_quotes_the_recall_figures_the_run_prints(self, results, ledger_row):
+        """Read off the run, so the row cannot drift from the table."""
+        single = self._recall5(results, "single")
+        append = self._recall5(results, "iter-append")
+        focus = self._recall5(results, "iter-focus")
+        assert (single, append, focus) == ("0.667", "0.958", "1.000")
+        assert f"{single} single vs {append} append and {focus} focus" in ledger_row
