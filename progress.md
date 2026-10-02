@@ -188,6 +188,87 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-02] 23 — the oracle bullet explained its own gap with the one
+  thing that does not cause it. the sentence was "gold bridge coverage is 0.958
+  (23 of 24), so scripted extraction is nearly free on this corpus, and oracle
+  over append is +0.011 [+0.000, +0.028] — the same too-close-to-call as above,
+  which is the point. the one miss is t01", and t01 contributes exactly 0.000 to
+  that +0.011. append mode keeps the question in the hop-2 query, so on t01 the
+  hop-2 ranking is byte-identical whether the added terms are the gold `ledgerd`
+  or the extractor's `autovacuum, bloating, buffers` — oracle and extracted both
+  land the answer at rank 3, rr 0.333. the whole gap is t16 and t22, two queries
+  where `bridge_hit` is True: `max_terms` is 3 and the bridge is one token, so
+  hop 2 got `chirpline alerts delivery` (t16) and `sms chirpline alerts` (t22),
+  and the two filler terms pulled distract-incident over infra-chirpline — the
+  answer sits at merged rank 5 against the oracle's rank 3, rr 0.200 vs 0.333.
+  so the measured price of scripted extraction on this corpus is padding, not
+  coverage, and the "so" in the published sentence ran the causation backwards.
+  the secondary claim was off too: "the same too-close-to-call as above" puts it
+  alongside the focus gap, but p(diff >= 0) = 1.0 and ci.lo is exactly 0.0 — no
+  query moves against the oracle and no resample goes negative, which is a
+  one-sided gap pinned at zero, not a two-sided straddle. found and fixed
+  2026-10-02
+
+  the fix is one readme bullet plus the fixes section, no source file touched
+  and no measured number moved — main.py is byte-identical before and after.
+  the bullet now says t01 costs nothing and why, names t16 and t22 as the whole
+  gap, names `max_terms` as the mechanism, says nothing sweeps it, and keeps the
+  "too small to publish as an ordering" verdict while separating its shape from
+  the focus gap's. nine new tests in tests/test_claims.py, 71 -> 80: five
+  recompute the mechanism (the per-query oracle-minus-append deltas are exactly
+  {t16: 0.1333, t22: 0.1333}, t01 is the only bridge miss and is absent from
+  that dict, both moving queries have bridge_hit True with three extracted
+  terms, re-running `iterative` with bridge_override=["chirpline"] against the
+  extractor's own padded list reproduces rank 3 vs rank 5 on both, and
+  p_ge_zero == 1.0 with ci.lo == 0.0) and four pin the readme prose. the five
+  mechanism tests pass before the fix too — they describe behaviour that was
+  already right, the prose was what was wrong. gate ran from a fresh clone: 80
+  pass, main.py output identical to the local run, and every numeric token in
+  the readme's measured sections appears verbatim in that output except the
+  derived per-query delta 0.133. revert check: with only the bullet reverted,
+  the four prose tests fail.
+
+- [high] 23 — the retired ordering is still live in progress.md. the
+  2026-09-01 fix pulled "iter-focus beats iter-append" out of the readme
+  because the gap is +0.010 [-0.011, +0.032], 4 of 24 queries move and t10
+  moves the other way — but 23's COMPLETED row here still reads "focus beats
+  append because question terms re-admit distractors", stated as a measured
+  finding with a mechanism on it, and the row is the summary every new project
+  reads before reusing a mechanism. same shape as the 14 finding of
+  2026-08-30: the readme got fixed, the index did not. the row also says
+  "recall@5 0.667 single vs 0.958 append and 1.000 focus" without the caveat
+  that the 1.000 is one query (t03). the fix is the row, no source and no
+  number. found 2026-10-02
+
+- [medium] 23 — `max_terms` is hardcoded 3 everywhere and nothing sweeps it,
+  and it is the only thing the oracle gap measures. `extract_bridge_terms`
+  defaults to 3, `iterative` passes 3, `run_all` never overrides it, and the
+  two queries where the oracle beats extracted lose solely to the two filler
+  terms that cap fills after the real bridge. so the published cost of scripted
+  extraction is a knob setting, not a property of the extractor, and the
+  tradeoffs section's "extraction quality is the ceiling on this whole
+  approach" is about coverage, which costs nothing here. a sweep over
+  max_terms in {1, 2, 3} across both modes is three more rows and would say
+  whether iter-append's 0.403 mrr is a padding artifact. found 2026-10-02
+
+- [low] 23 — the recall@5 column is computed by hand against a literal 5 while
+  pair@5 two lines up uses the named `PAIR_K`. `score` sets
+  `hit5=query.answer_id in ranking[:5]` and `top_pair = set(ranking[:PAIR_K])`,
+  so moving PAIR_K silently desynchronizes two columns the readme reads as the
+  same cutoff. related: `reuse.py` imports and re-exports 02's `recall_at_k`
+  and nothing in the project calls it, so the one metric 02 owns is the one
+  this project reimplements inline — exactly the drift the module docstring
+  says reuse exists to prevent. no number is wrong today. found 2026-10-02
+
+- [low] 23 — main.py's `clears zero` cannot tell a straddle from a bound. the
+  column is `"yes" if c.ci.lo > 0 else "no"`, and on oracle vs iter-append the
+  interval is [+0.000, +0.028] with ci.lo exactly 0.0 and p(diff >= 0) = 1.0 —
+  12.75% of resamples land on zero and none below it. "no" is the right call,
+  but the row reads identically to iter-focus vs iter-append at [-0.011,
+  +0.032], which really does go both ways, and the readme has to say the
+  difference in prose because the table cannot. printing p_ge_zero next to
+  p_le_zero would carry it. found 2026-10-02
+
 - [fixed 2026-10-01] 19 — the reading of the gate table summarized its own
   improvement row as all-pass. the bullet was "everything passes the
   improvement, and the ci confirms the improvement (interval fully above zero)
@@ -3268,7 +3349,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 26-reranking | 2026-09-02 |
 | 25-query-rewriting | 2026-09-02 |
 | 24-extraction-metrics | 2026-09-01 |
-| 23-multi-hop-retrieval | 2026-09-01 |
+| 23-multi-hop-retrieval | 2026-10-02 |
 | 19-eval-regression | 2026-10-01 |
 | 21-vector-store-persistence | 2026-10-01 |
 | 20-guardrails | 2026-10-01 |
