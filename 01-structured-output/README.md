@@ -106,6 +106,11 @@ always do
 
 ## fixes
 
+- 2026-10-03 — the 2026-09-02 control landed on this readme, run.py and the
+  tests but not on `extractor/pipeline.py`, whose docstring still called feedback
+  "the part that actually moves the success rate" — a flat contradiction of
+  "nothing here measures whether it helps" one file over. the docstring now
+  carries the tie and names `feedback=False` as the control. no number moved
 - 2026-09-02 — the 96.7% row was labelled "feedback retry" and the prose
   credited the feedback loop for it, but `ScriptedLLM` replays a plan indexed
   by attempt number and never reads the prompt. added the blind-retry control:

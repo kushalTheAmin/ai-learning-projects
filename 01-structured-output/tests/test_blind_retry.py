@@ -176,3 +176,58 @@ class TestReadmeClaims:
         text = readme_text()
         assert "a blind retry re-rolls the same dice - a feedback retry converges" not in text
         assert "a blind retry re-rolls the same dice — a feedback retry converges" not in text
+
+
+class TestPipelineDocstringMatchesTheControl:
+    """The module docstring is the fourth surface that carried the claim.
+
+    The 2026-09-02 control landed on run.py, the README and these tests, but
+    `pipeline.py`'s own docstring kept asserting that feedback is what moves
+    the rate - the one thing this harness cannot see. A reader opens that file
+    straight after the README, and nothing held it to the measured reading.
+    """
+
+    def docstring(self) -> str:
+        from extractor import pipeline
+
+        return " ".join((pipeline.__doc__ or "").split())
+
+    def test_docstring_does_not_credit_feedback_with_the_success_rate(self):
+        text = self.docstring()
+        assert "the part that actually moves the success rate" not in text
+        assert "actually moves the success rate" not in text
+
+    def test_docstring_does_not_state_the_distinction_as_fact(self):
+        text = self.docstring()
+        assert "a blind retry re-rolls the dice" not in text
+        assert "a feedback retry tells the model what to fix" not in text
+
+    def test_docstring_says_the_harness_cannot_show_it(self):
+        text = self.docstring()
+        assert "never reads the prompt" in text
+        assert "prices retrying, not feedback" in text
+
+    def test_docstring_names_the_blind_control(self):
+        text = self.docstring()
+        assert "control" in text
+        assert "feedback=False" in text
+
+    def test_docstring_keeps_the_hard_failure_policy(self):
+        text = self.docstring()
+        assert "after max_retries the pipeline returns a failed" in text
+        assert "never returns partially-validated data" in text
+
+    def test_docstring_does_not_contradict_the_readme(self):
+        """Both files describe the same measurement - they cannot disagree."""
+        readme = readme_text()
+        assert "nothing here measures whether it helps" in readme
+        # the README disclaims measuring feedback, so the source cannot assert it
+        assert "actually moves the success rate" not in self.docstring()
+
+    def test_run_py_docstring_already_agreed(self):
+        """run.py was fixed in 2026-09-02 and is the wording to match."""
+        import run
+
+        text = " ".join((run.__doc__ or "").split())
+        assert "never reads the prompt" in text
+        assert "prices retrying, not feedback" in text

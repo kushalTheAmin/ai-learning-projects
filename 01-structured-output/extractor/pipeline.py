@@ -1,8 +1,11 @@
 """Extraction pipeline: prompt -> parse -> validate -> retry with feedback.
 
 The retry loop feeds the concrete parse or validation error back to the
-model, which is the part that actually moves the success rate — a blind
-retry re-rolls the dice, a feedback retry tells the model what to fix.
+model. Whether that feedback is what moves the success rate is not something
+this harness can show: ScriptedLLM replays a plan indexed by attempt number
+and never reads the prompt, so the blind control run.py prints ties with the
+feedback path ticket for ticket. The measured rate prices retrying, not
+feedback. feedback=False is that control.
 
 Hard failure policy: after max_retries the pipeline returns a failed
 ExtractionResult. It never raises past this boundary and never returns

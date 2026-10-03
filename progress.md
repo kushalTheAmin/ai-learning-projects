@@ -188,6 +188,74 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-03] 01 — `pipeline.py`'s module docstring still published the
+  claim the 2026-09-02 blind-retry control retired. its second paragraph read
+  "the retry loop feeds the concrete parse or validation error back to the model,
+  which is the part that actually moves the success rate — a blind retry re-rolls
+  the dice, a feedback retry tells the model what to fix", which is the causal
+  attribution that fix was written to pull. the readme one file over says
+  "nothing here measures whether it helps" and run.py's own docstring says the
+  two rows "tie by construction - the retry rows price retrying, not feedback",
+  so the source file that implements the loop asserted as fact the exact thing
+  the project's two other surfaces disclaim — and it is the file a reader opens
+  straight after the readme. the 2026-09-02 fix landed on the readme, run.py and
+  a new tests/test_blind_retry.py, which bans both dash spellings of "a blind
+  retry re-rolls the same dice — a feedback retry converges" from the readme and
+  never looked at the docstring, so the banned sentence survived in paraphrase,
+  untested, one import away. same shape as the stale ledger rows fixed for 23,
+  21, 25 and 17: the readme got fixed, a second surface did not. found and fixed
+  2026-10-03
+
+  the fix is that one paragraph and nothing else. it now says whether feedback
+  moves the rate "is not something this harness can show", names the mechanism
+  (ScriptedLLM replays a plan indexed by attempt number and never reads the
+  prompt), carries the tie ticket for ticket, closes on "the measured rate prices
+  retrying, not feedback" and names `feedback=False` as the control — run.py's
+  own wording, so the two docstrings now agree instead of contradicting. no code
+  changed, so run.py's output is byte identical, confirmed by diffing before and
+  after, and no number moved, so the root readme's index row — corrected on
+  2026-09-02 and already carrying the blind-control reading — is untouched.
+  seven new tests in tests/test_blind_retry.py, 86 → 93, in a
+  TestPipelineDocstringMatchesTheControl class that reads `pipeline.__doc__` the
+  way the existing class reads the readme: five bind the fix (neither retired
+  phrasing present, the tie and the "prices retrying, not feedback" reading
+  present, `feedback=False` named as the control, and the docstring held against
+  the readme's own disclaimer so the two cannot drift apart again) and two pass
+  before it too — the hard-failure paragraph is unchanged, and run.py's docstring
+  was already the honest version. gate ran from a fresh clone: 93 pass, entry
+  point byte-identical to the local run, and every number in the readme's table
+  (20.0%, 60.0%, 96.7%, 30, 44) appears verbatim in that output, the derived
+  29/30 and the 47% call overhead aside. revert check: with only
+  extractor/pipeline.py reverted and the tests kept, 5 fail.
+
+- [medium] 01 — the COMPLETED ledger row benchmarks three strategies where the
+  project publishes four, and the missing one is the control. the row reads
+  "benchmarked strict vs lenient vs full retry on 30 scripted-failure tickets
+  (20.0% → 60.0% → 96.7%, 44 llm calls vs 30)", and the 2026-09-02 fix exists
+  precisely because 96.7% read as the feedback loop's number: blind retry scores
+  the same 96.7% at the same 44 calls, identical ticket for ticket, so the arrow
+  prices retrying while the row names the feedback path as what earned it. no
+  number in the row is wrong — all five reproduce from run.py today — what is
+  absent is the row that fix added, in the summary the next project reads before
+  reusing a retry loop. left out of today's fix to keep the diff one change: the
+  docstring was the surface asserting the claim, this one is the surface omitting
+  its refutation. found 2026-10-03
+
+- [low] 01 — `ScriptedLLM.complete` raises IndexError on a ticket with an empty
+  plan. the lookup is `plan[min(attempt, len(plan) - 1)]`, so a plan of length 0
+  indexes `plan[-1]` on an empty list and the caller gets "list index out of
+  range" where an unknown ticket id two lines up gets a clean
+  `KeyError("prompt does not reference a known ticket id")`. unreachable from the
+  committed dataset — `test_every_plan_mode_is_known` asserts every plan is
+  non-empty — so no published number is touched. found 2026-10-03
+
+- [low] 01 — `ScriptedLLM` silently keeps the last ticket when two share an id.
+  `self._by_id = {t["id"]: t for t in tickets}` drops the earlier one, so a
+  duplicated id shrinks the roster and the plan served is the second ticket's,
+  with no error raised. `test_thirty_tickets_unique_ids` pins the committed
+  dataset at 30 unique ids so nothing published is affected, and the `calls`
+  counter stays honest either way. found 2026-10-03
+
 - [fixed 2026-10-03] 25 — append's crossing rate was published as a 2.5-point
   bracket and it is one draw. the sweep section read "replace crosses under raw
   between 15% and 17.5%, append between 22.5% and 25%, and the gap between those
@@ -3723,7 +3791,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | project | last review |
 |---|---|
 | 06-rate-limiting | 2026-09-04 |
-| 01-structured-output | 2026-09-02 |
+| 01-structured-output | 2026-10-03 |
 | 22-rag-vertical-slice | 2026-09-02 |
 | 26-reranking | 2026-09-02 |
 | 25-query-rewriting | 2026-10-03 |
@@ -3748,6 +3816,42 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 03-hybrid-search | 2026-09-03 |
 | 04-bpe-tokenizer | 2026-09-03 |
 | 02-retrieval-eval | 2026-09-03 |
+
+01 came back clean on every published number and dirty on one surface of its
+own retired claim. all 86 committed tests pass, run.py is byte-identical across
+repeated runs and from a fresh clone, and every number in the readme's table
+reproduces verbatim from the entry point — 20.0% / 30 calls strict, 60.0% / 30
+lenient, 96.7% / 44 on both retry rows — with the 29/30 and the 47% call
+overhead derived from them. the call arithmetic adds up ticket by ticket to
+exactly 44, and the resolution table's attribution holds: trailing commas are
+rescued by `repair_commas` for free on all three, enum violations always cost a
+retry, t21 takes its second, t27 is the one permanent failure and is reported
+rather than hidden. the mechanics are honest on their own terms — the five parse
+layers run cheapest-first and report the winner, `extra="forbid"` makes drift
+fail loudly, every success is a validated `TicketExtraction` and every failure
+carries `data=None`, and a fresh `ScriptedLLM` per strategy keeps the attempt
+counters from leaking between rows. edge cases are well covered already: empty
+and whitespace-only responses, unicode, 1MB of junk, a 500k-character valid
+value, unclosed objects, both quote styles in the brace walker, and the stray-
+brace limitation pinned as a test and disclosed in the tradeoffs.
+
+what was wrong was the docstring. `extractor/pipeline.py` still opened by
+calling the feedback loop "the part that actually moves the success rate", which
+is the attribution the 2026-09-02 control retired — the readme one file over
+says "nothing here measures whether it helps" and run.py says the rows tie by
+construction. the tests that fix wrote ban the sentence from the readme and
+never looked at the source, so it survived in paraphrase in the file a reader
+opens next. fixed above: the docstring now carries the tie, names the mechanism
+and names `feedback=False` as the control, in run.py's own wording. no measured
+number moved.
+
+behind it, the same 2026-09-02 fix has one more surface left: 01's COMPLETED
+ledger row still benchmarks three strategies, so the control row is missing from
+the summary and 96.7% reads there as the feedback loop's. logged medium. the
+fence-shadowing finding logged medium on 2026-09-02 also still reproduces — a
+bare reasoning fence followed by the real json parses to nothing — and two low
+robustness items in `ScriptedLLM` are new: IndexError on an empty plan, and a
+duplicate ticket id silently dropped.
 
 Note on the first pass: every project in the repo was committed on 2026-08-25,
 so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
