@@ -188,6 +188,77 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-03] 25 — append's crossing rate was published as a 2.5-point
+  bracket and it is one draw. the sweep section read "replace crosses under raw
+  between 15% and 17.5%, append between 22.5% and 25%, and the gap between those
+  two brackets is the whole value of keeping the original query in the search
+  string", closing with "the append anchor buys another 5 to 10 points of that
+  rate". the rate column is exact since the 2026-09-02 fix — round(rate * n)
+  queries fire — but *which* queries fill the first k is still the seed's, and
+  rate 0.25 sits on top of raw's 0.830. over seeds 0-9 append at 0.25 runs 0.808
+  to 0.844, under raw on 6 draws and over it on 4, so the table's 0.818 row is
+  one side of a coin flip. the crossing moves with it: 22.5% to 30.0% over the
+  ten, against a published bracket the draws land inside 17 of 50 times on a
+  wider scan. replace's bracket is fine — 15% to 17.5% on 9 of the 10, 17.5% to
+  20% on the tenth — which is why the two read as equally solid and only one is.
+  found and fixed 2026-10-03
+
+  the fix is a band, not a number. main.py gains `first_rate_under_raw`, which
+  sweeps one query at a time until a mode falls under raw, and prints it per
+  seed across `CROSSING_SEEDS` with the append mrr at 0.25 beside it, so the
+  bracket a reader gets is the spread. the section quotes that table instead of
+  the single bracket and says what the draws do agree on: append outlives
+  replace by 2 to 5 queries on every one of the ten, 5 to 12.5 points of rate,
+  so the ordering is the measured result and the crossing rate is not pinnable
+  closer than ten points on this corpus. the root readme's index row carried the
+  retired 22.5-25% and now carries the spread. the block is a pure addition —
+  every previously published number is byte identical, confirmed by diffing the
+  entry point's output before and after. ten new tests in tests/test_sweep_rate.py,
+  76 -> 86, and the old `test_names_both_crossing_brackets` retired with the
+  claim it pinned: four hold the data (0.25 is a near-tie on 3-7 of 10 draws,
+  append's crossing spans at least 9 to 12 queries, replace's stays in {7, 8},
+  append outlives replace on every draw), three hold the helper (finds 10/40 at
+  seed 7, returns None when nothing crosses, refuses an unknown mode), one holds
+  the printed block to a row per seed plus a band, two hold the readme. gate ran
+  from a fresh clone: 86 pass, entry point byte-identical to the local run, and
+  every numeric token in the readme's measured sections appears verbatim in that
+  output except the derived 15 (the swept point below replace's 17.5%) and 12.5
+  (5 queries of 40). revert check: with main.py and both readmes reverted and the
+  tests kept, 7 fail.
+
+- [high] 25 — the COMPLETED ledger row still publishes the sweep the 2026-09-02
+  fix retired, conclusion and all. its measured summary ends "the hallucination
+  sweep prices the anchor: at a 10% wrong-answer rate replace-mode already loses
+  to the raw query (0.822 vs 0.830) while append holds 0.866, and at 100% append
+  keeps 0.367 on query-term votes where replace craters to 0.057". 0.822 and
+  0.866 are the nominal-rate numbers from the coin draw; neither appears anywhere
+  in what main.py prints today, where rate 0.10 reads 0.919 append and 0.897
+  replace — both *above* raw's 0.830. so the row publishes two numbers no run
+  reproduces and the reversed conclusion, which is the exact claim the 2026-09-02
+  entry was written to retire ("rate 0.10 moved 0.866/0.822 → 0.919/0.897"). the
+  rate-1.00 half of the sentence (0.367 and 0.057) is still right. this is the
+  same stale-ledger shape fixed for 23 on 2026-10-02 and 21 on 2026-10-02, one
+  project over and a month older. found 2026-10-03, and it is the next run's
+  first job — one fix per run, and today's went to the crossing bracket.
+
+- [medium] 25, and progress.md — the retired append bracket is still live in two
+  dated history entries. the 2026-09-02 entry in 25's `## fixes` closes "the
+  crossing points are 15-17.5% for replace and 22.5-25% for append", and this
+  log's own 2026-09-02 entry says "it is 22.5% to 25%". both are honest records
+  of what that commit published, and both now read as current numbers to anyone
+  scanning either file. lighter than the ledger row above — history entries are
+  dated and the fixes section is the version log — but the number is retired
+  either way. left out of today's fix to keep the diff one change. found
+  2026-10-03
+
+- [low] 25 — the recall@1 column cannot reach 1.000 and nothing says so. p13 has
+  two relevant docs and `recall_at_k` denominates over the whole relevant set, so
+  one query is capped at 0.5 at k=1 and the column's ceiling on this golden set
+  is 0.9875. hyde-append's published 0.963 is 38.5 of 40: one real miss (p07) and
+  p13's structural half. no prose reasons from recall@1 — every claim in the
+  readme runs off mrr@10 — so nothing published is wrong, but 0.963 reads as
+  "misses 4% of queries" against a ceiling that is not 1.000. found 2026-10-03
+
 - [fixed 2026-10-02] 24 — the corruptor did not corrupt every leaf it picked.
   `typo` damages a string by swapping one adjacent pair, and when the draw
   landed on a pair of the same character the swap returned the string byte for
@@ -3581,7 +3652,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 01-structured-output | 2026-09-02 |
 | 22-rag-vertical-slice | 2026-09-02 |
 | 26-reranking | 2026-09-02 |
-| 25-query-rewriting | 2026-09-02 |
+| 25-query-rewriting | 2026-10-03 |
 | 24-extraction-metrics | 2026-10-02 |
 | 23-multi-hop-retrieval | 2026-10-02 |
 | 19-eval-regression | 2026-10-01 |
@@ -3609,6 +3680,38 @@ so the "let it settle for 24 hours" rule would have skipped all four. Reviewed
 the oldest instead (01, committed 17:44 UTC) rather than run a no-op. Same on
 2026-08-26 — everything was still inside 24 hours, so the oldest unreviewed
 project went first (02, committed 18:10 UTC).
+
+25 came back clean on every published number and dirty on the bracket it reads
+them into. all 76 committed tests pass, main.py is deterministic across runs and
+byte-identical from a fresh clone, and every numeric token in the readme's
+measured sections appears verbatim in what the entry point prints — the whole
+5-row headline table, the four paired-bootstrap rows, the prf depth sweep's
+0.834/0.838 flatness, the 32-and-7 expansion-source split with its +0.000 and
++0.044, all five sweep rows, and the p07 regression at 1.000 -> 0.333. the
+mechanics hold on their own terms: the index is built once and never sees a
+label, prf extracts from its own first-pass top doc rather than a gold doc, the
+hallucination sets are nested at single-query granularity (tested over all 41
+counts) and fire exactly round(rate * n) with half-up rounding, no query ever
+draws its own answer, 02's bm25 really does dedupe query terms so the "every
+added term votes once" mechanism behind generic-append's 0.560 is the right
+reading, and 23's extractor is imported with matching argument order. edge cases
+are covered: unmatchable query, unicode, empty query, max_terms past the doc
+vocabulary, mismatched paired sets.
+
+what was wrong was one bracket. "append crosses under raw between 22.5% and 25%"
+is seed 7, and rate 0.25 sits on raw's 0.830 — over seeds 0-9 append reads 0.808
+to 0.844 there, under raw on 6 and over on 4, and the crossing wanders 22.5% to
+30.0%. the sentence it feeds was the project's answer to its own append-vs-replace
+question. replace's bracket, printed right beside it, is solid on 9 of the 10,
+which is what made the pair read as equally measured. fixed above: the entry
+point prints the band per seed, the section quotes it, and the ordering append
+outlives replace by 2 to 5 queries on every draw is what the sweep actually
+establishes. no measured number moved.
+
+behind it, the sharper residue is not in the code at all: the COMPLETED ledger
+row for 25 still publishes 0.822 and 0.866 at rate 0.10 and the reversed
+conclusion that replace loses to raw there, a month after the fix that retired
+them. logged high, and it goes first next run.
 
 24 came back clean on every published number and dirty on the thing producing
 them. all 63 committed tests pass, typecheck is clean, main.py's typescript

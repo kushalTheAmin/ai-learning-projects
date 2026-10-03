@@ -60,7 +60,27 @@ each query has a fixed wrong answer (the next query's authored answer, so its co
   (raw mrr@10 for reference: 0.830)
 ```
 
-append and replace are near-identical when the generator is honest (0.983 vs 0.981) and pull apart the moment it isnt. at 10% both still clear the raw query — replace 0.897, append 0.919 — so a rewrite survives the occasional confident wrong answer. replace crosses under raw between 15% and 17.5%, append between 22.5% and 25%, and the gap between those two brackets is the whole value of keeping the original query in the search string. at full hallucination the anchor is everything: append keeps the original query terms voting and lands at 0.367, replace searches for the wrong answer alone and lands at 0.057. so "should i search with the query plus the rewrite, or the rewrite alone" is really a bet on your generator's error rate, and the append anchor buys another 5 to 10 points of that rate before the rewrite stops paying at all. 23 found the mirror image on hop-2 queries (focus beat append because question terms re-admitted distractors); the difference is that here the query names the right doc's topic, there hop 1's question named the wrong one.
+append and replace are near-identical when the generator is honest (0.983 vs 0.981) and pull apart the moment it isnt. at 10% both still clear the raw query — replace 0.897, append 0.919 — so a rewrite survives the occasional confident wrong answer.
+
+where each one stops paying is the seed's, not the mechanism's. the rate column is exact now, but *which* queries fill the first k is still a draw, so the sweep runs again over 10 seeds:
+
+```
+  seed  append mrr @0.25  append under raw  replace under raw
+     0             0.808             25.0%              17.5%
+     1             0.808             22.5%              17.5%
+     2             0.817             22.5%              17.5%
+     3             0.840             27.5%              17.5%
+     4             0.826             25.0%              17.5%
+     5             0.843             30.0%              17.5%
+     6             0.838             27.5%              20.0%
+     7             0.818             25.0%              17.5%
+     8             0.815             25.0%              17.5%
+     9             0.844             30.0%              17.5%
+  band     0.808 - 0.844     22.5% - 30.0%      17.5% - 20.0%
+  (6 of 10 draws put append under raw at 0.25; append outlives replace by 2 to 5 queries on every draw)
+```
+
+replace crosses tight — 15% to 17.5% on 9 of the 10 draws, 17.5% to 20% on the tenth. append does not: 22.5% to 30.0% across the same draws, because rate 0.25 sits on top of raw's 0.830 and the draw decides which side. 0.808 to 0.844 over the ten, under raw on 6 and over it on 4 — so the table's 0.818 row is one draw of a coin flip, not a point on a curve. what the draws do agree on is the ordering: append outlives replace by 2 to 5 queries, 5 to 12.5 points of rate, on every one of the ten. that gap is the value of keeping the original query in the search string, and the gap is what the sweep measures — the crossing rate itself this corpus cannot pin closer than ten points. at full hallucination the anchor is everything: append keeps the original query terms voting and lands at 0.367, replace searches for the wrong answer alone and lands at 0.057. so "should i search with the query plus the rewrite, or the rewrite alone" is really a bet on your generator's error rate, and the append anchor buys another 5 to 12.5 points of that rate before the rewrite stops paying at all. 23 found the mirror image on hop-2 queries (focus beat append because question terms re-admitted distractors); the difference is that here the query names the right doc's topic, there hop 1's question named the wrong one.
 
 honest hyde is not free of regressions either: p07 (request waits forever, server never answers) falls from rr 1.000 to 0.333 under hyde-append at rate 0, because a correct answer about timeouts votes for every doc that discusses timeouts, not just the gold one. the biggest-moves table in the output shows both tails.
 
@@ -84,5 +104,7 @@ python, because the entire stack it composes with lives there: 02's bm25 and boo
 - real hyde samples several hypotheticals and averages; whether three authored paraphrases of the same answer beat one, or just widen the drift surface, is testable in this harness with more authoring
 
 ## fixes
+
+- 2026-10-03 — "append crosses under raw between 22.5% and 25%" was one seed. rate 0.25 sits on raw's 0.830, so the draw decides the side: over 10 seeds append runs 0.808 to 0.844 there, under raw on 6 and over on 4, and the crossing moves 22.5% to 30.0%. main.py prints the band per seed now and the section quotes it instead of the single bracket — replace's 15-17.5% holds on 9 of 10, append's does not, and the anchor's worth is 5 to 12.5 points of rate, not 5 to 10. no measured number moved.
 
 - 2026-09-02 — the hallucination sweep drew an independent coin per query, so the column labelled `rate` was nominal and the row measured whatever 40 draws gave: 0.10 fired 7 (17.5%), 0.50 fired 15 (37.5%). the readme read its conclusion off the label — "one wrong answer in ten erases the entire benefit" — when at a real 10% replace scores 0.897, above raw's 0.830. the draw is now the rate-quantile of the same per-query scores, still nested, still seeded, and exactly round(rate * n) queries fire. rate 0.10 moved 0.866/0.822 → 0.919/0.897 and rate 0.50 moved 0.762/0.634 → 0.652/0.509; the crossing points are 15-17.5% for replace and 22.5-25% for append, not 10% and "somewhere between 10% and 25%". rate 0, 0.25 and 1.00 are unchanged and no other table moved.

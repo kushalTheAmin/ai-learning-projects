@@ -17,6 +17,33 @@ from query_rewriting.reuse import BM25Index, mean, paired_bootstrap
 SEED = 7
 SWEEP_RATES = (0.0, 0.1, 0.25, 0.5, 1.0)
 PRF_DEPTHS = (1, 3, 5, 10)
+CROSSING_SEEDS = tuple(range(10))
+BAND_RATE = 0.25
+
+
+def first_rate_under_raw(
+    index: BM25Index,
+    queries: list,
+    hypotheticals: dict[str, str],
+    mode: str,
+    raw_mrr: float,
+    seed: int,
+) -> float | None:
+    """The lowest hallucination rate whose mrr falls under the raw query,
+    swept one query at a time. None when no rate does.
+
+    The sweep fires exactly round(rate * n) queries, so a point sits at the
+    rate it is labelled with — but *which* queries sit in the first k is the
+    seed's, and that is what decides where a mode stops paying. So this is
+    one draw's crossing, not the mechanism's, and it is only worth reading
+    as a band over seeds.
+    """
+    n = len(hypotheticals)
+    for count in range(n + 1):
+        hyde = ScriptedHyde(hypotheticals, hallucination_rate=count / n, seed=seed)
+        if aggregate(run_hyde(index, queries, hyde, mode)).mrr < raw_mrr:
+            return count / n
+    return None
 
 
 def main() -> None:
@@ -102,6 +129,47 @@ def main() -> None:
             f"{aggregate(replace_outcomes).mrr:>12.3f} {halluc_mrr}"
         )
     print(f"  (raw mrr@10 for reference: {raw_mrr:.3f})")
+
+    print(
+        f"\nthe crossing is one draw, so both curves over {len(CROSSING_SEEDS)} "
+        "hallucination seeds (first rate whose mrr falls under raw)"
+        f"\n{'seed':>6} {'append mrr @' + format(BAND_RATE, '.2f'):>17} "
+        f"{'append under raw':>17} {'replace under raw':>18}"
+    )
+    band_mrrs: list[float] = []
+    crossings: dict[str, list[float]] = {"append": [], "replace": []}
+    for seed in CROSSING_SEEDS:
+        hyde = ScriptedHyde(hypotheticals, hallucination_rate=BAND_RATE, seed=seed)
+        band_mrrs.append(aggregate(run_hyde(index, queries, hyde, "append")).mrr)
+        for mode in ("append", "replace"):
+            crossings[mode].append(
+                first_rate_under_raw(
+                    index, queries, hypotheticals, mode, raw_mrr, seed
+                )
+            )
+        print(
+            f"{seed:>6} {band_mrrs[-1]:>17.3f} "
+            f"{crossings['append'][-1]:>17.1%} {crossings['replace'][-1]:>18.1%}"
+        )
+
+    def band(low: float, high: float, fmt: str, width: int) -> str:
+        return f"{format(low, fmt) + ' - ' + format(high, fmt):>{width}}"
+
+    print(
+        f"{'band':>6} {band(min(band_mrrs), max(band_mrrs), '.3f', 17)} "
+        f"{band(min(crossings['append']), max(crossings['append']), '.1%', 17)} "
+        f"{band(min(crossings['replace']), max(crossings['replace']), '.1%', 18)}"
+    )
+    under = sum(1 for value in band_mrrs if value < raw_mrr)
+    gaps = [
+        round((append - replace) * len(hypotheticals))
+        for append, replace in zip(crossings["append"], crossings["replace"])
+    ]
+    print(
+        f"  ({under} of {len(CROSSING_SEEDS)} draws put append under raw at "
+        f"{BAND_RATE:.2f}; append outlives replace by {min(gaps)} to {max(gaps)} "
+        "queries on every draw)"
+    )
 
     print("\nbiggest per-query moves, hyde-append (rate 0) vs raw")
     moves = sorted(

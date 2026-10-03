@@ -192,5 +192,104 @@ class TestReadme:
 
     def test_names_both_crossing_brackets(self, readme):
         body = readme.split("## fixes", 1)[0]
-        assert "15% and 17.5%" in body
-        assert "22.5% and 25%" in body
+        assert "15% to 17.5%" in body
+        assert "22.5% to 30.0%" in body
+
+
+CROSSING_SEEDS = tuple(range(10))
+
+
+def _first_count_under_raw(setup, raw_mrr, mode, seed):
+    _, queries, hypotheticals, index = setup
+    n = len(hypotheticals)
+    for count in range(n + 1):
+        hyde = ScriptedHyde(hypotheticals, hallucination_rate=count / n, seed=seed)
+        if aggregate(run_hyde(index, queries, hyde, mode)).mrr < raw_mrr:
+            return count
+    return None
+
+
+class TestTheCrossingIsADraw:
+    """Which rate a mode stops paying at is a property of the draw.
+
+    The sweep fires exactly round(rate * n) queries, so a point sits at its
+    label — but *which* queries sit in the first k is the seed's, and append
+    at 0.25 sits on top of raw. So the crossing a single seed prints is one
+    draw of many, and the readme published append's as a 2.5-point bracket.
+    """
+
+    def test_append_at_one_quarter_is_a_coin_flip_against_raw(self, setup, raw_mrr):
+        under = [
+            _mrr(setup, 0.25, "append", seed=seed) < raw_mrr for seed in CROSSING_SEEDS
+        ]
+        assert 3 <= sum(under) <= 7, f"not a near-tie across draws: {under}"
+
+    def test_appends_crossing_moves_further_than_the_published_bracket(
+        self, setup, raw_mrr
+    ):
+        counts = [
+            _first_count_under_raw(setup, raw_mrr, "append", seed)
+            for seed in CROSSING_SEEDS
+        ]
+        # the readme's 22.5-25% bracket is count 10; the draws span 9 to 12
+        assert min(counts) <= 9
+        assert max(counts) >= 12
+
+    def test_replaces_crossing_barely_moves(self, setup, raw_mrr):
+        counts = {
+            _first_count_under_raw(setup, raw_mrr, "replace", seed)
+            for seed in CROSSING_SEEDS
+        }
+        assert counts <= {7, 8}, f"replace crossing wandered: {sorted(counts)}"
+
+    def test_append_outlives_replace_on_every_draw(self, setup, raw_mrr):
+        for seed in CROSSING_SEEDS:
+            append = _first_count_under_raw(setup, raw_mrr, "append", seed)
+            replace = _first_count_under_raw(setup, raw_mrr, "replace", seed)
+            assert append > replace, f"seed {seed}: {append} vs {replace}"
+
+
+class TestEntryPointPublishesTheBand:
+    def test_first_rate_under_raw_finds_the_crossing(self, setup, raw_mrr):
+        _, queries, hypotheticals, index = setup
+        entry_point = _load_entry_point()
+        rate = entry_point.first_rate_under_raw(
+            index, queries, hypotheticals, "append", raw_mrr, 7
+        )
+        assert rate == pytest.approx(10 / 40)
+
+    def test_first_rate_under_raw_returns_none_when_nothing_crosses(self, setup):
+        _, queries, hypotheticals, index = setup
+        entry_point = _load_entry_point()
+        assert (
+            entry_point.first_rate_under_raw(
+                index, queries, hypotheticals, "append", 0.0, 7
+            )
+            is None
+        )
+
+    def test_first_rate_under_raw_rejects_an_unknown_mode(self, setup, raw_mrr):
+        _, queries, hypotheticals, index = setup
+        entry_point = _load_entry_point()
+        with pytest.raises(ValueError):
+            entry_point.first_rate_under_raw(
+                index, queries, hypotheticals, "swap", raw_mrr, 7
+            )
+
+    def test_the_sweep_block_prints_a_row_per_seed_and_a_band(self, printed):
+        block = printed.split("the crossing is one draw", 1)[1]
+        seeds = re.findall(r"^\s*(\d+)\s+0\.\d\d\d\s+\d+\.\d%\s+\d+\.\d%", block, re.M)
+        assert [int(s) for s in seeds] == list(CROSSING_SEEDS)
+        assert "band" in block
+
+
+class TestReadmePublishesTheBandNotTheDraw:
+    def test_the_single_draw_bracket_is_gone(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        assert "append between 22.5% and 25%" not in body
+        assert "another 5 to 10 points" not in body
+
+    def test_the_band_is_published(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        for value in ("22.5% to 30.0%", "0.808", "0.844", "6 of 10"):
+            assert value in body, f"readme must publish {value}"
