@@ -117,3 +117,93 @@ def test_entry_point_heading_matches_the_curve(entry_point, capsys):
         line for line in out.splitlines() if re.match(r"== 1\.", line.strip())
     )
     assert "converges" not in heading.lower(), heading
+
+
+@pytest.fixture(scope="module")
+def ledger_row() -> str:
+    """The COMPLETED row for 17 in the repo ledger, one project up.
+
+    The signals extension has its own row keyed by the same project
+    name, so the match has to be exact up to the closing pipe."""
+    ledger = (_ROOT.parent / "progress.md").read_text(encoding="utf-8")
+    # the REVIEWED table keys its rows by project name too, so scope to the
+    # COMPLETED section before matching or the date row comes back as well
+    completed = ledger.split("## COMPLETED", 1)[1].split("\n## ", 1)[0]
+    rows = [
+        line
+        for line in completed.splitlines()
+        if line.startswith("| 17-confidence-calibration |")
+    ]
+    assert len(rows) == 1, "progress.md has no single COMPLETED row for 17"
+    return rows[0]
+
+
+class TestEpochHundredIsNotWhereTheCurveSettles:
+    """The retired claim named epoch 100 specifically. These recompute
+    the curve to refute that reading before the row is judged against
+    it."""
+
+    def test_accuracy_keeps_falling_well_past_epoch_100(self, curve):
+        """"done moving at epoch 100" needs the checkpoint-100 value to
+        be roughly where the curve ends. It is 4.6 points above it."""
+        at_hundred = next(acc for point, acc, _ in curve if point == 100)
+        assert at_hundred > curve[-1][1] + 0.04, f"{at_hundred:.3f}"
+
+    def test_accuracy_has_already_fallen_by_epoch_100(self, curve):
+        """And it is not the curve's start either, so quoting it as the
+        settled value hides the slide on both sides."""
+        at_hundred = next(acc for point, acc, _ in curve if point == 100)
+        assert at_hundred < curve[0][1]
+
+    def test_ece_at_epoch_100_is_the_dip_not_the_curves_start(self, curve):
+        """So an ece span opening at the epoch-100 value starts mid-curve
+        and drops the dip the readme names."""
+        eces = {point: e for point, _, e in curve}
+        assert eces[100] == min(eces.values())
+        assert eces[100] < eces[curve[0][0]]
+
+
+class TestLedgerRow:
+    """progress.md is the summary the next project reads before reusing a
+    mechanism, so it has to retract alongside the readme."""
+
+    def test_ledger_has_exactly_one_completed_row_for_17(self, ledger_row):
+        assert ledger_row.endswith("|")
+
+    def test_ledger_row_does_not_claim_accuracy_stops_moving(self, ledger_row):
+        lowered = ledger_row.lower()
+        for phrase in (
+            "done moving",
+            "accuracy converges",
+            "accuracy is done",
+            "stopped learning",
+        ):
+            assert phrase not in lowered, phrase
+
+    def test_ledger_row_does_not_quote_the_retired_epoch_100_pair(
+        self, ledger_row, curve
+    ):
+        """0.818 is the epoch-100 accuracy. It was the whole evidence for
+        "done moving" and it appears nowhere in the readme."""
+        at_hundred = next(acc for point, acc, _ in curve if point == 100)
+        assert f"{at_hundred:.3f}" not in ledger_row
+
+    def test_ledger_row_quotes_both_ends_of_the_accuracy_slide(
+        self, ledger_row, curve
+    ):
+        """Read off the curve rather than pasted: the first and last
+        printed checkpoint, which is the slide the project does show."""
+        for value in (f"{curve[0][1]:.3f}", f"{curve[-1][1]:.3f}"):
+            assert value in ledger_row, value
+
+    def test_ledger_row_carries_the_ece_dip(self, ledger_row, curve):
+        """The ece span has to open at the curve's start, not at the dip,
+        or the row reads as a climb the whole way."""
+        eces = [e for _, _, e in curve]
+        for value in (f"{eces[0]:.3f}", f"{min(eces):.3f}", f"{eces[-1]:.3f}"):
+            assert value in ledger_row, value
+
+    def test_ledger_row_says_both_numbers_pay(self, ledger_row):
+        """The point of the 2026-08-31 retraction: this curve is not
+        "overfitting costs calibration only"."""
+        assert "both pay" in ledger_row.lower()

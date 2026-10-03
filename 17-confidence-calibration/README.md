@@ -66,6 +66,12 @@ python was the right language here. the whole project is matrix arithmetic, soft
 
 ## fixes
 
+- 2026-10-03 — the repo ledger row still opened "val accuracy is done moving at
+  epoch 100 (0.818, ends 0.772)" — the reading section 1 dropped on 2026-08-31,
+  and 0.818 is in no table here. the row now carries the slide both ends, 0.835 at
+  epoch 50 to 0.772, and opens the ece span at 0.061 instead of the dip. no code
+  touched, no measured number moved
+
 - 2026-09-07 — the signals extension said "about two thirds of the achievable
   mistake-ranking" was missing, dividing the oracle gap by the signals own aurc
   — a denominator that already contains the floor, so it prices the gap against
