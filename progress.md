@@ -261,7 +261,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
   byte-identical to the local run. revert check: with progress.md's row reverted
   and the tests kept, 4 fail.
 
-- [high] 17 — the COMPLETED ledger row publishes the claim 17's own readme
+- [fixed 2026-10-03] 17 — the COMPLETED ledger row publishes the claim 17's own readme
   retired on 2026-08-31. the row's measured summary opens "val accuracy is done
   moving at epoch 100 (0.818, ends 0.772)", which is the "done moving early"
   reading the 2026-08-31 fix pulled out of section 1 — that entry says plainly
@@ -273,7 +273,35 @@ Fixed items stay listed with their fix date so the history reads in one place.
   cross-project scan run alongside today's 25 fix: same shape, one project over
   and five weeks older, and not the identical change — different claim, its own
   test, its own entry point to verify against — so logged rather than folded in.
-  found 2026-10-03, and it is the next run's first job
+  found 2026-10-03, fixed 2026-10-03
+
+  the fix is the row's opening measured clause and nothing else. it now reads
+  "val accuracy slides at every printed checkpoint, 0.835 at epoch 50 to 0.772
+  at 3200, and never turns back up, while val ece dips 0.061→0.034 by epoch 100
+  and rots from there to 0.159, so both pay for the extra epochs and calibration
+  pays much the steeper price (ece 2.6x worse against the error rate's 1.4x)",
+  which is section 1's own reading since 2026-08-31 — the slide carried at both
+  ends, the ece span opened at the curve's start instead of the dip, and 0.818
+  gone. the rest of the row was already right and is untouched. no code changed,
+  so main.py and signals_main.py are byte identical, confirmed by diffing both
+  before and after, and the root readme's index row never carried either the
+  retired reading or 0.818 so it is untouched too. nine new tests in
+  tests/test_claims.py, 95 → 104, modelled on 25's and 23's claims tests: three
+  recompute the curve and refute the epoch-100 reading specifically (accuracy at
+  100 sits 4.6 points above the end, it has already fallen from the start, and
+  the ece at 100 is the curve's minimum, so a span opening there drops the dip),
+  six bind the row — one COMPLETED row for 17, none of the four done-moving
+  phrasings in it, 0.818 absent and read off the curve rather than pasted, both
+  ends of the slide present, all three ece values present, and the "both pay"
+  reading the 2026-08-31 retraction turned on. gate ran from a fresh clone: 104
+  pass, both entry points run, and every number in the rewritten clause appears
+  verbatim in main.py's output except the derived 2.6x and 1.4x, which the readme
+  has published since 2026-08-31. revert check: with progress.md and 17's readme
+  reverted and the tests kept, 5 fail.
+
+  17 is still due a full review pass — this finding came off the cross-project
+  scan during the 25 run, not off a review of 17, so its REVIEWED date stays
+  2026-09-07 and it is the oldest in the table.
 
 - [low] 15 — the ledger row carries a uniform-dataset recall the readme never
   publishes. the row reads "int8-asym flat recall@10 0.985 clustered / 0.989
