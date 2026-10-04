@@ -188,6 +188,91 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-04] 26 — the flat keyword column was credited to a ceiling tie
+  that never fires. the readme's third headline bullet read "keyword queries are
+  immune to every scorer, by mechanism", and the mechanism it named was that "an
+  exact term match has cosine 1.0 in maxsim, so a doc containing all query terms
+  sums to the query term count ... and docs that reach that ceiling tie there
+  while the stable sort resolves ties by first-stage order". the ceiling half is
+  right and already pinned by `test_no_doc_outscores_a_full_match`. the tie half
+  is a claim about two or more docs landing on the ceiling together, and that
+  happens 0 times out of 19 — at depth 5, 10, 20, 50 and 100 alike. the keyword
+  gold is the *only* doc up there on every one of the 19 keyword queries that
+  has an in-vocabulary term (k14's "GIL" has none), and it is the strict unique
+  maximum on all 19, so it wins outright and the stable sort is never consulted.
+  same shape as 22's stolen picks and 23's oracle gap blamed on bridge coverage:
+  a plausible mechanism published without the measurement that would have killed
+  it. found and fixed 2026-10-04
+
+  two further overreaches rode in the same bullet. "immune to every scorer" put
+  the maxsim ceiling behind a column the ceiling says nothing about — the pooled
+  scorer has no ceiling property at all, reorders 19 of the 20 keyword
+  shortlists, and leaves the gold at rank 1 anyway, which is bm25 and lsa
+  agreeing on the easy queries rather than anything structural. and "the
+  reranker structurally cannot damage what the lexical stage already got right"
+  is not structural: a non-gold doc that also held every query term and sat
+  higher in bm25 order would take rank 1, and the project's own table shows
+  maxsim demoting p11, p17 and p18. the fix is `keyword_ceiling_audit` plus
+  `ceiling_hits` in evaluate.py (gold-at-ceiling, ceiling-tie and
+  strict-unique-top counts per depth), one printed attribution line in main.py
+  so the reading traces to output instead of being asserted, and the corrected
+  reading on the three surfaces that carried the retired one: the project
+  readme, the root readme's index row, and this file's COMPLETED ledger row. no
+  measured number moved — the entry point output is byte-identical except the
+  one added line, confirmed by diffing before and after, so every table cell is
+  what it was. 13 new tests in tests/test_keyword_immunity.py, 67 → 80: eight
+  pin the measurement (the audit at the headline depth, no tie at any swept
+  depth, the gold-is-sole-ceiling-doc count recomputed by hand straight from the
+  scorer, an outright-win check that hands the scorer a reversed shortlist so a
+  tie-break would sink the gold, and a synthetic pair proving the tie counter
+  can fire at all so its 0 is not vacuous) and five hold the two readmes to the
+  corrected reading. gate ran from a fresh clone: 80 pass, entry point
+  byte-identical to the local run, and every number in the readme appears
+  verbatim in that output bar the pre-existing historical and non-measured ones
+  (the 2026-09-02 entry's 0.838/0.825/-0.013, the 10000-resample label, the 13
+  cross-reference, python 3.11). revert check: the whole fix undone with the
+  test kept fails at import; prose only, 5; the measure only, at import again.
+
+- [medium] 26 — "ties rrf fusion" is not a tie. the headline bullet reads
+  "bm25+pooled-lsa@20 lands on the same reciprocal rank as scanning all 100 docs
+  with the bi-encoder, on every single query, and ties rrf fusion" — the first
+  half is exactly true and pinned by `test_headline_identity_...` as dict
+  equality, which is what makes the second half read as the same kind of
+  exactness. it is not: pooled-lsa@20 mrr is 0.86145833 against rrf's
+  0.86111111, they disagree on p14 (rr 0.125 against 0.1111), and the mean gap
+  is +0.000347. the project already prints the evidence twice — the bootstrap
+  row one block down gives diff +0.000 with ci [+0.000, +0.001], an interval
+  that does not contain a tie at its top end, and the first-stage table shows
+  rrf's paraphrase column at 0.772 against lsa's 0.773. no published number is
+  wrong; the word "ties" is, and it is on three surfaces (project readme, root
+  readme index row, ledger row). left out of today's fix to keep the diff one
+  change. found 2026-10-04
+
+- [medium] 26 — the maxsim depth decay is one query, published as a trend. the
+  readme says maxsim "goes the wrong way with depth — 0.867 at 20, 0.854 at 50
+  and past — because every extra candidate is another chance for one noisy
+  term-to-term max to outrank the pooled document context". the mechanism is
+  real and checks out: exactly one query moves between depth 20 and 50 (p12, rr
+  1.0 → 0.5), its gold is displaced to rank 2, and the doc that displaces it
+  (http-06) does come from stage ranks 21-50, so an extra candidate really did
+  outrank the gold. but that single rr halving is the entire 0.867 → 0.854 drop,
+  and promoted/demoted is +4/-3 at both depths — unchanged — so nothing else
+  moved at all. "goes the wrong way with depth" over a 40-query set reads as a
+  trend where the measurement is n=1, the same shape as 25's crossing rate
+  published as a bracket off one draw. the full sweep also rises before it
+  falls (0.858 at 5 and 10, 0.867 at 20), and those rows are printed but not in
+  the readme's table. found 2026-10-04
+
+- [low] 26 — MaxSim scores a doc with no in-vocabulary terms 0.0, which is not
+  a neutral score. the docstring's reason — "the space knows nothing about
+  either side, so the scorer must not reorder on it" — holds for an empty
+  *query*, where every candidate ties at 0.0 and stage order survives, but not
+  for an empty *doc* among scoring ones: max cosines in the 64-dim LSA space go
+  negative (8 of 4000 candidate scores on the real queries, down to -0.0523), so
+  a doc the space knows nothing about would outrank every doc it knows and
+  scores negative. unreachable on this corpus — 0 of the 100 docs have an empty
+  term profile — so no published number is touched. found 2026-10-04
+
 - [fixed 2026-10-04] 22 — the k sweep attributed the extraction-accuracy drift
   to a mechanism that never fires. the reading said extraction accuracy "sits at
   0.500 and slightly falls as k grows: every extra doc is another set of
@@ -3873,7 +3958,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 06-rate-limiting | 2026-09-04 |
 | 01-structured-output | 2026-10-03 |
 | 22-rag-vertical-slice | 2026-10-04 |
-| 26-reranking | 2026-09-02 |
+| 26-reranking | 2026-10-04 |
 | 25-query-rewriting | 2026-10-03 |
 | 24-extraction-metrics | 2026-10-02 |
 | 23-multi-hop-retrieval | 2026-10-02 |
@@ -3896,6 +3981,42 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 03-hybrid-search | 2026-09-03 |
 | 04-bpe-tokenizer | 2026-09-03 |
 | 02-retrieval-eval | 2026-09-03 |
+
+26 came back clean on every published number and dirty on the mechanism behind
+one of its four headline findings. all 67 committed tests passed before the fix,
+the entry point is byte-identical across three repeated runs and from a fresh
+clone, and all nine rows of the published depth sweep, both first-stage blocks
+and all four bootstrap lines reproduce verbatim — the only readme numbers not
+appearing as literals in the output are the 2026-09-02 fix entry's explicitly
+historical 0.838/0.825/-0.013, the 10000-resample label, the 13 cross-reference
+and python 3.11. the imported metrics are right where it matters: 02's
+reciprocal_rank is 1-indexed and slices k, recall_at_k slices k not k+1, and the
+paired bootstrap resamples the per-query differences from a seeded
+random.Random(0), so every interval is reproducible. evaluation hygiene is
+sound and the one piece of label leakage is the point of the oracle, labelled as
+such. and unlike 15, 21 and 22, this project does pin its published numbers to
+tests — test_end_to_end.py holds the bm25 stage, the oracle ceiling at 20 and
+50, the pooled identity, the maxsim mrr at 20 and 100, the 1909.45 dot count and
+two bootstrap gaps — so no table cell here is unbound.
+
+what was wrong was the mechanism behind "keyword queries are immune to every
+scorer". the bullet credited the flat 0.950 column to docs tying on maxsim's
+|query terms| ceiling with the stable sort breaking the tie by first-stage
+order, and that tie fires 0 times out of 19 at every swept depth: the gold is
+the sole doc on the ceiling and the strict unique maximum on all 19 keyword
+queries that have an in-vocabulary term, so it wins outright and the sort never
+gets a say. fixed above: the outright-win reading, counted by
+`keyword_ceiling_audit`, printed by the entry point and corrected on all three
+surfaces. no measured number moved. the same bullet also stretched a
+maxsim-only ceiling over the pooled scorer, which has no ceiling property,
+reshuffles 19 of 20 keyword shortlists and spares the gold by coincidence.
+
+behind it, three findings. two medium: "ties rrf fusion" is not a tie (one query
+apart, +0.000347, and the project's own bootstrap row and paraphrase column
+already say so), and the maxsim depth decay 0.867 → 0.854 is one query's rr
+halving published as a trend. one low: MaxSim's 0.0 for a doc with no
+in-vocabulary terms would outrank the genuinely negative scores, unreachable at
+0 such docs in this corpus.
 
 22 came back clean on every published number and dirty on the one sentence that
 explains its headline. all 125 committed tests pass, typecheck is clean, the
