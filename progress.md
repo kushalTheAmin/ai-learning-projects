@@ -188,6 +188,86 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-04] 22 — the k sweep attributed the extraction-accuracy drift
+  to a mechanism that never fires. the reading said extraction accuracy "sits at
+  0.500 and slightly falls as k grows: every extra doc is another set of
+  distractor sentences for the best-overlap pick to lose to", which is a claim
+  about a query reading correctly at one k and wrong at a wider one. measured
+  over the whole sweep, that happens 0 times out of 40 — at every adjacent step
+  and from every k to every wider k. and the project had already measured it
+  from the other side: the escalation plane's always-escalate row puts 18
+  correct answers through a wider context with hurt 0, and the readme's own open
+  questions say "the gold sentence wins every wider contest it was winning at
+  k=3". so the sweep paragraph asserted as the explanation the exact thing a
+  later section of the same file rules out. same shape as 23's oracle gap blamed
+  on bridge coverage and 13's ablation blamed on stranded nodes: a plausible
+  mechanism published without the measurement that would have killed it. found
+  and fixed 2026-10-04
+
+  the real mechanism is a denominator effect. gold docs do not get harder to
+  read as context widens; the gold docs that only arrive at a wider k are
+  harder to begin with. 5 of the 12 that first appear past k=1 are answered
+  right, against 14 of the first 26 — 0.417 against 0.538 — so each widening
+  step adds more denominator than numerator and the ratio sags while the
+  correct count still climbs 14/16/18/19. the fix is `extractionDrift` in
+  eval.ts (stolen picks counted over every narrow/wide pair, not just the ends,
+  plus the widest row's hits split into early and late arrivals), one printed
+  attribution line in main.ts so the reading is traceable to output rather than
+  asserted, and the corrected mechanism on all three surfaces that carried the
+  retired one: the project readme, the root readme's index row, and this file's
+  COMPLETED ledger row. no measured number moved — the entry point output is
+  byte-identical except the one added line, confirmed by diffing before and
+  after, so every table cell is what it was. 11 new tests in
+  tests/extraction-drift.test.ts, 125 → 136: five pin the measurement (0 stolen
+  picks via the measure and again by hand over all six narrow/wide pairs, the
+  26/14 and 12/5 decomposition, that it adds back up to the widest row, and a
+  synthetic flip proving the counter can fire at all so its 0 is not vacuous)
+  and six hold the three surfaces to the corrected reading. gate ran from a
+  fresh clone: 136 pass, typecheck clean, entry point byte-identical to the
+  local run, every number in the readme present verbatim in that output bar the
+  pre-existing derived and historical ones ($3/$15 pricing, 8x195=1560, the
+  explicitly-past 23.3%, 44% derived from two dollar totals). revert check: the
+  whole fix undone with the test kept fails 10 of 11; prose only, 6; the measure
+  only, 4.
+
+- [medium] 22 — `projectPolicyRow` escalates on the score alone while the server
+  also requires the wider k to actually be wider. the server's guard is
+  `firstOverlap < trigger && escalation.k2 > ask.k`; the projection's predicate
+  is just `c1.bestOverlap < policy.trigger`. every policy main.ts prices has
+  k2 of 5 or 10 against k1 of 3, so no published row is affected and the live
+  servers still reproduce their projections exactly — but a policy with
+  k2 <= k1 would project escalations the endpoint would never run, and the
+  projection is the thing the readme calls "the analysis". the two predicates
+  should agree or the asymmetry should be stated.
+
+- [medium] 22 — nothing ties the published tables to a fresh entry-point run.
+  atrisk.test.ts pins one escalation row verbatim; the k sweep, the floor sweep,
+  the policy plane and the backpressure tables are pinned nowhere, so any of
+  them can drift from `npm start` the way 01's docstring drifted from its
+  readme. same finding already open on 15 and 21.
+
+- [low] 22 — "an escalated query pays the first call in full, input and
+  suppressed draft output" is not what gets billed. `passOutcome` bills
+  REFUSAL_TOKENS whenever the first pass sits under the floor, which is every
+  escalated query at any trigger at or below 0.35 — so the output the readme
+  calls a suppressed draft is the refusal's ~11 tokens, not a draft sentence's
+  ~16. defensible for a scripted model that really does emit the refusal, and
+  worth about $0.000075 a query at $15/M, so the dollars barely move; the prose
+  names a thing the code does not bill.
+
+- [low] 22 — "sits at 0.500 and slightly falls as k grows" is one step, not a
+  trend. the column reads 0.538 / 0.500 / 0.500 / 0.500 across k 1/2/3/5: it
+  falls once between k=1 and k=2 and is then flat to k=5. "slightly falls as k
+  grows" reads as monotone decay over the sweep. (k=10 does fall again to 0.475,
+  but the published sweep stops at 5.)
+
+- [low] 22 — the served outcome is identified by string equality against the
+  refusal text. `outcome = answer === REFUSAL ? "refused" : "answered"` in
+  server.ts, so a corpus sentence equal to the refusal string would be logged
+  and graded as a refusal. unreachable on this corpus and the floor decision is
+  the real signal, but the flag is derived from the text instead of from the
+  decision that produced it.
+
 - [fixed 2026-10-03] 01 — `pipeline.py`'s module docstring still published the
   claim the 2026-09-02 blind-retry control retired. its second paragraph read
   "the retry loop feeds the concrete parse or validation error back to the model,
@@ -3792,7 +3872,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 |---|---|
 | 06-rate-limiting | 2026-09-04 |
 | 01-structured-output | 2026-10-03 |
-| 22-rag-vertical-slice | 2026-09-02 |
+| 22-rag-vertical-slice | 2026-10-04 |
 | 26-reranking | 2026-09-02 |
 | 25-query-rewriting | 2026-10-03 |
 | 24-extraction-metrics | 2026-10-02 |
@@ -3816,6 +3896,41 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 03-hybrid-search | 2026-09-03 |
 | 04-bpe-tokenizer | 2026-09-03 |
 | 02-retrieval-eval | 2026-09-03 |
+
+22 came back clean on every published number and dirty on the one sentence that
+explains its headline. all 125 committed tests pass, typecheck is clean, the
+entry point is byte-identical across repeated runs and from a fresh clone, and
+every number in the readme reproduces verbatim from it — the k sweep's four
+rows, the ten floor rows, the fifteen-row policy plane, both backpressure
+tables, 2367/2318 on the traced request, 22.6% first-token, $2.2292 over 202
+logged requests — with only the pre-existing derived and historical ones
+($3/$15 pricing, 8x195=1560, the explicitly-past 23.3%, 44% off two dollar
+totals) not appearing as literals. the composition is honest where it matters:
+the floor-0 projection is checked against a live server at all ten floors and
+at two escalation grid points field by field, the byte-budget server is held to
+the event-cap server's eval row, the free window (0.333 wrong-doc ceiling,
+0.400 lowest correct) is computed and printed rather than asserted, and the
+atrisk column added on 2026-09-02 still does its job of marking the vacuous
+zeros. edge cases are well covered: empty corpus, all-zero rankings returned
+for a query with no known words, unicode, every validation rejection named.
+
+what was wrong was the mechanism behind "answer accuracy does not follow hit@k
+up". the sweep blamed the extra docs for stealing the reader's pick, and no pick
+is ever stolen — 0 of 40 queries across every narrow/wide pair in the sweep,
+which the escalation plane had already measured from the other side (atrisk 18,
+hurt 0) and the open questions already conceded. fixed above: the drift is which
+gold docs arrive late, 5 of 12 against 14 of the first 26, now measured by
+`extractionDrift`, printed by the entry point and corrected on all three
+surfaces. no measured number moved.
+
+behind it, five findings. two medium: the policy projection escalates on the
+score alone where the server also requires k2 > k1 (no published row affected,
+but the projection is the analysis), and nothing pins the published tables to a
+fresh entry-point run — the same gap already open on 15 and 21, and the one that
+let this claim sit unmeasured. three low: the readme bills a "suppressed draft"
+the code charges as a refusal, "slightly falls as k grows" is one step then
+flat, and the served outcome is derived from string equality against the refusal
+text rather than from the floor decision.
 
 01 came back clean on every published number and dirty on one surface of its
 own retired claim. all 86 committed tests pass, run.py is byte-identical across
