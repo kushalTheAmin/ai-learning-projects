@@ -10,6 +10,7 @@ from hybrid_search.evaluate import (
     RECALL_KS,
     aggregate,
     evaluate,
+    fusion_attribution,
     load_json,
     sweep_alpha,
 )
@@ -62,6 +63,22 @@ def _first_relevant_rank(ranking, relevant) -> str:
     return "not retrieved"
 
 
+def print_rrf_attribution(results) -> None:
+    """Trace the rrf lead to the queries it rests on, so the reading in the
+    readme comes off the run instead of being asserted."""
+    for name, row in fusion_attribution(results).items():
+        missed, recovered = row["missed"], row["missed_recovered"]
+        sole, kept = row["sole_first"], row["sole_first_kept"]
+        noun = "query" if len(missed) == 1 else "queries"
+        missed_ids = f" ({', '.join(missed)})" if missed else ""
+        sole_ids = f" ({', '.join(sole)})" if sole else ""
+        print(
+            f"  {name:<6}misses {len(missed)} {noun} at the cutoff{missed_ids}, "
+            f"rrf recovers {len(recovered)}; ranks the answer first alone on "
+            f"{len(sole)}{sole_ids}, rrf keeps {len(kept)}"
+        )
+
+
 def main() -> None:
     corpus = load_json(DATA_DIR / "corpus.json")
     queries = load_json(DATA_DIR / "queries.json")
@@ -81,6 +98,9 @@ def main() -> None:
 
     print("\nWHERE EACH RETRIEVER WINS")
     print_biggest_wins(results, queries)
+
+    print(f"\nWHERE THE RRF LEAD COMES FROM (mrr@{MRR_K} cutoff)")
+    print_rrf_attribution(results)
 
     alphas = [round(0.1 * i, 1) for i in range(11)]
     sweep = sweep_alpha(corpus, queries, alphas)

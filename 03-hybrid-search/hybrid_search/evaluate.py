@@ -120,3 +120,42 @@ def sweep_alpha(
             )
         result[alpha] = mean(mrrs)
     return result
+
+
+def fusion_attribution(
+    results: list[QueryResult],
+    fused: str = "hybrid_rrf",
+    singles: tuple[str, ...] = ("bm25", "dense"),
+    k: int = MRR_K,
+) -> dict[str, dict[str, list[str]]]:
+    """Attribute a fused ranking's lead to the queries it rests on.
+
+    Per single retriever: the queries it misses outright (zero at the cutoff)
+    and which of those the fusion pulls back inside it, plus the queries where
+    it alone ranks the answer first and whether the fusion keeps them there.
+    Query ids rather than counts, so a reading quotes its evidence instead of
+    asserting a mechanism.
+    """
+    ranks = {
+        r.query_id: {
+            name: reciprocal_rank(ranking, r.relevant, k)
+            for name, ranking in r.rankings.items()
+        }
+        for r in results
+    }
+    report = {}
+    for name in singles:
+        others = [other for other in singles if other != name]
+        missed = [q for q, rr in ranks.items() if rr[name] == 0.0]
+        sole_first = [
+            q
+            for q, rr in ranks.items()
+            if rr[name] == 1.0 and all(rr[other] != 1.0 for other in others)
+        ]
+        report[name] = {
+            "missed": missed,
+            "missed_recovered": [q for q in missed if ranks[q][fused] > 0.0],
+            "sole_first": sole_first,
+            "sole_first_kept": [q for q in sole_first if ranks[q][fused] == 1.0],
+        }
+    return report

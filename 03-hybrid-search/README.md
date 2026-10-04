@@ -46,7 +46,7 @@ mrr is cut off at rank 10, same as 02 — every ranking here covers all 100 docs
 
 - keyword queries: both sides go 20/20 at rank 1. more on why thats interesting below
 - paraphrase queries: bm25 gets trapped by surface-word collisions — "check who is logged in without a trip to the database" lands on the connection-pooling doc (database! trip!) and doesnt reach the JWT doc until rank 12, past the cutoff, so it scores zero — dense has it at 9. dense wins the category on mrr@10 and recall@5
-- hybrid rrf has the best mrr@10 and recall@1 overall — it recovers several of bm25s paraphrase misses without giving up the keyword wins
+- hybrid rrf has the best mrr@10 and recall@1 overall, and not by rescuing a miss — bm25 misses exactly one query past the cutoff (p14, the one above at rank 12) and rrf leaves it a miss at rank 11. what rrf does is hold both sides sole rank-1: p08 is rank 1 for bm25 alone, p01 for dense alone, and rrf puts both at 1 — that is the whole recall@1 gain, 0.812 to 0.838, one query of the 40. the mrr@10 lead over dense is that same query, p08 at +0.5, against losses on p02, p09 and p14. keyword stays 20/20 either way. main.py prints the attribution so this reads off the run
 - the weighted blend at the default a=0.5 is the row that doesnt pay — 0.887 overall and 0.774 on paraphrase, under rrf on both and under plain dense too. so "fusion helps" on this set is an rrf result, not a fusion result. the sweep below finds the blend only at a=0.2, where it lands on rrfs 0.899 exactly
 - the alpha sweep prints mrr@10 at every blend from pure-bm25 to pure-dense. best value on this set is 0.2, but with 40 queries thats reading tea leaves — the sweep is there to show the tradeoff curve exists, not to pick a production constant
 
@@ -62,6 +62,10 @@ i expected dense to stumble on exact identifiers — thats the standard story fo
 
 ## fixes
 
+- 2026-10-04 — the rrf bullet credited the overall lead to recovering bm25s
+  paraphrase misses. bm25 misses one query past the cutoff (p14) and rrf leaves
+  it a miss at 11 — the lead is rrf holding both sides sole rank-1, p08 and p01.
+  main.py prints the attribution now. no measured number moved
 - 2026-09-03 — the numbers block quoted three of the four strategies main.py
   prints, dropping hybrid (weighted a=0.5) — the one fusion that loses. both
   tables carry it now: 0.887 mrr@10 overall, 0.774 paraphrase. no value moved
