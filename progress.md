@@ -188,6 +188,80 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-04] 02 — the `+probes` bill charged a probed posting twice. the
+  pruning study read the charged bill as postings_scored + probes, and most of a
+  pruner's probes find the posting they then score: on common-heavy at 32,000
+  docs, 13092 of maxscore's 20882 probes and 12574 of wand's 22994 land on a
+  posting the same search goes on to score, billed once as a probe and again as
+  a scored posting. maxscore compounds it — a non-essential term is re-bisected
+  from scratch for every candidate, so consecutive candidates re-land on the
+  same posting and the naive sum charges it once per probe. the column that came
+  out of that was published as "the honest bill against term-at-a-time" and read
+  as a skip: "on common-heavy it takes most of the win back: 37.9% and 37.0%",
+  "only 1.6x once the probes are charged, which is most of the answer", and
+  rare-only "goes over 100%, the bookkeeping costing more touches than the
+  77-posting bill it was meant to shrink". all three are artifacts of the double
+  charge. found and fixed 2026-10-04
+
+  the fix is `postings_read` on PrunedSearchStats and BlockMaxSearchStats — the
+  postings a search actually read, each counted once — with
+  `probe_charged_share` reading that over the bill. one int per cursor
+  (`landed`, the index its last probe landed on) is all it takes: wand's and
+  bmw's probes only ever move a cursor forward, so a landing is a new posting
+  unless the same position is then scored, and maxscore's full-list bisects are
+  monotone in the candidate, so a repeat is always the immediately previous
+  landing. the strata table now prints the `read` count so the percentage comes
+  off the row instead of out of prose. what moved: common-heavy +probes 62.1% →
+  37.0% maxscore and 63.0% → 44.7% wand, typical 18.1% → 12.0% and 20.0% →
+  14.5%, rare-only 115.1% → 92.5% and 92.6% → 92.3% — so the common-heavy skip
+  is 63.0% and 55.3% rather than 37.9% and 37.0%, the common-heavy wall-clock
+  inversion still beats the exhaustive scan 2.2-2.7x on the charged bill rather
+  than 1.6x (so the probes are not where the inversion comes from, constant
+  factors are), and rare-only no longer exceeds its own bill. pruning behaviour
+  is untouched: postings scored, probes, shallow checks and skips, the block
+  size sweep, both k sweeps and the whole exactness contract reproduce verbatim,
+  and main.py is byte-identical. 4 new tests in tests/test_probe_charged_bill.py
+  and one superseded formula test dropped, 156 → 159: a six-doc hand-traced
+  corpus where the one probe lands on the very posting it scores (8 postings
+  billed term-at-a-time, 6 scored, 1 probe, 6 read), a bracket on every stratum,
+  a materiality check that the read count is under 80% of the naive sum on
+  common-heavy, and the metric itself. gate ran from a fresh clone with the
+  readme's own venv steps: 159 pass, main.py byte-identical to the local run,
+  every seeded count in all three studies verbatim. revert check: the three
+  source files reverted with the tests kept fails all 4.
+
+- [medium] 02 — `InvertedBM25Index` and both its subclasses die at construction
+  on a corpus where no document tokenizes. `length_norms` divides by
+  `avg_doc_length` eagerly in __init__, so {"a": "___", "b": "+++"} — avg length
+  0, every doc non-empty as far as `load_corpus` is concerned — raises
+  ZeroDivisionError where `BM25Index` and `TfidfIndex` both build and answer []
+  for every query. the class docstring and the readme both sell the inverted
+  scorer as "the same okapi bm25" served from posting lists, and the flat twin
+  survives this input. `test_doc_with_no_tokens_is_harmless` covers one
+  untokenizable doc beside two real ones, which is exactly the case where the
+  average is still positive. found 2026-10-04
+
+- [low] 02 — the scaling prose says the wall-clock speedup "hovers in the 3-6x
+  band" and the first row of its own table is 2.8x. found 2026-10-04
+
+- [low] 02 — the disagreement bullet quotes its clearest example as "expire old
+  entries from an in-memory cache" where queries.jsonl carries "expire old
+  entries from an in-memory cache automatically", so the query the readme points
+  at cannot be found in the entry point's output. found 2026-10-04
+
+- [low] 02, and 03 — `recall_at_k` disagrees between the two projects on a
+  ranking that repeats a doc id: 02 intersects a set of the top-k slice, 03
+  counts matching positions, so one repeated relevant id scores above 1.0 in 03
+  and not in 02, while both docstrings claim the same metric. no retriever in
+  either project returns a duplicate, so no published number moves. found
+  2026-10-04
+
+- [low] 02 — two entry-point helpers have no guard for an empty input:
+  `evaluate_system` raises TypeError on an empty `k_values` because
+  `max(*k_values, mrr_k)` needs one positional, and `head_term_share` divides by
+  len(shares), so a query set where nothing matches raises ZeroDivisionError.
+  neither is reachable from the committed entry points. found 2026-10-04
+
 - [fixed 2026-10-04] 26 — the flat keyword column was credited to a ceiling tie
   that never fires. the readme's third headline bullet read "keyword queries are
   immune to every scorer, by mechanism", and the mechanism it named was that "an
@@ -2445,6 +2519,12 @@ Fixed items stay listed with their fix date so the history reads in one place.
   moved: every count in every table in the project is character for character
   what it was, the column is new, and the root index row quotes only the
   scored column so it needed no change. found and fixed 2026-09-03
+
+  superseded 2026-10-04: the column this entry added was scored + probes, which
+  bills a posting twice whenever the probe finds the one it then scores. the
+  charged shares quoted above (62.1%/37.9% maxscore, 63.0%/37.0% wand, 18.1%
+  typical, 115.1% rare-only) and the 1.6x are all that double charge. see the
+  `postings_read` entry at the top of this section for the counted-once figures.
 - [medium] 02 — every other `% of bill` in the project is still scored-only,
   and the fix above establishes that on common-heavy that understates the cost
   by about half. the k sweep in pruning.py prints "% of bill" at k = 1, 10,
@@ -2454,8 +2534,9 @@ Fixed items stay listed with their fix date so the history reads in one place.
   where the reader is being told the technology stops paying. blockmax_study.py
   is the same shape twice over: the block size sweep prints probes/q beside a
   scored-only "% of bill" (at block size 8, 6207 scored and 25907 probes
-  against a 68765 bill — 9.0% printed, 46.7% charged, the widest gap anywhere
-  in the project, because the shallow skip buys its jumps with probes), and the
+  against a 68765 bill — 9.0% printed, 46.7% charged on the scored-plus-probes
+  arithmetic the 2026-10-04 fix retired, so the real charged share is lower and
+  still unmeasured, because the shallow skip buys its jumps with probes), and the
   per-stratum table at block size 32 prints no probes column, so bmw's headline
   6.4% on typical and 17.6% on common-heavy carry the same silence. nothing
   published is arithmetically wrong — every one of those cells is a correct
@@ -3980,7 +4061,44 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 05-token-streaming | 2026-09-04 |
 | 03-hybrid-search | 2026-09-03 |
 | 04-bpe-tokenizer | 2026-09-03 |
-| 02-retrieval-eval | 2026-09-03 |
+| 02-retrieval-eval | 2026-10-04 |
+
+02 came back clean on everything that is seeded and dirty on one derived
+column. all 156 committed tests passed before the fix, main.py is byte-identical
+to its published block, and every seeded number in the three studies reproduces
+verbatim on a machine roughly twice as slow as the one the readme was written
+on — the full-depth and top-10 equivalence counts (38/38 and 150/150 for the
+inverted index, maxscore, wand and bmw alike), the six-row corpus sweep's
+scanned/postings/touch-ratio columns, the realized vocabulary and the three
+df lines, every postings-scored cell in both k sweeps, the four block-max bound
+rows and all six block-sweep rows including the directory sizes. only the wall
+clocks differ, which the readme discloses twice as one run on one machine, and
+they move 15% between two runs of unchanged code on this box, so they were left
+as published rather than re-based onto a different machine. the algorithms hold
+up where it counts: bm25 dedupes query terms and so does 03's (that
+reconciliation is done), the idf is the non-negative lucene variant it claims,
+tf-idf is sklearn's default weighting, reciprocal_rank is 1-indexed and
+recall_at_k slices k not k+1, the bootstrap resamples per-query differences from
+a seeded random.Random(0), and p_le_zero is labelled a direction check rather
+than a p-value. the exactness contract is genuinely bound, not asserted: i
+flipped the strict comparison to `<=` in maxscore's essential split, in wand's
+pivot sum and in bmw's shallow skip, and the all-ties traps caught every one.
+
+what was wrong was the `+probes` column. it added a count of bisect operations
+to a count of gain computations and called the sum the postings a pruner
+touches, and most of a pruner's probes land on the posting it then scores, so
+that posting was billed twice — plus maxscore re-bisecting the same posting for
+consecutive candidates. fixed above with `postings_read`, each posting counted
+once: the common-heavy skip is 63.0% and 55.3%, not the 37.9% and 37.0% the
+2026-09-03 entry put there, and rare-only stops appearing to cost more than its
+own 77-posting bill.
+
+behind it, five findings. one medium: the inverted index and both its subclasses
+raise ZeroDivisionError at build on a corpus where nothing tokenizes, where the
+flat twin they are pinned bit-identical to builds fine. four low: the 3-6x
+speedup band against its own 2.8x first row, a misquoted golden query, 02 and
+03's recall_at_k disagreeing on a repeated doc id, and two unguarded empty
+inputs in helpers the entry points never hand one.
 
 26 came back clean on every published number and dirty on the mechanism behind
 one of its four headline findings. all 67 committed tests passed before the fix,
