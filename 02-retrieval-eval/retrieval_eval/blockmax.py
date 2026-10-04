@@ -23,7 +23,9 @@ class BlockMaxSearchStats(PrunedSearchStats):
 
 
 class _BlockCursor:
-    __slots__ = ("order", "plist", "idf", "ub", "block_last", "block_max", "pos")
+    __slots__ = (
+        "order", "plist", "idf", "ub", "block_last", "block_max", "pos", "landed"
+    )
 
     def __init__(
         self,
@@ -41,6 +43,7 @@ class _BlockCursor:
         self.block_last = block_last
         self.block_max = block_max
         self.pos = 0
+        self.landed = -1  # index a probe last landed on, so it is read once
 
     @property
     def doc(self) -> int:
@@ -128,7 +131,7 @@ class BlockMaxBM25Index(PrunedBM25Index):
         self, query: str, top_k: int = 10
     ) -> tuple[list[tuple[str, float]], BlockMaxSearchStats]:
         matched = self._matched_blocks(query)
-        postings_scored = probes = docs_scored = 0
+        postings_scored = probes = postings_read = docs_scored = 0
         shallow_checks = shallow_skips = 0
         available = sum(len(c.plist) for c in matched)
         top = _TopK(top_k)
@@ -182,6 +185,9 @@ class BlockMaxBM25Index(PrunedBM25Index):
                                 cursor.plist, (target,), cursor.pos
                             )
                             probes += 1
+                            if not cursor.exhausted():
+                                cursor.landed = cursor.pos
+                                postings_read += 1
                     cursors = [c for c in cursors if not c.exhausted()]
                     continue
             if cursors[0].doc == pivot_doc:
@@ -191,6 +197,8 @@ class BlockMaxBM25Index(PrunedBM25Index):
                 for cursor in at_pivot:
                     score += self._gain(cursor.idf, cursor.plist[cursor.pos][1], pivot_doc)
                     postings_scored += 1
+                    if cursor.pos != cursor.landed:
+                        postings_read += 1
                 top.add(score, self.doc_ids[pivot_doc])
                 docs_scored += 1
                 for cursor in at_pivot:
@@ -202,9 +210,13 @@ class BlockMaxBM25Index(PrunedBM25Index):
                 probes += 1
                 if cursor.exhausted():
                     cursors.pop(0)
+                else:
+                    cursor.landed = cursor.pos
+                    postings_read += 1
         stats = BlockMaxSearchStats(
             postings_scored=postings_scored,
             probes=probes,
+            postings_read=postings_read,
             docs_scored=docs_scored,
             docs_abandoned=0,
             terms_matched=len(matched),

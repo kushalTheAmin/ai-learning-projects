@@ -12,6 +12,10 @@ class PrunedSearchStats:
 
     postings_scored: (term, doc) gains actually computed
     probes: bisect jumps into posting lists (cursor skips and lookups)
+    postings_read: distinct postings the search read, each counted once —
+        the ones it scored plus the ones a probe landed on and nothing
+        else looked at. A probe that finds the posting it then scores is
+        one read, so this is below postings_scored + probes.
     docs_scored: docs whose score entered top-k consideration
     docs_abandoned: candidates dropped mid-scoring by the bound (maxscore)
     terms_matched: query terms present in the index vocabulary
@@ -20,6 +24,7 @@ class PrunedSearchStats:
 
     postings_scored: int
     probes: int
+    postings_read: int
     docs_scored: int
     docs_abandoned: int
     terms_matched: int
@@ -77,7 +82,7 @@ class _TopK:
 
 
 class _Cursor:
-    __slots__ = ("order", "plist", "idf", "ub", "pos")
+    __slots__ = ("order", "plist", "idf", "ub", "pos", "landed")
 
     def __init__(self, order: int, plist: list[tuple[int, int]], idf: float, ub: float):
         self.order = order  # position among matched terms, query order
@@ -85,6 +90,7 @@ class _Cursor:
         self.idf = idf
         self.ub = ub
         self.pos = 0
+        self.landed = -1  # index a probe last landed on, so it is read once
 
     @property
     def doc(self) -> int:
@@ -136,7 +142,7 @@ class PrunedBM25Index(InvertedBM25Index):
         self, query: str, top_k: int = 10
     ) -> tuple[list[tuple[str, float]], PrunedSearchStats]:
         matched = self._matched(query)
-        postings_scored = probes = docs_scored = 0
+        postings_scored = probes = postings_read = docs_scored = 0
         available = sum(len(c.plist) for c in matched)
         top = _TopK(top_k)
         cursors = list(matched) if top_k > 0 else []
@@ -163,6 +169,8 @@ class PrunedBM25Index(InvertedBM25Index):
                 for cursor in at_pivot:
                     score += self._gain(cursor.idf, cursor.plist[cursor.pos][1], pivot_doc)
                     postings_scored += 1
+                    if cursor.pos != cursor.landed:
+                        postings_read += 1
                 top.add(score, self.doc_ids[pivot_doc])
                 docs_scored += 1
                 for cursor in at_pivot:
@@ -174,9 +182,15 @@ class PrunedBM25Index(InvertedBM25Index):
                 probes += 1
                 if cursor.exhausted():
                     cursors.pop(0)
+                else:
+                    # a probe only ever moves a cursor forward, so this
+                    # posting has not been read before
+                    cursor.landed = cursor.pos
+                    postings_read += 1
         stats = PrunedSearchStats(
             postings_scored=postings_scored,
             probes=probes,
+            postings_read=postings_read,
             docs_scored=docs_scored,
             docs_abandoned=0,
             terms_matched=len(matched),
@@ -192,11 +206,11 @@ class PrunedBM25Index(InvertedBM25Index):
         self, query: str, top_k: int = 10
     ) -> tuple[list[tuple[str, float]], PrunedSearchStats]:
         matched = self._matched(query)
-        postings_scored = probes = docs_scored = docs_abandoned = 0
+        postings_scored = probes = postings_read = docs_scored = docs_abandoned = 0
         available = sum(len(c.plist) for c in matched)
         top = _TopK(top_k)
         if top_k <= 0 or not matched:
-            return [], PrunedSearchStats(0, 0, 0, 0, len(matched), available)
+            return [], PrunedSearchStats(0, 0, 0, 0, 0, len(matched), available)
         # suffix upper-bound sums in query order, for mid-doc abandonment
         suffix = [0.0] * (len(matched) + 1)
         for j in reversed(range(len(matched))):
@@ -239,11 +253,20 @@ class PrunedBM25Index(InvertedBM25Index):
                 if cursor.order in essential:
                     if not cursor.exhausted() and cursor.doc == candidate:
                         tf = cursor.plist[cursor.pos][1]
+                        # a term leaves the essential set and never
+                        # returns, so no probe has read this posting
+                        postings_read += 1
                 else:
                     idx = bisect.bisect_left(cursor.plist, (candidate,))
                     probes += 1
-                    if idx < len(cursor.plist) and cursor.plist[idx][0] == candidate:
-                        tf = cursor.plist[idx][1]
+                    if idx < len(cursor.plist):
+                        # consecutive candidates can land on the same
+                        # posting; it is read the first time only
+                        if idx != cursor.landed:
+                            cursor.landed = idx
+                            postings_read += 1
+                        if cursor.plist[idx][0] == candidate:
+                            tf = cursor.plist[idx][1]
                 if tf:
                     score += self._gain(cursor.idf, tf, candidate)
                     postings_scored += 1
@@ -261,6 +284,7 @@ class PrunedBM25Index(InvertedBM25Index):
         stats = PrunedSearchStats(
             postings_scored=postings_scored,
             probes=probes,
+            postings_read=postings_read,
             docs_scored=docs_scored,
             docs_abandoned=docs_abandoned,
             terms_matched=len(matched),

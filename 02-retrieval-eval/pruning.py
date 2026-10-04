@@ -33,6 +33,7 @@ METHODS = ("taat", "maxscore", "wand")
 class MethodWork:
     scored_mean: float
     probes_mean: float
+    read_mean: float
     ms_mean: float
 
 
@@ -49,20 +50,23 @@ def ms_mean(timings: list[float]) -> float:
 
 
 def probe_charged_share(work: MethodWork, bill: float) -> float:
-    """Share of the term-at-a-time bill a pruner touches, probes included.
+    """Share of the term-at-a-time bill a pruner reads, probes included.
 
     A probe is a binary search that lands on one posting and reads it, so
-    charging it as a touched posting is the honest comparison against the
-    exhaustive scan. `% of bill` counts only what was scored.
+    charging that posting against the exhaustive scan is the honest
+    comparison. Charging it *on top of* the scored count is not: a probe
+    that finds the posting it then scores read one posting, not two. The
+    `read` column counts each posting once; `% of bill` counts only what
+    was scored.
     """
-    return (work.scored_mean + work.probes_mean) / bill
+    return work.read_mean / bill
 
 
 def measure(
     index: PrunedBM25Index, method: str, queries: list[str], top_k: int
 ) -> MethodWork:
     search = searcher(index, method)
-    scored = probes = 0
+    scored = probes = read = 0
     timings = []
     for query in queries:
         start = time.perf_counter()
@@ -70,11 +74,13 @@ def measure(
         timings.append(time.perf_counter() - start)
         if method == "taat":
             scored += stats.postings_touched
+            read += stats.postings_touched
         else:
             scored += stats.postings_scored
             probes += stats.probes
+            read += stats.postings_read
     n = len(queries)
-    return MethodWork(scored / n, probes / n, ms_mean(timings))
+    return MethodWork(scored / n, probes / n, read / n, ms_mean(timings))
 
 
 def count_identical(
@@ -124,8 +130,8 @@ def print_strata(index: PrunedBM25Index, sampler: ZipfSampler) -> None:
     )
     header = (
         f"{'stratum':<14} {'taat post/q':>12} "
-        f"{'maxscore':>9} {'probes':>7} {'% of bill':>10} {'+probes':>8} "
-        f"{'wand':>7} {'probes':>7} {'% of bill':>10} {'+probes':>8}"
+        f"{'maxscore':>9} {'probes':>7} {'read':>7} {'% of bill':>10} {'+probes':>8} "
+        f"{'wand':>7} {'probes':>7} {'read':>7} {'% of bill':>10} {'+probes':>8}"
     )
     print(header)
     print("-" * len(header))
@@ -138,10 +144,12 @@ def print_strata(index: PrunedBM25Index, sampler: ZipfSampler) -> None:
             f"{stratum:<14} {bill:>12.0f} "
             f"{work['maxscore'].scored_mean:>9.0f} "
             f"{work['maxscore'].probes_mean:>7.0f} "
+            f"{work['maxscore'].read_mean:>7.0f} "
             f"{100 * work['maxscore'].scored_mean / bill:>9.1f}% "
             f"{100 * probe_charged_share(work['maxscore'], bill):>7.1f}% "
             f"{work['wand'].scored_mean:>7.0f} "
             f"{work['wand'].probes_mean:>7.0f} "
+            f"{work['wand'].read_mean:>7.0f} "
             f"{100 * work['wand'].scored_mean / bill:>9.1f}% "
             f"{100 * probe_charged_share(work['wand'], bill):>7.1f}%"
         )
