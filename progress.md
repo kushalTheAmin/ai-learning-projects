@@ -188,6 +188,83 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-04] 03 — the rrf lead was credited to recovering bm25's
+  paraphrase misses and it recovers none. the readme's third headline bullet
+  read "hybrid rrf has the best mrr@10 and recall@1 overall — it recovers
+  several of bm25s paraphrase misses without giving up the keyword wins". the
+  keyword half is right and pinned (every strategy prints 1.000/1.000/1.000 on
+  all 20). the recovery half is a claim about queries bm25 loses past the mrr@10
+  cutoff coming back inside it, and bm25 loses exactly one — p14, the jwt query,
+  at rank 12 — which rrf moves to rank 11 and leaves scoring zero. the mechanism
+  fires 0 times out of 1, and all three queries rrf does improve (p01 2 → 1, p02
+  5 → 3, p09 10 → 7) were already hits for bm25. same shape as 26's ceiling tie,
+  22's stolen picks and 23's oracle gap: a plausible mechanism published without
+  the measurement that would have killed it. found and fixed 2026-10-04
+
+  the real mechanism is better and was never named — rrf is the only strategy
+  that holds both retrievers' sole rank-1. p08 is rank 1 for bm25 alone (dense
+  has it at 2), p01 is rank 1 for dense alone (bm25 at 2), rrf puts both at 1,
+  and that is the entire recall@1 gain: 0.8125 for bm25 and for dense against
+  0.8375 for rrf, a gap of exactly 1/40. the mrr@10 lead over dense is the same
+  single query — p08 at +0.5 against losses on p02 (2 → 3), p09 (4 → 7) and p14
+  (9 → 11), summing to +0.115079 over 40 queries = +0.002877, which is
+  0.8994047619047618 against 0.8965277777777778. so the win is one query net,
+  not a rescue. the fix is `fusion_attribution` in evaluate.py — per retriever,
+  the queries it misses at the cutoff, which of those the fusion recovers, the
+  queries where it alone ranks the answer first, and whether the fusion keeps
+  them, as query-id lists so a reading quotes its evidence — plus one printed
+  block in main.py so the reading traces to output, and the corrected bullet.
+  the root readme's index row needed nothing: it says "RRF fusion takes the best
+  overall MRR@10 (0.899) at the price of rank-blind averaging", which is what
+  the run shows. no measured number moved — main.py's output is byte-identical
+  bar the added block, confirmed by diffing before against after. 12 new tests
+  in tests/test_rrf_attribution.py, 86 → 98: six pin the measurement (one miss
+  and zero recovered, p14 at 12 → 11 still scoring zero, the four queries rrf
+  improves and which of them were already hits, dense missing nothing at the
+  cutoff, both sole rank-1s kept, and the 1/40 recall@1 gap and one-query mrr
+  lead recomputed from the per-query deltas), two prove the counters can fire at
+  all so the zeros are not vacuous (a synthetic ranking where the fusion does
+  pull a miss inside the cutoff, and a query both retrievers put first being
+  nobody's sole rank-1), one runs main.py and parses the printed block, and two
+  hold the readme to the corrected reading. gate ran from a fresh clone with the
+  readme's own pip steps: 98 pass, entry point byte-identical to the local run,
+  every 3-decimal number in the numbers section verbatim in that output bar the
+  explicitly historical 0.083 the 2026-08-26 cutoff fix retired. revert check:
+  each of the three files reverted alone fails the new test — the readme 2 of
+  them, main.py 1, evaluate.py at import — and all three together fail at
+  import.
+
+- [high] 03 — the COMPLETED ledger row still publishes the paraphrase dense mrr
+  that the 2026-08-27 stemmer fix retired. the row reads "paraphrase mrr@10:
+  bm25 0.765, dense 0.794, hybrid rrf 0.799"; bm25 and rrf are what main.py
+  prints today and dense is 0.793. the project readme's own fixes entry records
+  the move ("paraphrase dense mrr 0.794 → 0.793", the jwt doc going rank 8 → 9),
+  so the ledger is the one surface that kept the pre-fix value. 03 carries no
+  TestLedgerRow class, which is what 23, 14, 21 and 18 each grew for exactly
+  this drift — the fix is that class reading ../progress.md and binding the
+  row's three figures to `aggregate` so they cannot be typed stale again. found
+  2026-10-04
+
+- [medium] 03 — overall recall@1 has a ceiling of 0.9875 and nothing says so.
+  p13 ("ship a small production image that pulls fast") is the one query of the
+  40 with two relevant docs, dk-07 and dk-08, and `recall_at_k` divides by
+  len(relevant_ids), so at k=1 it can score at most 0.5 however well the
+  retriever does while the other 39 carry one relevant doc each. the published
+  recall@1 column — 0.812 three times and 0.838 for rrf — is therefore out of a
+  possible 39.5/40, and a reader taking 0.812 as "81.2% of queries answered at
+  rank 1" is counting 32.5 queries. the metric is the standard one and recall@5
+  is untouched (both of p13's docs land in the top 5 for every strategy), so no
+  number is wrong — the table just has an unstated ceiling one of its columns
+  cannot reach. found 2026-10-04
+
+- [low] 03 — the readme says the weighted blend reaches rrf's mrr "only at
+  a=0.2" where the sweep is bit-identical at 0.2 and 0.3 (0.8994047619047618
+  both). extends the 2026-09-03 finding below about main.py printing a unique
+  best alpha off that same tie — the readme carries the overstatement too, and
+  the word doing the damage is "only". the printed sweep row shows 0.899 twice
+  on screen and the next bullet calls the whole thing tea leaves, so nothing
+  downstream moves. found 2026-10-04
+
 - [fixed 2026-10-04] 02 — the `+probes` bill charged a probed posting twice. the
   pruning study read the charged bill as postings_scored + probes, and most of a
   pruner's probes find the posting they then score: on common-heavy at 32,000
@@ -4059,9 +4136,44 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 08-agent-tool-loop | 2026-09-05 |
 | 07-near-duplicates | 2026-09-03 |
 | 05-token-streaming | 2026-09-04 |
-| 03-hybrid-search | 2026-09-03 |
+| 03-hybrid-search | 2026-10-04 |
 | 04-bpe-tokenizer | 2026-09-03 |
 | 02-retrieval-eval | 2026-10-04 |
+
+03 came back clean on every published number and dirty on the mechanism behind
+one of its four headline bullets. all 86 committed tests passed before the fix,
+main.py is byte-identical across two local runs and again from a fresh clone,
+and every cell of all three printed tables reproduces verbatim — the numbers
+section's 16 three-decimal figures all appear as literals in that output bar the
+0.083 the 2026-08-26 cutoff fix explicitly retired. the narrative examples hold
+up one by one: sql-10 really is "Connection pooling" and really is bm25's rank 1
+for p14, sec-02 really is the jwt doc at bm25 rank 12 and dense rank 9, p09 is
+the rank-blind drag the tradeoffs section describes (dense 4, bm25 10, rrf 7),
+and the sweep endpoints are exact — alpha 0.0 is bm25's 0.8825 and alpha 1.0 is
+dense's 0.8965277777777778, so the min-max normalization is order preserving as
+claimed. the cross-project bm25 contract is real rather than asserted: 02's idf
+is log(1 + (n-d+0.5)/(d+0.5)) against 03's log((n-df+0.5)/(df+0.5) + 1.0), the
+same expression, both default to k1=1.5 and b=0.75, both dedupe query terms with
+dict.fromkeys, and both carry a test for the dedupe. determinism is genuine —
+the svd is seeded and two runs diff empty. evaluation hygiene is clean: the
+tf-idf and the svd are fit on the corpus only, the golden set never reaches
+fitting, and the alpha sweep is disclosed as tea leaves instead of sold as a
+tuned constant.
+
+what was wrong was the third headline bullet. it credited rrf's overall mrr@10
+and recall@1 lead to recovering bm25's paraphrase misses, and bm25 has exactly
+one miss past the cutoff — p14 at rank 12 — which rrf leaves a miss at rank 11,
+so the mechanism fires zero times out of one. fixed above with
+`fusion_attribution` and one printed attribution block: the lead is rrf holding
+both sides' sole rank-1, p08 for bm25 and p01 for dense, one query of the 40.
+no measured number moved.
+
+behind it, three findings. one high: the ledger row for 03 still publishes
+paraphrase dense 0.794 where the 2026-08-27 stemmer fix moved it to 0.793, and
+03 has no TestLedgerRow class of the kind 23, 14, 21 and 18 grew for exactly
+this drift. one medium: overall recall@1 cannot exceed 0.9875 because p13
+carries two relevant docs, and the table does not say so. one low: the readme's
+"only at a=0.2" against a sweep tied at 0.2 and 0.3.
 
 02 came back clean on everything that is seeded and dirty on one derived
 column. all 156 committed tests passed before the fix, main.py is byte-identical
