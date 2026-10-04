@@ -16,7 +16,7 @@ a vertical slice is the argument that composition is where production behavior l
 
 ```
 npm ci
-npm test          # 125 tests: unit + integration over a live server
+npm test          # 136 tests: unit + integration over a live server
 npm run typecheck
 npm start
 ```
@@ -38,7 +38,7 @@ the k sweep over the 40 golden queries, each row a full eval against the live en
  5   0.950   0.475   0.500     10       9       0       2    4176.4    4229.2   $0.013138   $0.5255
 ```
 
-retrieval climbs the way you want, 0.650 to 0.950. answer accuracy does not follow it up, because extraction accuracy, the share of retrieved-gold queries the reader actually answers right, sits at 0.500 and slightly falls as k grows: every extra doc is another set of distractor sentences for the best-overlap pick to lose to. so k=1 to k=3 buys 0.100 answer accuracy for 2.85x the input tokens, and past that youre paying for context the reader wastes. the misses are attributed, not averaged away: at k=3 the 22 wrong queries are 10 wrong-sentence picks, 8 refusals with the gold doc sitting in context, and 4 retrieval misses, all of which refused rather than quoting an unrelated doc. answered-without-gold is 0 in every row, so the overlap floor never let the reader confidently quote the wrong doc; the floor sweep below shows exactly why.
+retrieval climbs the way you want, 0.650 to 0.950. answer accuracy does not follow it up, because extraction accuracy, the share of retrieved-gold queries the reader actually answers right, sits at 0.500 and slightly falls as k grows. not because the extra docs steal the pick — no query that reads correctly at one k reads wrong at a wider one, 0 of 40 over the whole sweep, and the escalation plane below measures the same thing from the other side (atrisk 18 / hurt 0 under always-escalate). what drifts is which gold docs arrive late: 5 of the 12 gold docs that only arrive past k=1 are answered right, against 14 of the first 26, 0.417 against 0.538, so every widening step adds more denominator than numerator. k=1 to k=3 buys 0.100 answer accuracy for 2.85x the input tokens, and past that youre paying for context the reader wastes. the misses are attributed, not averaged away: at k=3 the 22 wrong queries are 10 wrong-sentence picks, 8 refusals with the gold doc sitting in context, and 4 retrieval misses, all of which refused rather than quoting an unrelated doc. answered-without-gold is 0 in every row, so the overlap floor never let the reader confidently quote the wrong doc; the floor sweep below shows exactly why.
 
 the category split says where the damage is: keyword queries 0.700, paraphrase queries 0.200 at k=3. the same lexical machinery sits on both sides of this pipeline, so a paraphrased question pays twice, once in retrieval and once in sentence scoring. thats the measured version of why rag stacks want an embedder, a wall this repo has now hit from 03, 12, 13, 15, 18, 20, and here.
 
@@ -134,6 +134,8 @@ validation is a table of exact rejections: empty or non-string question 400, k o
 this is the applied-ai shape typescript actually ships: an http endpoint, streaming wire protocols, backpressure across async boundaries, token accounting on the request path. strict mode with typed event payloads catches the protocol drift these systems are famous for, and node's microtask/macrotask scheduling made the backpressure experiment deterministic without a mock clock.
 
 ## fixes
+
+- 2026-10-04 — the k sweep blamed the extraction-accuracy drift on the extra docs — "every extra doc is another set of distractor sentences for the best-overlap pick to lose to" — and that steal never happens here: 0 of 40 queries read correctly at one k and wrong at a wider one, which is the same fact the escalation plane already measured as atrisk 18 / hurt 0. the reading now names the real mechanism, which gold docs arrive late (5 of the 12 past k=1 answered right against 14 of the first 26, 0.417 against 0.538), and the entry point prints the attribution instead of leaving it asserted. no measured number moved — every table cell is what it was.
 
 - 2026-09-02 — the escalation section sold "the hurt column is 0 everywhere, and thats measured, not assumed", but at trigger 0.35 the trigger sits on the refusal floor, so escalation only fires on queries that already refused and none of them was correct going in — hurt was 0 by construction on the headline row and on both oracle rows, and the same for answered-without-gold on the k2=10 rows, where the wider context is the whole corpus. the policy table now carries an `atrisk` column, the escalated queries that were correct before escalating, so a 0 with nothing behind it reads as vacuous: 0 at trigger 0.35 and on the oracles, 5 / 6 / 15 / 18 on the rows above the floor, which are the four that actually rule the risk out. no measured number moved — the column is new, every other cell is what it was.
 

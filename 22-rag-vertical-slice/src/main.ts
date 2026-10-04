@@ -21,7 +21,7 @@ import {
   type PolicyRow,
 } from "./escalate.js";
 import { ask } from "./client.js";
-import { evalGolden, type EvalRow } from "./eval.js";
+import { evalGolden, extractionDrift, type EvalRow, type QueryOutcome } from "./eval.js";
 import {
   captureScores,
   correctScores,
@@ -95,10 +95,12 @@ async function main(): Promise<void> {
     console.log(" k  hit@k  answer   extr  wrong refused answerd refused   ctx tok    in tok    cost/req  cost/40");
     console.log("             acc      acc   sent  w/gold  no gold no gold");
     const rows: EvalRow[] = [];
+    const sweepOutcomes = new Map<number, QueryOutcome[]>();
     let firstTokenFractions: number[] = [];
     for (const k of [1, 2, 3, 5]) {
       const { row, outcomes } = await evalGolden(baseUrl, queries, k);
       rows.push(row);
+      sweepOutcomes.set(k, outcomes);
       console.log(evalRowLine(row));
       if (k === 3) {
         firstTokenFractions = outcomes
@@ -116,6 +118,10 @@ async function main(): Promise<void> {
     console.log(`answer accuracy by category at k=3: ${categoryLine}`);
     console.log(
       `k=1 -> k=3 buys ${fmt(k3.answerAccuracy - k1.answerAccuracy, 3)} answer accuracy for ${fmt(k3.meanTokensIn / k1.meanTokensIn, 2)}x input tokens ($${fmt(k1.totalCostUsd, 4)} -> $${fmt(k3.totalCostUsd, 4)} per 40 questions)`,
+    );
+    const drift = extractionDrift(sweepOutcomes);
+    console.log(
+      `why extraction accuracy does not climb with hit@k: ${drift.stolenPicks} of ${queries.length} queries read correctly at one k and wrong at a wider one, so the extra docs steal no picks; the drift is which gold docs arrive late — ${drift.lateCorrect} of the ${drift.lateHits} that only arrive past k=1 are answered right (${fmt(drift.lateCorrect / drift.lateHits, 3)}) against ${drift.earlyCorrect} of the first ${drift.earlyHits} (${fmt(drift.earlyCorrect / drift.earlyHits, 3)})`,
     );
     console.log();
 

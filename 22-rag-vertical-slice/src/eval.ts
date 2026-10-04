@@ -111,3 +111,59 @@ export async function evalGolden(
   };
   return { row, outcomes };
 }
+
+/**
+ * Where a k sweep's extraction accuracy drift comes from. Two mechanisms
+ * could move it as k grows: a wider context steals a pick the reader was
+ * winning (a query correct at one k, wrong at a wider one), or the gold
+ * docs that only arrive at a wider k are simply harder than the ones
+ * retrieved first. The first is a claim about the same query changing
+ * answer, so it is countable — and on this corpus it never happens, which
+ * leaves the second as the whole story.
+ */
+export interface ExtractionDrift {
+  /** Queries correct at some k and wrong at a wider one: picks the extra docs stole. */
+  stolenPicks: number;
+  /** Gold docs already retrieved at the narrowest k. */
+  earlyHits: number;
+  /** Of those, the ones answered right at the widest k. */
+  earlyCorrect: number;
+  /** Gold docs that only arrive at a wider k. */
+  lateHits: number;
+  /** Of those, the ones answered right at the widest k. */
+  lateCorrect: number;
+}
+
+/**
+ * Attribute the drift across a k sweep's per-query outcomes. `stolenPicks`
+ * is counted over every narrow/wide pair, not just the ends, so one
+ * transient flip in the middle of the sweep still shows up.
+ */
+export function extractionDrift(byK: ReadonlyMap<number, readonly QueryOutcome[]>): ExtractionDrift {
+  const ks = [...byK.keys()].sort((a, b) => a - b);
+  const narrowest = ks[0];
+  const widest = ks[ks.length - 1];
+  if (narrowest === undefined || widest === undefined) throw new Error("extractionDrift needs at least one k");
+
+  let stolenPicks = 0;
+  for (const outcome of byK.get(narrowest) as readonly QueryOutcome[]) {
+    const correctAt = ks.map((k) => {
+      const found = (byK.get(k) as readonly QueryOutcome[]).find((o) => o.queryId === outcome.queryId);
+      if (found === undefined) throw new Error(`extractionDrift: no k=${k} outcome for ${outcome.queryId}`);
+      return found.correct;
+    });
+    if (correctAt.some((correct, i) => correct && correctAt.slice(i + 1).includes(false))) stolenPicks++;
+  }
+
+  const first = new Map((byK.get(narrowest) as readonly QueryOutcome[]).map((o) => [o.queryId, o.hit]));
+  const last = byK.get(widest) as readonly QueryOutcome[];
+  const early = last.filter((o) => o.hit && first.get(o.queryId) === true);
+  const late = last.filter((o) => o.hit && first.get(o.queryId) === false);
+  return {
+    stolenPicks,
+    earlyHits: early.length,
+    earlyCorrect: early.filter((o) => o.correct).length,
+    lateHits: late.length,
+    lateCorrect: late.filter((o) => o.correct).length,
+  };
+}
