@@ -106,8 +106,8 @@ def test_maxsim_reranking_beats_its_first_stage(evaluator):
 
 
 def test_maxsim_keyword_column_is_still_untouched(evaluator):
-    """The tie mechanism survives the formula change: a keyword query's gold
-    sits at the ceiling, and the stable sort leaves ties in stage order."""
+    """The ceiling survives the formula change: a keyword query's gold sits
+    alone on it, so the column holds without the sort breaking any tie."""
     bm25 = evaluator.run_first_stage("bm25")
     for depth in (10, 20, 100):
         maxsim = evaluator.run_reranked("bm25", "maxsim", depth)

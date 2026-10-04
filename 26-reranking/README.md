@@ -60,7 +60,7 @@ four results worth stating plainly.
 
 **finer interaction, ~95x the cost, nothing you can measure.** MaxSim over per-term vectors from the very same LSA fit is the top real row in the table at depth 20, 0.867 against pooled-lsa's 0.861 and bm25's 0.851 — and that is not a result. the paired bootstrap on the gap it looks best on, +0.016 over bm25, gives ci [-0.042, +0.075] and p_le_zero 0.3157, so on 40 queries all three real scorers are one blur. what the numbers do carry is the price: 1909.5 latent dots per query against the pooled scorer's 20.0, about 95x, for a difference the data cant separate from zero. it still demotes 3 paraphrase queries (p11, p17, p18) while promoting 4, and it goes the wrong way with depth — 0.867 at 20, 0.854 at 50 and past — because every extra candidate is another chance for one noisy term-to-term max to outrank the pooled document context. untrained single-term LSA vectors are the reason: real late-interaction models train the term vectors for exactly this interaction, and granularity without training buys variance, not rank.
 
-**keyword queries are immune to every scorer, by mechanism.** the keyword column reads 0.950 for every system in the table. an exact term match has cosine 1.0 in maxsim, so a doc containing all query terms sums to the query term count — the most any doc can score, since every per-term max is a cosine — and docs that reach that ceiling tie there while the stable sort resolves ties by first-stage order. the reranker structurally cannot damage what the lexical stage already got right, which is a property you want and normally have to engineer on purpose.
+**keyword queries come through untouched, and the ceiling is why — not the tie.** the keyword column reads 0.950 for every system in the table. the ceiling half of that holds: an exact term match has cosine 1.0 in maxsim, so a doc containing all query terms sums to the query term count, the most any doc can score since every per-term max is a cosine. the tie half does not. the gold is the only doc on the ceiling — 19 of the 19 keyword queries that have an in-vocabulary term (k14 has none), 0 of them with a second doc up there, at depth 5, 10, 20, 50 and 100 alike. it wins outright, so there is no tie to break and the stable sort never gets a say — the entry point prints the count now rather than leaving it asserted. and nothing structural holds it there: a non-gold doc that also contained every query term, sitting higher in bm25 order, would take rank 1 — it just never happens on this corpus. the ceiling also says nothing about the pooled scorer, which reshuffles 19 of 20 keyword shortlists and leaves the gold at rank 1 anyway — that column is bm25 and lsa agreeing on the easy queries, not a property of the scorer.
 
 **the headroom is in the scorer, not the shortlist.** at depth 20 the shortlist already contains the gold doc for 95% of queries, and the oracle turns that into mrr 0.950. the gap between the oracle and the pooled scorer, +0.089 with ci [+0.025, +0.160], is the only gap in the table that clears zero — every comparison between two real scorers straddles it. so on this corpus a better shortlist buys almost nothing (deepening 20 to 50 moves the oracle 0.950 to 1.000) while a genuinely better pair scorer has 9 points of mrr sitting on the table. thats the case for a trained cross-encoder, priced without simulating one.
 
@@ -78,6 +78,13 @@ this project is glue over 02's metrics and 03's retrievers, which are numpy and 
 - one gold doc per query makes mrr and the ceiling crisp, but graded relevance would blur the oracle: with multiple partially-relevant docs "gold in shortlist" stops being binary.
 
 ## fixes
+
+- 2026-10-04 — the keyword column was credited to docs tying at maxsim's
+  ceiling with the stable sort breaking the tie, and that tie never fires —
+  the gold is the only doc up there, 19 of 19 keyword queries with an
+  in-vocabulary term, 0 ceiling ties at every swept depth. now the
+  outright-win reading, counted in `keyword_ceiling_audit` and printed by
+  the entry point. no measured number moved.
 
 - 2026-09-02 — the maxsim scorer was not maxsim. colbert sums each query term's
   best cosine unweighted, this took an idf-weighted mean — weighting hardest the

@@ -54,6 +54,31 @@ class RerankedEval:
     demoted: int  # queries whose rr@MRR_K got worse
 
 
+@dataclass(frozen=True)
+class CeilingAudit:
+    """Why MaxSim leaves the keyword column alone, counted rather than asserted.
+
+    An exact term match has cosine 1.0, so a doc holding every query term
+    sums to |query terms| — the most any doc can score. Whether that makes
+    the keyword gold safe depends on how many docs get there: alone it wins
+    outright, and only a second doc on the ceiling would put the outcome in
+    the hands of the stable sort's first-stage tie-break.
+    """
+
+    depth: int
+    scored: int  # keyword queries with at least one in-vocabulary term
+    gold_at_ceiling: int  # of those, the gold reaches |query terms|
+    ceiling_ties: int  # of those, a second shortlist doc reaches it too
+    gold_strict_top: int  # of those, the gold is the strict unique maximum
+
+
+def ceiling_hits(
+    scores: dict[str, float], ceiling: float, tol: float = 1e-9
+) -> list[str]:
+    """Candidates sitting on `ceiling`, within float tolerance."""
+    return [doc_id for doc_id, score in scores.items() if abs(score - ceiling) <= tol]
+
+
 class Evaluator:
     def __init__(self, docs: list[Document], queries: list[Query]):
         validate_relevance(docs, queries)
@@ -156,6 +181,43 @@ class Evaluator:
             gold_in_shortlist=mean(shortlist_hits),
             promoted=promoted,
             demoted=demoted,
+        )
+
+    def keyword_ceiling_audit(self, depth: int) -> CeilingAudit:
+        """Count how the keyword golds actually reach the top under MaxSim.
+
+        A query with no in-vocabulary term has no ceiling to reach (k14's
+        "GIL" is the whole corpus's one case) and is left out of `scored`
+        rather than counted as a pass.
+        """
+        if depth < 1:
+            raise ValueError(f"depth must be >= 1, got {depth}")
+        scorer = self.scorers["maxsim"]
+        scored = at_ceiling = ties = strict_top = 0
+        for query in self.queries:
+            if query.category != "keyword":
+                continue
+            ceiling = float(len(self.space.term_indices(query.text)))
+            if ceiling == 0.0:
+                continue
+            scored += 1
+            shortlist = self._stage_rankings["bm25"][query.query_id][:depth]
+            scores, _ = scorer.score(query, shortlist)
+            relevant = set(query.relevant)
+            on_ceiling = ceiling_hits(scores, ceiling)
+            if relevant & set(on_ceiling):
+                at_ceiling += 1
+            if len(on_ceiling) > 1:
+                ties += 1
+            best = ceiling_hits(scores, max(scores.values()))
+            if len(best) == 1 and best[0] in relevant:
+                strict_top += 1
+        return CeilingAudit(
+            depth=depth,
+            scored=scored,
+            gold_at_ceiling=at_ceiling,
+            ceiling_ties=ties,
+            gold_strict_top=strict_top,
         )
 
     def compare(self, eval_a: SystemEval, eval_b: SystemEval) -> PairedComparison:

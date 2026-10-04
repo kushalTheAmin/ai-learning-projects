@@ -64,7 +64,17 @@ def main() -> None:
                 headline[scorer_name] = result
         print()
 
-    print("== direction check: weak scorer on strong candidates ==")
+    audit = evaluator.keyword_ceiling_audit(HEADLINE_DEPTH)
+    sweep_ties = sum(evaluator.keyword_ceiling_audit(d).ceiling_ties for d in DEPTHS)
+    print(
+        f"why the keyword column holds at depth {HEADLINE_DEPTH}: gold on the "
+        f"|query terms| ceiling {audit.gold_at_ceiling}/{audit.scored}, strict "
+        f"unique top {audit.gold_strict_top}/{audit.scored}, ceiling ties "
+        f"{audit.ceiling_ties} ({sweep_ties} across depths "
+        f"{', '.join(str(d) for d in DEPTHS)})"
+    )
+
+    print("\n== direction check: weak scorer on strong candidates ==")
     for scorer_name in ("bm25", "maxsim"):
         result = evaluator.run_reranked("lsa", scorer_name, HEADLINE_DEPTH)
         print(show_reranked(result))
