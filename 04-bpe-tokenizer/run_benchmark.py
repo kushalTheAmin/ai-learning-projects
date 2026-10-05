@@ -93,16 +93,49 @@ def main():
           f"cuts code tokens {code_cut * 100:.1f}% and costs prose "
           f"{prose_cost * 100:.1f}% — one budget, two domains, already crowding")
 
-    print("\n=== script cost (mixed-trained, tokens per character) ===")
-    print(f"{'text':>18} {'tokens/char':>12}")
+    # The untrained column is vocab 256 — every byte its own token, no merges
+    # at all. It is the control that separates what training did from what
+    # utf-8 already charges per character before any tokenizer learns
+    # anything, because the ratio to english mixes both.
+    untrained = ByteBPE()
+    print("\n=== script cost (tokens per character, mixed-trained vs untrained) ===")
+    print(f"{'text':>18} {'mixed':>8} {'vs english':>11} "
+          f"{'untrained':>10} {'vs english':>11}")
     prose_tpc = tokens_per_char(heldout["prose"], domain_tokens["prose"]["mixed"])
-    print(f"{'english prose':>18} {prose_tpc:>12.3f}")
+    prose_raw_tpc = tokens_per_char(heldout["prose"],
+                                    len(untrained.encode(heldout["prose"])))
+    print(f"{'english prose':>18} {prose_tpc:>8.3f} {'—':>11} "
+          f"{prose_raw_tpc:>10.3f} {'—':>11}")
+    unmoved = []
+    script_tpc = {}
     for line in heldout["unicode"].splitlines():
         if ": " not in line:
             continue
         label, _, body = line.partition(": ")
-        tpc = tokens_per_char(body, len(mixed_bpe.encode(body)))
-        print(f"{label.lower():>18} {tpc:>12.3f}  ({tpc / prose_tpc:>4.1f}x english)")
+        n_mixed, n_raw = len(mixed_bpe.encode(body)), len(untrained.encode(body))
+        tpc = tokens_per_char(body, n_mixed)
+        raw_tpc = tokens_per_char(body, n_raw)
+        script_tpc[label.lower()] = (tpc, raw_tpc, n_mixed)
+        if n_mixed == n_raw:
+            unmoved.append(label.lower())
+        print(f"{label.lower():>18} {tpc:>8.3f} {tpc / prose_tpc:>10.1f}x "
+              f"{raw_tpc:>10.3f} {raw_tpc / prose_raw_tpc:>10.1f}x")
+
+    # The ratio to english is a product, not a single cause: utf-8 byte width,
+    # which the untrained column already shows, times how much training
+    # compressed the english denominator. Crediting all of it to training
+    # reads the second factor onto rows training never touched.
+    cjk_tpc, cjk_raw_tpc, cjk_tokens = script_tpc["chinese"]
+    trained_x = cjk_tpc / prose_tpc
+    raw_x = cjk_raw_tpc / prose_raw_tpc
+    print(f"{len(unmoved)} of {len(script_tpc)} rows are byte-identical trained "
+          f"and untrained ({', '.join(unmoved)}) — no merge fires on them, so "
+          f"training moved their token counts by zero")
+    print(f"chinese costs {trained_x:.1f}x english per character trained and "
+          f"{raw_x:.1f}x untrained — {cjk_tokens} tokens either way: byte width "
+          f"is {raw_x:.1f}x of the gap before any training, the remaining "
+          f"{prose_raw_tpc / prose_tpc:.2f}x is training compressing english "
+          f"{prose_raw_tpc:.3f} -> {prose_tpc:.3f}")
 
     # The word tokenizer gets the same budget as the mixed bpe, but it cannot
     # spend it: the training text holds fewer word types than the budget has

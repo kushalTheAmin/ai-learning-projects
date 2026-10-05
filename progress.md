@@ -188,6 +188,74 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-05] 04 — the script gap was credited "purely" to training
+  and training moves the rows it is credited on by zero tokens. the readme's
+  script-cost paragraph read "nine times the per-character price of english,
+  purely because of what the tokenizer saw during training", and the repo
+  index row said "cjk costs 9x english per character when training never saw
+  it". the 9.0x is right. the attribution is not: the ratio is a product of
+  utf-8 byte width and how far training compressed the *english* denominator,
+  and only the second factor is training's. an untrained vocab-256 tokenizer
+  — no merges at all — already prices chinese at 3.0x english, and the mixed
+  tokenizer emits byte-identical token counts to it on 7 of the 13 sheet rows
+  (russian, greek, japanese, chinese, korean, arabic, hindi): chinese is 174
+  tokens either way, japanese 180, so no merge fires on any of them and
+  training moved their numerator by nothing. what training moved is english,
+  1.000 -> 0.335 tokens/char, 2.98x — and 3.0 x 2.98 is the 9.0. same shape
+  as 03's rrf attribution and 26's ceiling tie: a mechanism credited with an
+  effect it does not produce, where a control the run never printed separates
+  the two. fix: the script section now prints the untrained vocab-256
+  tokenizer as a second pair of columns plus the two decomposition lines, the
+  readme quotes them and splits the gap, and the index row names the byte-
+  width half. `tests/test_script_gap_attribution.py` pins the mechanism (the
+  7 unmoved rows are byte-identical and equal to their utf-8 byte count,
+  trained x == byte-width x times english compression exactly) and holds the
+  readme and the index row to it. no measured number moves — every figure
+  already published is unchanged, the control is new output. the latin rows
+  are the mirror image and the readme now says so: spanish is 1.0x untrained
+  and 1.4x trained, so there the gap really is all training
+- [medium] 04 — the word baseline's oov rate dilutes its own denominator with
+  whitespace. `oov_stats` splits on `\S+|\s+` and counts whitespace runs as
+  tokens like any other, and a whitespace run is essentially never oov, so the
+  published "word tokenizer, heldout prose: 209/1032 tokens are OOV (20.3%)"
+  is 209 misses over 1032 tokens of which 516 are whitespace. over words only
+  it is 209/516 = 40.5%, code 111/227 = 48.9%, unicode 226/249 = 90.8%. the
+  docstring says out loud that "whitespace runs count like any other token",
+  so the code is not hiding it, but the readme spends the number as "my
+  word-level tokenizer hits 20.3% unknown tokens on held-out prose" and then
+  "20.3% is the ceiling for a closed word vocab on this corpus" — a reader
+  takes that as one word in five going to `<unk>` and it is two in five. the
+  error runs against the argument the number is making (bpe exists because
+  closed vocabularies lose information), so the project understates its own
+  case rather than overstating it, which is why this is medium and not high.
+  left out of this run because it is a second measurement in a second section
+  and would have widened a commit that should read as one change. found
+  2026-10-05
+- [low] 04 — the script table's english baseline is not one of its rows. every
+  script line is a ~120-character sentence from `heldout/unicode.txt`, and the
+  "vs english" column divides by the tokens-per-character of the whole
+  3106-byte `heldout/prose.txt` — a different file, a different length, and a
+  different passage. tokens-per-character normalizes the length away so the
+  ratios are not wrong, but the sheet has no english line to compare against,
+  which is the control the comparison actually wants. adding one english
+  sentence to the sheet would make every row a like-for-like division and
+  would also say how much of each ratio is per-line variance. found 2026-10-05
+- [low] 04 — the unicode sheet's own header oversells it. the first line reads
+  "The same short passage, rewritten in several scripts", and the passages are
+  not the same one. spanish, russian, japanese, chinese, korean, arabic and
+  hindi share the network-is-unreliable opener; french is about cache
+  invalidation, german about queue decoupling, portuguese about index cost;
+  and the longer lines carry sentences the shorter ones do not. nothing
+  measured depends on it — tokens-per-character does not care what the
+  sentence says — but the header promises a matched translation set, and a
+  reader who checks two rows against each other finds different content.
+  found 2026-10-05
+- [low] 04 — `ByteBPE(merges)` raises `IndexError: list index out of range` on
+  a merge list that references a token id it has not built yet, so
+  `ByteBPE.load` of a truncated or hand-edited merges file reports a bare
+  index error naming nothing. every other invalid input in the project raises
+  `ValueError` quoting the offending value (`vocab_size must be >= 256, got
+  255`, `token id 256 outside vocab of size 256`). found 2026-10-05
 - [fixed 2026-10-04] 03 — the rrf lead was credited to recovering bm25's
   paraphrase misses and it recovers none. the readme's third headline bullet
   read "hybrid rrf has the best mrr@10 and recall@1 overall — it recovers
@@ -4170,7 +4238,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 07-near-duplicates | 2026-09-03 |
 | 05-token-streaming | 2026-09-04 |
 | 03-hybrid-search | 2026-10-05 |
-| 04-bpe-tokenizer | 2026-09-03 |
+| 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
 
 03 came back clean on every published number and dirty on the mechanism behind

@@ -107,26 +107,44 @@ is already enough to see it. in cost terms, from the run:
 the prose-only tokenizer pays 80.7% more for the same code — training on code too cuts the bill 44.7%
 ```
 
-script cost, tokens per character through the mixed tokenizer:
+script cost, tokens per character — the mixed tokenizer against an untrained
+vocab-256 one, which is the control. untrained means every byte is its own
+token, no merges at all:
 
 ```
-     english prose        0.335
-           spanish        0.486  ( 1.4x english)
-            german        0.651  ( 1.9x english)
-           russian        1.835  ( 5.5x english)
-          japanese        3.000  ( 9.0x english)
-           chinese        3.000  ( 9.0x english)
-            korean        2.492  ( 7.4x english)
+              text    mixed  vs english  untrained  vs english
+     english prose    0.335           —      1.000           —
+           spanish    0.486        1.4x      1.007        1.0x
+            german    0.651        1.9x      1.020        1.0x
+           russian    1.835        5.5x      1.835        1.8x
+          japanese    3.000        9.0x      3.000        3.0x
+           chinese    3.000        9.0x      3.000        3.0x
+            korean    2.492        7.4x      2.492        2.5x
 ```
 
 chinese and japanese land on exactly 3.000 — every cjk character is three
 utf-8 bytes and the tokenizer learned zero merges for them, so each character
-costs three whole tokens. nine times the per-character price of english,
-purely because of what the tokenizer saw during training. this is the
-much-discussed tokenizer inequity, reproduced on a 20KB corpus with 150 lines
-of stdlib python. one caveat the table hides: the emoji row reads 0.699 but
-that line is emoji scattered through english words, not a pure emoji stream —
-per-line granularity flattens whats inside the line.
+costs three whole tokens. nine times the per-character price of english, and
+the untrained column says where the nine comes from, because it isnt one
+cause. 3.0x of it is utf-8 byte width, sitting there before any training
+happens. the other 2.98x is training compressing english 1.000 → 0.335. the
+cjk rows are byte-identical across both columns — 174 tokens for the chinese
+line either way — so training moved them by zero tokens, and every bit of
+the gap it opened is on the english side of the ratio. from the run:
+
+```
+7 of 13 rows are byte-identical trained and untrained (russian, greek, japanese, chinese, korean, arabic, hindi) — no merge fires on them, so training moved their token counts by zero
+chinese costs 9.0x english per character trained and 3.0x untrained — 174 tokens either way: byte width is 3.0x of the gap before any training, the remaining 2.98x is training compressing english 1.000 -> 0.335
+```
+
+this is still the much-discussed tokenizer inequity, reproduced on a 20KB
+corpus with 150 lines of stdlib python — the gap is real and it is that big.
+the untrained column only says which half to blame. and the latin rows are
+the mirror image: spanish
+sits at 1.0x untrained and 1.4x trained, so there the gap really is all
+training. one caveat the table hides: the emoji row reads 0.699 but that line
+is emoji scattered through english words, not a pure emoji stream — per-line
+granularity flattens whats inside the line.
 
 ## details worth knowing
 
@@ -157,6 +175,11 @@ per-line granularity flattens whats inside the line.
 
 ## fixes
 
+- 2026-10-05 — the script section credited the 9.0x cjk-vs-english per-char
+  gap "purely" to what the tokenizer saw in training, and training moves those
+  rows by zero tokens. the run now prints an untrained vocab-256 control
+  column — 3.0x of the gap is utf-8 byte width, the other 2.98x is english
+  compression. no measured number moves, the control is new output
 - 2026-09-03 — the baselines section printed "matched vocab 1659" and the
   readme called the word tokenizer vocab-matched to the bpe. it isnt — it
   builds 1402, because the training text only has 1401 word types. the run
