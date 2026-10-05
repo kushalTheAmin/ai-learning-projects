@@ -188,6 +188,92 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-05] 07 — the mistuned banding's 31 missed pairs were all
+  credited to its 50% collision point clearing the duplicate floor, and that
+  accounts for 9. main.py printed "never sees 31 of brute force's 360 pairs:
+  its 50% collision threshold (0.383) sits above the lowest duplicate jaccard
+  (0.280)", the readme said "the 50% point (0.383) sits above the floor, so 31
+  true pairs are never generated as candidates", and the open question said
+  "all came from the curve sitting above the floor". only 20 of the 360 true
+  pairs sit below 0.383 and only 9 of those are missed, so threshold placement
+  caps recall at 0.975 against a published 0.914 — it explains 0.025 of a 0.086
+  gap. the other 22 misses are pairs *above* the 50% point, lost to the shallow
+  part of 1-(1-s^4)^32 rather than to where it sits: the highest is
+  ratelimit-02--drop vs ratelimit-02--shuffle at jaccard 0.581, a 0.979
+  collision probability that came up the other way, and at the floor the curve
+  is 0.179 while at 0.462 it is still only 0.775. the control the run never
+  printed is the curve's own prediction summed over all 360 pairs: 35.2 misses
+  against 31 observed, so the banding is behaving exactly as the s-curve says
+  and the single-cause story was never needed. same shape as 03's rrf
+  attribution, 26's ceiling tie and 04's script gap — a mechanism credited with
+  an effect it mostly does not produce, where an arithmetic control separates
+  the two. the readme's companion claim "every single-mutation kind above the
+  curve stays at 1.000" is plainly false and is gone: typo pairs run 0.462 to
+  0.722, all of it above the 50% point, and sit at 0.917. fix: the pipeline
+  section prints the split and the prediction,
+  `tests/test_lsh_recall_loss_is_not_just_the_floor.py` pins the mechanism (20
+  below the point, 9/22 split, 0.975 ceiling, the 0.581 pair at 0.979, 35.2
+  predicted, every sub-0.383 pair a compounded one) and holds the readme, the
+  root index row and the COMPLETED ledger row to it. the ledger row was also
+  still publishing mutant-mutant recall 0.879, retired to 0.812 by 07's own
+  2026-09-03 fix; corrected in the same clause. no measured number moves —
+  recall is still 0.914, the 31 is still 31, every per-kind row is
+  byte-identical, the split is new output
+
+- [medium] 07 — the head-to-head's two operating points are both read off the
+  set they are then scored on. "best f1 at t=0.2" comes from the brute-force
+  sweep over all 10296 pairs and "best f1 is 0.942 at d<=20" from the hamming
+  sweep over the same 10296, and the closing table compares the two as "each
+  method's best operating point". neither is a held-out reading, and the readme
+  never says so — its caveat paragraph is about mutation shapes and corpus
+  realism, not about tuning. the comparison is at least symmetric, both sides
+  get the same unfair help, and d=20 really is the global optimum (swept 0..40
+  by hand this pass, f1 rises monotonically to 0.942 at 20 then falls to 0.926
+  at 21, so the sweep's endpoint landing on the maximum is a coincidence rather
+  than a truncation artifact). but "simhash tops out at 0.942" is a tuned-on-
+  test number presented as a property of simhash. the honest fix is a
+  train/eval split of the 24 groups, which moves every published figure, or a
+  sentence saying both points are oracle-tuned. found 2026-10-05
+
+- [medium] 07 — the hardest-non-duplicate reading names documents it did not
+  measure, and the number is partly a truncation artifact. the readme says the
+  hardest non-duplicate "lands at 0.024 — cache-03 (thundering herd) against
+  ratelimit-03 (retry hints)" and that "the hardest pair that really does share
+  a topic is index-02 vs index-03 at 0.011". the measured pairs are
+  cache-03--truncate vs ratelimit-03--truncate and index-02--truncate vs
+  index-03--drop; base against base those two score 0.0161 and 0.0084, a third
+  and a fifth lower. all ten of the top-ten non-duplicates involve a truncate
+  mutant, because `truncate` keeps the first 70% of words and so shrinks the
+  union while keeping the shared opening phrase — the ceiling is a denominator
+  effect of the mutation set as much as a vocabulary one. main.py prints the
+  real ids, so only the readme renames them. the direction is safe (a real
+  cross-topic ceiling of 0.016 only strengthens the separability argument, and
+  0.2 clears either), which is why this is medium. found 2026-10-05
+
+- [low] 07 — `with_typos` applies an op it did not choose and some of its edits
+  are invisible. the branch chain is `if op == "swap" and i < len(chars) - 1 /
+  elif op == "drop" and len(chars) > 1 / else: double`, so a "swap" drawn at the
+  last index falls through to the double branch, and a double of a space emits a
+  doubled space that `normalize` collapses. over the 24 seeded typo mutants 11
+  of 173 edits are one of those two, so the docstring's "roughly 2% of
+  positions" is nearer 1.9% in effect. nothing measured is wrong — no typo
+  mutant shingles identically to its base, the kind's jaccard range is 0.462 to
+  0.722 — but this is the same no-op-mutation shape already logged against 24's
+  `corruptLeaves` numeric arm and 18's `applyTypo`, and it is the third
+  project with it. found 2026-10-05
+
+- [low] 07 — `simhash` gives the empty shingle set fingerprint 0, which is a
+  real point in the space rather than a sentinel, and the nearest committed
+  document sits at hamming 20 — exactly the readme's best operating point. so
+  an empty document would be served as a near-duplicate of
+  orchestration-02--typo at d<=20 while sharing no content with it. the project
+  guards the same case on the other side: `minhash.EMPTY_SENTINEL` is
+  deliberately >= the Mersenne prime precisely so an empty document matches no
+  non-empty one on any component, and the module says so in a comment. the
+  corpus has no empty document so nothing published is affected. same shape as
+  26's MaxSim scoring 0.0 for a doc with no in-vocabulary terms. found
+  2026-10-05
+
 - [fixed 2026-10-05] 04 — the script gap was credited "purely" to training
   and training moves the rows it is credited on by zero tokens. the readme's
   script-cost paragraph read "nine times the per-character price of english,
@@ -331,7 +417,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
   entry point matches, and reverting just the progress.md digit fails the two
   new tests.
 
-- [medium] every project but 03, 14, 17, 21, 22, 23, 25 — the COMPLETED ledger
+- [medium] every project but 03, 07, 14, 17, 21, 22, 23, 25 — the COMPLETED ledger
   row is unbound, and that is the drift just fixed in 03 sitting in 19 more
   places. the row is the surface another project reads before reusing a
   mechanism, it quotes measured figures, and `grep -rl progress.md` finds a test
@@ -344,7 +430,12 @@ Fixed items stay listed with their fix date so the history reads in one place.
   of recomputed figures) but not the identical diff, since every row quotes
   different metrics, so it is one project per pass rather than one commit. worth
   taking the oldest-REVIEWED project's row each pass alongside whatever that
-  review turns up. found 2026-10-05
+  review turns up. found 2026-10-05. 2026-10-05: 07's row came along with its
+  review pass as described and was found carrying a *wrong* number, mutant-
+  mutant recall 0.879, retired to 0.812 by its own 2026-09-03 fix 32 days
+  earlier — so the mechanism has now produced the failure it was logged to
+  predict, and "no number is known wrong today" was only true of the rows
+  nobody had recomputed yet
 
 - [medium] 03 — overall recall@1 has a ceiling of 0.9875 and nothing says so.
   p13 ("ship a small production image that pulls fast") is the one query of the
@@ -4235,11 +4326,52 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 10-chunking-strategies | 2026-09-04 |
 | 09-concurrency | 2026-09-05 |
 | 08-agent-tool-loop | 2026-09-05 |
-| 07-near-duplicates | 2026-09-03 |
+| 07-near-duplicates | 2026-10-05 |
 | 05-token-streaming | 2026-09-04 |
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+07 reproduces exactly and reasons about its own numbers almost everywhere. all
+127 committed tests passed before the fix, main.py is byte-identical across two
+local runs and again from a fresh clone, and every figure in the readme appears
+as a literal in that output bar three that the 2026-09-03 fixes entry labels as
+retired (0.577, 0.879, 0.908) and four it derives in prose (0.179 and 0.775 off
+the s-curve, 0.025 and 0.086 off the recalls) — the two curve readings are now
+pinned by test since no run prints them. determinism is genuine: every mutation
+draws from `random.Random(f"{seed}:{group}:{name}")`, the hash is blake2b rather
+than `hash()`, and the minhash family is seeded and prefix-truncatable, which is
+real and tested — `MinHasher(8, seed=7)` draws the first 8 of `MinHasher(128,
+seed=7)`'s params off the same stream, so the whole k sweep genuinely comes from
+one pass. evaluation hygiene is structural rather than careful: ground truth is
+provenance, nothing is fitted, and no sketch sees a label. the headline
+separability claims hold pair by pair — the 0.280 floor, the 360 labeled pairs,
+b=64 r=2's candidate set being exactly those 360.
+
+what was wrong is the explanation under the one table where the project loses
+something, and it is the fourth time this ledger has caught the same shape: a
+mechanism credited with an effect it does not produce, separable by an
+arithmetic control the run already had everything to compute. 03's rrf, 26's
+ceiling tie, 04's script gap, now 07's s-curve. the specific slip here is
+treating a 50% collision point as a cutoff — the readme and the entry point both
+read "the threshold sits above the floor" as a complete account of 31 missing
+pairs when only 20 pairs are below that threshold at all. the giveaway was
+sitting two lines down in the project's own output the whole time: typo recall
+0.917 in a table printed directly under a sentence claiming every
+single-mutation kind above the curve holds 1.000, with typo's range entirely
+above the curve.
+
+the rule it adds: when a probabilistic retrieval step loses recall, the claim is
+not which side of a threshold the data sits on, it is the expected loss the
+model predicts — sum 1 - p(s) over the labeled pairs and compare it to what
+happened. 35.2 against 31 closes the question in one line, and anything the
+threshold story explains is then a sub-total of it, not the whole. the corollary
+for ledgers: 07's COMPLETED row had been publishing a recall its own fix retired
+32 days earlier, which is the unbound-ledger-row finding producing exactly the
+failure it was logged to predict rather than merely risking it. four findings
+left open — two medium (both operating points oracle-tuned, the hardest
+non-duplicate naming base docs for a mutant measurement) and two low, each the
+third or fourth project to carry its shape.
 
 03 came back clean on every published number and dirty on the mechanism behind
 one of its four headline bullets. all 86 committed tests passed before the fix,
