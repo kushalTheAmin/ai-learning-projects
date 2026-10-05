@@ -18,7 +18,7 @@ from neardup.corpus import (
     true_duplicate_pairs,
 )
 from neardup.evaluate import max_absolute_error, mean_absolute_error, score_pairs
-from neardup.lsh import candidate_pairs, halfway_threshold
+from neardup.lsh import candidate_pairs, collision_probability, halfway_threshold
 from neardup.minhash import MinHasher, estimate_jaccard
 from neardup.mutations import MUTATIONS
 from neardup.shingles import hashed_shingles, jaccard, word_shingles
@@ -81,6 +81,46 @@ def print_kind_recall(label: str, by_kind: dict[str, tuple[int, int]]) -> None:
     for kind in kinds:
         hit, total = by_kind[kind]
         print(f"    {kind:>14}: {hit:>3}/{total:<3} ({hit / total:.3f})")
+
+
+def print_curve_loss_split(
+    exact: dict[tuple[str, str], float],
+    truth: set[tuple[str, str]],
+    candidates: set[tuple[str, str]],
+    bands: int,
+    rows: int,
+) -> None:
+    """Divide a banding's recall loss at its own 50 percent collision point.
+
+    `1 - (1 - s^r)^b` is a probability, not a cutoff, so a 50 percent point
+    above the duplicate floor only accounts for the pairs below that point.
+    The pairs above it go missing too, at a rate the curve itself predicts,
+    and that is the larger half of the loss here. `recall ceiling` is the
+    recall this banding would reach if every pair above its 50 percent point
+    were bucketed.
+    """
+    half = halfway_threshold(bands, rows)
+    missed = truth - candidates
+    below = [p for p in truth if exact[p] < half]
+    above = [p for p in truth if exact[p] >= half]
+    missed_below = [p for p in missed if exact[p] < half]
+    missed_above = [p for p in missed if exact[p] >= half]
+    ceiling = 1 - len(missed_below) / len(truth)
+    highest = max(missed_above, key=lambda p: exact[p])
+    expected = sum(1 - collision_probability(exact[p], bands, rows) for p in truth)
+    print(
+        f"    below the 50% point: {len(below):>4} pairs, "
+        f"{len(missed_below):>3} missed  (recall ceiling {ceiling:.3f})"
+    )
+    print(
+        f"    at or above it:      {len(above):>4} pairs, "
+        f"{len(missed_above):>3} missed  (highest {exact[highest]:.3f}, "
+        f"p={collision_probability(exact[highest], bands, rows):.3f})"
+    )
+    print(
+        f"    the curve predicts {expected:.1f} misses over all "
+        f"{len(truth)} pairs; {len(missed)} observed"
+    )
 
 
 def main() -> None:
@@ -215,12 +255,16 @@ def main() -> None:
             tuned_f1 = s.f1
         else:
             missed = sorted(brute - cands)
+            half = halfway_threshold(bands, rows)
+            below_half = [p for p in truth - cands if exact[p] < half]
             print(
                 f"  the mistuned banding never sees {len(missed)} of brute "
-                f"force's {len(brute)} pairs: its 50% collision threshold "
-                f"({halfway_threshold(bands, rows):.3f}) sits above the "
-                f"lowest duplicate jaccard ({dup_floor:.3f})"
+                f"force's {len(brute)} pairs. its 50% collision threshold "
+                f"({half:.3f}) sits above the lowest duplicate jaccard "
+                f"({dup_floor:.3f}), but that accounts for "
+                f"{len(below_half)} of them:"
             )
+            print_curve_loss_split(exact, truth, cands, bands, rows)
             print_kind_recall(
                 f"mistuned b={bands} r={rows}",
                 recall_by_kind(docs_by_id, verified, truth),

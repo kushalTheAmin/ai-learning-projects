@@ -45,7 +45,11 @@ b=16 r= 8: 50% collision at s=0.674  candidates  137 (1.3% of pairs)  dup recall
 b= 8 r=16: 50% collision at s=0.856  candidates   60 (0.6% of pairs)  dup recall 0.167  precision 1.000
 ```
 
-the knob that matters is where the s-curve sits relative to your lowest real duplicate. b=64 r=2 puts its 50% collision point at 0.104, below the 0.280 floor, and its candidate set turns out to be exactly the 360 labeled pairs: verified with exact jaccard it matches brute force (precision 1.000, recall 1.000) with 360 verifications instead of 10296, 3.5% of the comparison work. move one step to b=32 r=4 and the 50% point (0.383) sits above the floor, so 31 true pairs are never generated as candidates and no amount of verification can get them back: recall 0.914, and the per-kind breakdown shows who pays, the genuinely compounded mutant-vs-mutant pairs at 0.812 and typo pairs at 0.917 while every single-mutation kind above the curve stays at 1.000. lsh recall failures are silent and concentrated in exactly the low-similarity duplicates you probably care about.
+the knob that matters is where the s-curve sits relative to your lowest real duplicate - and how steep it is once it gets there. b=64 r=2 puts its 50% collision point at 0.104, below the 0.280 floor, and its candidate set turns out to be exactly the 360 labeled pairs: verified with exact jaccard it matches brute force (precision 1.000, recall 1.000) with 360 verifications instead of 10296, 3.5% of the comparison work. move one step to b=32 r=4 and the 50% point (0.383) crosses the floor, 31 true pairs are never generated as candidates, and no amount of verification gets them back: recall 0.914.
+
+that threshold placement is 9 of the 31, not all of it. only 20 of the 360 true pairs sit below 0.383, so bucketing every pair above that point would still leave recall at 0.975 - the placement caps recall 0.025 below perfect and the published reading is 0.086 below. the other 22 of the 31 are misses *above* the 50% point, tail losses on a shallow curve rather than consequences of where it sits: the highest is ratelimit-02--drop vs ratelimit-02--shuffle at jaccard 0.581, which the curve gives a 0.979 chance of bucketing and which went the other way. summed over all 360 pairs the curve predicts 35.2 misses against the 31 observed, so nothing here is misbehaving - 1 - (1 - s^4)^32 is a probability and a 50% point is not a cutoff. at the floor it is 0.179, at 0.462 still only 0.775.
+
+the per-kind breakdown shows who pays. the genuinely compounded mutant-vs-mutant pairs at 0.812, and every one of the 20 sub-0.383 pairs is one of those. typo pairs at 0.917 - and the whole typo range is 0.462 to 0.722, entirely above the 50% point, so being above the curve does not mean caught. lsh recall failures are silent and skewed low, and the two causes need separating before you reach for a fix, because they want different fixes: a lower 50% point for the first nine, more bands or probes for the other twenty-two.
 
 simhash, one 64-bit fingerprint per document:
 
@@ -75,6 +79,20 @@ the ml-adjacent dedup literature and tooling (datasketch, spark minhash) live he
 
 ## fixes
 
+- 2026-10-05 — all 31 pairs the mistuned banding misses were credited to
+  its 50% collision point (0.383) sitting above the duplicate floor
+  (0.280). that accounts for 9 of them. only 20 of the 360 true pairs are
+  below 0.383, so threshold placement caps recall at 0.975 and the other
+  22 misses are above the 50% point - tail losses on a shallow curve, the
+  highest at jaccard 0.581 where the curve gives 0.979. the pipeline
+  section prints the split now, plus the curve's own prediction (35.2
+  misses over the 360 pairs against 31 observed) as the control that
+  separates the two. the claim that any single-mutation kind above the curve
+  holds recall 1.000 is gone with it - typo pairs run 0.462 to 0.722, all of
+  it above the 50% point, and they sit at 0.917. no measured number moves:
+  recall is still 0.914, the 31 is still 31, every per-kind row is
+  unchanged, the split is new output
+
 - 2026-09-03 — the `mutant-mutant` category was 40% padding. the `noise`
   mutation only swaps case and doubles spaces, both of which `normalize`
   undoes, so all 24 noise mutants shingle identically to their base and
@@ -100,7 +118,7 @@ the ml-adjacent dedup literature and tooling (datasketch, spark minhash) live he
 ## open questions
 
 - the s-curve placement was tuned knowing the duplicate floor (0.280), which real pipelines never know. what does an adaptive scheme look like, sampling candidate similarities to pick b and r online?
-- 31 missed pairs at b=32 r=4 all came from the curve sitting above the floor. multi-probe lsh claims to buy back recall without more tables; how much of that 0.086 recall gap would it close here, and at what probe cost?
+- of the 31 missed pairs at b=32 r=4, 9 sit below the curve's 50% point and 22 are tail losses above it. multi-probe lsh claims to buy back recall without more tables, but it probes near-miss buckets, which is the second group; how much of the 0.086 gap does it actually reach, and at what probe cost?
 - simhash used unit weights per shingle. idf weighting is what the original paper does; does it pull the duplicate and non-duplicate hamming distributions apart enough to close the f1 gap?
 - band buckets here are exact tuples in dicts. at billions of docs the tables themselves are the memory problem; what do the bucket-size distributions look like and when do hot buckets (boilerplate shingles) blow up the candidate count?
 - exact jaccard as the verifier reuses shingle sets already in memory. in a store where fetching originals costs io, when is verifying with a bigger signature (k=512) cheaper than fetching, and what false-verdict rate does that introduce?
