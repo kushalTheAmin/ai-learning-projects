@@ -208,9 +208,13 @@ async function headroomSweep(): Promise<void> {
       await runPacingStudy(`oracle-${Math.round(h * 100)}`, { kind: "oracle", burst: SERVER_BURST, headroom: h }, DROP_BASE),
     );
   }
-  // Attribution control: the informed rate at 100%, but a pacing bucket that
-  // releases the t=0 herd at burst 5 instead of all 20 at once.
+  // Attribution controls. The 100% row is the only one that fails anything,
+  // and two knobs could own that: the rate it stands on and the 20-wide t=0
+  // burst its bucket releases. These two rows hold one knob each, and with
+  // oracle-95 above them they close the 2x2 of {100%, 95%} x {burst 20, 5},
+  // so the reading is an interaction rather than a guess at which knob.
   results.push(await runPacingStudy("oracle-100-b5", { kind: "oracle", burst: 5, headroom: 1 }, DROP_BASE));
+  results.push(await runPacingStudy("oracle-95-b5", { kind: "oracle", burst: 5, headroom: 0.95 }, DROP_BASE));
   for (const h of headrooms) {
     results.push(
       await runPacingStudy(`hdr-limit-${Math.round(h * 100)}`, { kind: "header", opts: headerOpts("trust-limit", h) }, DROP_BASE),
@@ -247,16 +251,19 @@ async function headroomSweep(): Promise<void> {
   const o100 = byName.get("oracle-100")!;
   const o100b5 = byName.get("oracle-100-b5")!;
   const o95 = byName.get("oracle-95")!;
+  const o95b5 = byName.get("oracle-95-b5")!;
   const o90 = byName.get("oracle-90")!;
   console.log("\npart 2 findings:");
   console.log(
-    `- the 100% oracle's ${o100.failed} failures are not about the average rate: the identical informed rate ` +
-      `behind a burst-5 pacing bucket (oracle-100-b5) fails ${o100b5.failed} with ${o100b5.count429} 429s. ` +
-      `the knife edge lives in the 20-wide t=0 burst the burst-20 bucket admits at once, which lands the ` +
-      `whole herd before the first fault retry has anywhere to go`,
+    `- the 100% oracle's ${o100.failed} failures need the rate and the burst together, and the 2x2 says it: ` +
+      `hold the rate and shape the burst (oracle-100-b5) and it fails ${o100b5.failed} with ` +
+      `${o100b5.count429} 429s, hold the 20-wide burst and take 5% off the rate (oracle-95) and it fails ` +
+      `${o95.failed}, drop both (oracle-95-b5) and it fails ${o95b5.failed}. one cell of four loses requests, ` +
+      `so neither knob alone is the cause: the burst-20 bucket empties the server at t=0 and only a rate ` +
+      `standing at exactly 100% leaves it drained, with nowhere for the first fault retry to go`,
   );
   console.log(
-    `- two fixes, priced: 5% of margin (oracle-95: ${o95.failed} failed, ${o95.count429} 429s) costs ` +
+    `- so two ways to break the pair, priced: 5% of margin (oracle-95: ${o95.failed} failed, ${o95.count429} 429s) costs ` +
       `${fmt((o95.makespanMs - o100.makespanMs) / 1000, 2)}s of makespan; shaping the burst (oracle-100-b5) ` +
       `costs ${fmt((o100b5.makespanMs - o100.makespanMs) / 1000, 2)}s. past the fix, margin prices as pure ` +
       `throughput: 95% -> 90% adds ${fmt((o90.makespanMs - o95.makespanMs) / 1000, 2)}s and buys nothing ` +

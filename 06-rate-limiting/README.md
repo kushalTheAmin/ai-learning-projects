@@ -680,8 +680,8 @@ hdr-remain-95     100.0%       1011     1.01         0         0      17.57     
 ### part 2: pricing the margin
 
 oracle and hdr-limit swept from 85% to 100% headroom on the same drop
-scenario, plus one control row, the 100% oracle behind a burst-5 pacing
-bucket instead of burst-20:
+scenario, plus two control rows that swap the burst-20 pacing bucket for a
+burst-5 one at 100% and at 95%, closing the 2x2 of rate by burst:
 
 ```
 strategy        headroom   success   failed    429s   att/ok   makespan
@@ -691,6 +691,7 @@ oracle-90            90%    100.0%        0       0     1.01     91.16s
 oracle-95            95%    100.0%        0       3     1.01     83.97s
 oracle-100          100%     98.9%       11      88     1.10     77.54s
 oracle-100-b5       100%    100.0%        0       0     1.01     79.42s
+oracle-95-b5         95%    100.0%        0       0     1.01     85.96s
 hdr-limit-85         85%    100.0%        0       0     1.01    101.29s
 hdr-limit-90         90%    100.0%        0       0     1.01     93.18s
 hdr-limit-95         95%    100.0%        0       0     1.01     86.00s
@@ -699,16 +700,19 @@ hdr-limit-100       100%    100.0%        0       0     1.01     79.47s
 
 the sweep answered a different question than the one i asked it. the pacing
 study read the 100% oracles 1.1% failure rate as zero-headroom fragility, so
-the plan was to price the margin that fixes it. the control row says the
-fragility was never about the average rate: the identical informed rate
-behind a burst-5 bucket fails nothing and takes zero 429s. the knife edge
-lives in the 20-wide t=0 burst that a burst-20 pacing bucket admits all at
-once, landing the whole herd before the first fault retry has anywhere to
-go. hdr-limit-100 is clean for the same reason, its bucket bursts 5. two
-fixes, priced: 5% of margin costs 6.43s of makespan, shaping the burst costs
-1.88s. the burst is the cheaper fix, and past it, margin prices as pure
-throughput, roughly 7s per 5% step on this workload, buying nothing
-measurable
+the plan was to price the margin that fixes it. the 2x2 says it is neither
+knob on its own - it is both. oracle-100 behind burst 20 is the only cell of
+four that loses a request: hold the rate and shape the burst (oracle-100-b5)
+and it fails nothing, hold the 20-wide burst and take 5% off the rate
+(oracle-95) and it fails nothing, drop both (oracle-95-b5) and it fails
+nothing. so neither alone is the cause. the mechanism needs the pair - the
+burst-20 bucket empties the server in one t=0 wave, and only a rate standing
+at exactly 100% leaves it drained, with nowhere for the first fault retry to
+go. hdr-limit-100 never reaches the cell at all, its bucket bursts 5. that
+makes the two fixes two ways of breaking the same pair, priced: 5% of margin
+costs 6.43s of makespan, shaping the burst costs 1.88s. the burst is the
+cheaper of the two, and past either one, margin prices as pure throughput,
+roughly 7s per 5% step on this workload, buying nothing measurable
 
 ### part 3: the budget rises, and nobody tells you
 
@@ -735,9 +739,9 @@ hdr-remaining     100.0%       1014     1.01         0         0       8.20     
   fails requests (75.03s, 9 failed). pacing at 100% of a known budget leaves
   fault retries nowhere to land, and the retry burnout tail stretches its
   makespan past every adaptive client whose slack is accidental headroom.
-  part 2 already named the deeper cause, the burst-20 bucket, but the lesson
-  survives: perfect information about the rate is not a strategy, its one
-  input to one
+  part 2 pinned the mechanism as the 100% rate and the burst-20 bucket
+  together, and this row stands on both, but the lesson survives either way:
+  perfect information about the rate is not a strategy, its one input to one
 
 one sentence: if the server tells you the limit, believe it and keep 5% or a
 demand-shaped burst in hand; if it only tells you whats left, you can recover
@@ -784,7 +788,7 @@ The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
 
 ```
 npm ci
-npm test               # 158 tests
+npm test               # 162 tests
 npm start              # the main table
 npm run start:outage   # the outage studies
 npm run start:breaker  # the breaker studies
@@ -796,6 +800,14 @@ npm run typecheck
 
 ## fixes
 
+- 2026-10-05 — the headroom sweep read its own control row as a single cause.
+  it said the 100% oracle's 11 failures "were never about the average rate,
+  it was the 20-wide t=0 burst" - but the oracle-95 row right above it holds
+  that same burst and fails nothing. across the 2x2 of rate by burst only
+  oracle-100 behind burst 20 loses a request, so both are needed and neither
+  alone is the cause. the sweep now prints the missing cell (oracle-95-b5)
+  and reads the pair. no measured number moves - the new row is the only new
+  output
 - 2026-09-04 — the aimd rate trace was not a read. `currentRatePerSec` banked
   the growth it reported, refilling the pacing bucket at an extra instant, and
   with the rate moving that accrues different tokens - so every published aimd
