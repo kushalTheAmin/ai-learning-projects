@@ -62,7 +62,7 @@ OPEN THREADS for the questions worth answering next.
 | 05-token-streaming | 2026-08-26 | typescript | incremental sse parser over raw bytes (whatwg subset: lf/crlf/bare-cr incl. cr on a chunk boundary, streaming utf-8 decode, multi-line data, last-event-id, dispatch only on non-empty data) + partial-json prefix parser (single left-to-right scan: container stack, in-progress token, safe-index truncation; unambiguous completion — close string, tru->true, trim 12. to 12 — else drop the dangling piece) + bounded async queue whose await-push blocks when full, with high-water/stall instrumentation; measured — first text at 2.5% of a buffering client's wait, tool-arg fields first parsed at 44-89% of stream bytes vs 100% waiting for the closing brace and first carrying a value at 44-89% too except the one object-valued field, which parses empty at 60.5% and holds a filter at 63.8%, bounded(8) queue holds high-water at 8 chunks vs 419 unbounded at identical wall time, 300/300 seeded byte-level chunkings parse identically |
 | 04-bpe-tokenizer | 2026-08-25 | python | byte-level bpe from scratch: pair counting weighted by pretoken piece frequency, deterministic lexicographic tie-break, rank-ordered merge application, byte fallback, replacement-char-safe decode; merge-prefix truncation lets one training serve a whole vocab sweep; measured — vocab 256→1246 cuts heldout prose 3106→1058 tokens (2.9x cost), domain transfer with a vocab-matched control (prose-trained 1.49 vs mixed-trained 2.56 bytes/token on code at equal vocab — the domain, not the slots), script cost (cjk 9.0x english tokens/char, zero merges learned), baselines at matched vocab (word tokenizer 20.3% oov on heldout prose, char tokenizer misses 277 chars, byte-level oov is structurally 0%) |
 | 02-retrieval-eval, bootstrap extension | 2026-08-25 | python | paired bootstrap over per-query reciprocal ranks (10000 resamples, seeded, stdlib only): 95% percentile confidence intervals on each system's mrr and on paired per-query mrr differences, plus a direction-stability fraction (share of resamples where the gap is <= 0); measured verdict — bm25 vs tf-idf +0.018 [+0.000, +0.048] includes zero, the gap rests on 2 of 38 queries even though bm25 never loses one, while bm25 vs b=0 +0.041 [+0.001, +0.091] excludes zero |
-| 03-hybrid-search | 2026-08-25 | python | okapi bm25 from scratch + lsa dense retrieval (tf-idf → seeded truncated svd) over one shared stemmer/compound-splitting tokenizer; rrf and weighted score fusion with alpha sweep; recall@1/5 + mrr on 100 docs / 40 golden queries split keyword vs paraphrase (paraphrase mrr@10: bm25 0.765, dense 0.794, hybrid rrf 0.799; overall rrf best at 0.899; keyword saturated for both — corpus-fit lsa has no oov failure mode) |
+| 03-hybrid-search | 2026-08-25 | python | okapi bm25 from scratch + lsa dense retrieval (tf-idf → seeded truncated svd) over one shared stemmer/compound-splitting tokenizer; rrf and weighted score fusion with alpha sweep; recall@1/5 + mrr on 100 docs / 40 golden queries split keyword vs paraphrase (paraphrase mrr@10: bm25 0.765, dense 0.793, hybrid rrf 0.799; overall rrf best at 0.899; keyword saturated for both — corpus-fit lsa has no oov failure mode) |
 | 02-retrieval-eval | 2026-08-25 | python | from-scratch okapi bm25 (lucene idf, k1 tf saturation, b length norm) vs sklearn-style tf-idf cosine (raw tf, smooth idf, l2 norm); evaluated with recall@1/recall@5/mrr@10 over a committed 40-doc / 38-query golden dataset, per-query head-to-head by reciprocal rank, plus a b=0 ablation isolating length normalization (mrr 0.917 tf-idf / 0.934 bm25 / 0.893 b=0); dataset includes engineered kitchen-sink distractor docs and deliberate vocabulary-mismatch queries to show where lexical retrieval fails |
 | 01-structured-output | 2026-08-25 | python | layered JSON parse repair (fence strip, balanced-brace extraction, trailing-comma removal, python-literal fallback) + pydantic schema validation with a validation-error-feedback retry loop and hard-failure policy; benchmarked strict vs lenient vs full retry on 30 scripted-failure tickets (20.0% → 60.0% → 96.7%, 44 llm calls vs 30) |
 
@@ -234,8 +234,8 @@ Fixed items stay listed with their fix date so the history reads in one place.
   them, main.py 1, evaluate.py at import — and all three together fail at
   import.
 
-- [high] 03 — the COMPLETED ledger row still publishes the paraphrase dense mrr
-  that the 2026-08-27 stemmer fix retired. the row reads "paraphrase mrr@10:
+- [fixed 2026-10-05] 03 — the COMPLETED ledger row still published the
+  paraphrase dense mrr that the 2026-08-27 stemmer fix retired. the row reads "paraphrase mrr@10:
   bm25 0.765, dense 0.794, hybrid rrf 0.799"; bm25 and rrf are what main.py
   prints today and dense is 0.793. the project readme's own fixes entry records
   the move ("paraphrase dense mrr 0.794 → 0.793", the jwt doc going rank 8 → 9),
@@ -244,6 +244,39 @@ Fixed items stay listed with their fix date so the history reads in one place.
   this drift — the fix is that class reading ../progress.md and binding the
   row's three figures to `aggregate` so they cannot be typed stale again. found
   2026-10-04
+
+  fixed 2026-10-05 exactly that way. the row's `dense 0.794` reads 0.793, which
+  is what `aggregate(results, category="paraphrase")` returns and what both
+  readmes and main.py already said; 23, 21, 22, 25 and 17 carry the same class
+  and it was the one surface here with nobody holding it. 6 new tests in
+  tests/test_ledger_row.py, 98 → 104: the row is unique in COMPLETED, the three
+  paraphrase mrrs are recomputed and spliced into the row's exact phrasing, the
+  retired 0.794 cannot come back (a regex pins the only `dense N.NNN` in the row
+  to one value, so 0.793 passing is not 0.794 matching a prefix), the overall
+  0.899 is recomputed and `hybrid_rrf` is confirmed to actually be the best of
+  the four rather than just quoted as it, and "keyword saturated for both" holds
+  only while every keyword cell is 1.0. two of the six failed before the change
+  and pass after. no measured number moved — main.py's output is byte-identical,
+  confirmed by diffing before against after — so the readme tables, the root
+  index row (already 0.793) and the fixes section needed nothing but one dated
+  entry. gate ran from a fresh clone with the readme's own pip steps: 104 pass,
+  entry point matches, and reverting just the progress.md digit fails the two
+  new tests.
+
+- [medium] every project but 03, 14, 17, 21, 22, 23, 25 — the COMPLETED ledger
+  row is unbound, and that is the drift just fixed in 03 sitting in 19 more
+  places. the row is the surface another project reads before reusing a
+  mechanism, it quotes measured figures, and `grep -rl progress.md` finds a test
+  referencing it in 7 of the 26 projects. 03's row survived the 2026-08-27
+  stemmer fix stale for 39 days because nothing recomputed it; 14's and 25's
+  rows each went stale the same way and each needed a review pass to catch it.
+  no number is known wrong today — this is the mechanism that lets one go wrong
+  unnoticed, so it is medium, not high. the change is small and identical in
+  shape per project (a `ledger_row` fixture scoping to COMPLETED plus a handful
+  of recomputed figures) but not the identical diff, since every row quotes
+  different metrics, so it is one project per pass rather than one commit. worth
+  taking the oldest-REVIEWED project's row each pass alongside whatever that
+  review turns up. found 2026-10-05
 
 - [medium] 03 — overall recall@1 has a ceiling of 0.9875 and nothing says so.
   p13 ("ship a small production image that pulls fast") is the one query of the
@@ -4136,7 +4169,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 08-agent-tool-loop | 2026-09-05 |
 | 07-near-duplicates | 2026-09-03 |
 | 05-token-streaming | 2026-09-04 |
-| 03-hybrid-search | 2026-10-04 |
+| 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-09-03 |
 | 02-retrieval-eval | 2026-10-04 |
 

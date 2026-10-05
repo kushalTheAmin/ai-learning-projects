@@ -62,6 +62,11 @@ i expected dense to stumble on exact identifiers — thats the standard story fo
 
 ## fixes
 
+- 2026-10-05 — the repo ledger row still published paraphrase dense mrr 0.794,
+  the value the 2026-08-27 stemmer fix retired here — nothing bound that row to
+  the run. tests/test_ledger_row.py recomputes all three paraphrase mrrs, the
+  overall rrf mrr and the keyword saturation from aggregate now. row reads
+  0.793, same as the readme and main.py. no measured number moved
 - 2026-10-04 — the rrf bullet credited the overall lead to recovering bm25s
   paraphrase misses. bm25 misses one query past the cutoff (p14) and rrf leaves
   it a miss at 11 — the lead is rrf holding both sides sole rank-1, p08 and p01.
