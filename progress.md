@@ -188,6 +188,85 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-05] 06 — the oracle's 11 failures were credited to the
+  20-wide t=0 burst alone, and the row two above that control holds the same
+  burst and fails nothing. the header extension's headroom sweep printed one
+  attribution control, the informed rate at 100% behind a burst-5 pacing bucket
+  (0 failed, 0 429s), and read it as settling the mechanism: the readme said
+  "the fragility was never about the average rate ... the knife edge lives in
+  the 20-wide t=0 burst", header-main.ts printed "the 100% oracle's 11 failures
+  are not about the average rate", and the repo index row said "it was never the
+  100% rate, it was the 20-wide t=0 burst". but oracle-95 sits in the same table
+  with the burst-20 bucket untouched and also fails nothing. across the 2x2 of
+  {100%, 95%} headroom by {20, 5} pacing burst, exactly one cell loses a
+  request — 100% behind burst 20, 11 failed and 88 429s — and the other three
+  are clean, so either knob alone clears it and neither alone is the cause. the
+  mechanism is the pair: a burst-20 bucket empties the server in one t=0 wave,
+  and only a rate standing at exactly 100% leaves it drained when the first
+  fault retry arrives. this is the same shape as 03's rrf, 26's ceiling tie,
+  04's script gap and 07's s-curve, except the over-credited mechanism here is
+  the one the *fix* installed: the control row was right that the burst matters
+  and wrong that it was the whole story, and the row that refutes the "whole
+  story" was already printed three lines up. fix: the sweep prints the missing
+  cell (oracle-95-b5: 0 failed, 0 429s, 85.96s) so the interaction reads off
+  the run instead of being inferable,
+  `tests/oracle-fragility-needs-rate-and-burst.test.ts` pins the 2x2, prices
+  both fixes (burst 1.88s, margin 6.43s) and holds both readmes to the pair.
+  no measured number moves — the other five entry points are byte-identical
+  and every published figure reproduces; the one new row is the only new output
+
+- [medium] 06 — the pacing extension still reads the same failure through one
+  of its two causes, from the other side. the readme and `start:pacing` both say
+  the oracle "paces at exactly 100% and inherits the sweep's zero-headroom
+  fragility, failing 1.1% of requests where aimd fails 0.1%", which names the
+  rate and not the burst-20 bucket that the 2x2 above shows is equally
+  necessary. unlike the header claim this one is not false — 100% really is one
+  of the two conditions, and aimd's immunity really is average-rate headroom
+  (control: aimd at burst 20 instead of its burst 5 still fails 0 on the drop
+  scenario, so its safety is the ramp and the sawtooth, not its burst shape) —
+  it is just half the mechanism stated as the mechanism, in the section a reader
+  meets first. the honest version is one clause: standing at 100% is fragile
+  *behind a burst-20 bucket*, and part 2 prices both ways out. left out of the
+  fix commit to keep that diff one intentional change
+
+- [medium] 06 — `HeaderPacer`'s cap-censoring guard calls a window censored
+  whenever its closing response sets a new high-water remaining.
+  `header-pacer.ts:145` folds the current response into `maxRemainingSeen`
+  before `capFloor = maxRemainingSeen - slack` is computed at :159, so if
+  `headers.remaining` is the new maximum then `headers.remaining >= capFloor`
+  is true by construction and the window is spent on a +2 req/s probe instead
+  of on the refill estimate it actually carried. the observed maximum is only a
+  lower bound on the cap, so a bucket climbing honestly from near-empty — every
+  reading a new high, none of them at the cap — is read as capped for as long as
+  the climb lasts. the guard's own comment addresses only the opposite
+  direction (never having seen a cap at all). nothing published moves: the drop
+  run splits 138 estimate windows to 18 censored and the estimator still locks
+  onto 8 req/s. carrying the cap as max(observed, believed-from-limit) or
+  requiring two readings at the same high would separate a climb from a
+  ceiling
+
+- [low] 06 — the pacing table's aimd and oracle rows pace with different burst
+  shapes and the table never says so. aimd's bucket is burst 5
+  (`pacing-main.ts:57`) while fixed-20, fixed-8 and oracle all take
+  `SERVER_BURST` = 20 (:164-166), so the headline aimd-vs-oracle comparison
+  moves two knobs, not one. checked: aimd at burst 20 lands 0 failed and 146
+  429s against burst 5's 1 failed and 160, so the published reading survives
+  and no number moves — but after part 2 pinned the burst as half the oracle's
+  failure mechanism, the burst each row paces behind is exactly the column a
+  reader needs disclosed
+
+- [low] 06 — `HeaderPacer`'s refill arithmetic dates a token take by when its
+  response was observed, not when the token was taken. `admittedSinceAnchor`
+  increments in `observe` (`header-pacer.ts:150`), which runs after the
+  processing latency, while the `remaining` endpoint it is differenced against
+  is snapshotted at response-write time — so a request admitted inside the
+  window whose response lands after it has already drained the closing
+  snapshot but is billed to the next window. each take is still counted exactly
+  once, so the error telescopes across windows and the EWMA absorbs it, and
+  nothing published moves; the docstring's "is exactly the refill, whatever the
+  drain was" is exact only for a window with no requests in flight at either
+  endpoint, which under concurrency is never
+
 - [fixed 2026-10-05] 07 — the mistuned banding's 31 missed pairs were all
   credited to its 50% collision point clearing the duplicate floor, and that
   accounts for 9. main.py printed "never sees 31 of brute force's 360 pairs:
@@ -4305,7 +4384,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 
 | project | last review |
 |---|---|
-| 06-rate-limiting | 2026-09-04 |
+| 06-rate-limiting | 2026-10-05 |
 | 01-structured-output | 2026-10-03 |
 | 22-rag-vertical-slice | 2026-10-04 |
 | 26-reranking | 2026-10-04 |
@@ -4331,6 +4410,47 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+06 is the most thoroughly reasoned project in the repo and that is exactly how
+it got caught. all 158 committed tests passed before the fix, typecheck is
+clean, and all six entry points are byte-identical across two runs and again
+from a fresh clone — determinism here is structural rather than careful, since
+every wait goes through `VirtualClock` and timers fire in (time, schedule-order)
+order, so a run is a pure function of the seed with no wall clock anywhere in
+the measurement path. every one of the 226 decimal figures in the readme appears
+as a literal in that output except 85.99, which the fixes entry labels as
+retired. the algorithms check out term by term against the aws formulations:
+full jitter draws [0, min(cap, base*2^n)), equal jitter keeps half and jitters
+half, decorrelated draws [base, prev*3) capped and is the only one carrying
+prev, and the 1-based attempt index lines up between `retry.ts` and
+`breaker-retry.ts` so the breaker path and the plain path schedule the same
+delays. the arithmetic ties out row by row too — every main-table row's
+attempts minus 429s minus 503s equals its success count, the 22.7s budget cliff
+is the sum of the eight capped delays, and the rolling detector's window really
+is (now - windowMs, now].
+
+what was wrong is the attribution the header extension's own control row was
+installed to settle, and the giveaway was three lines up its own table. the
+sweep showed the 100% oracle failing 11 requests, showed the same rate behind a
+burst-5 bucket failing none, and concluded the rate "was never" involved — in a
+table whose oracle-95 row holds the burst at 20 and also fails none. fill in the
+2x2 and only one cell of four loses a request, so the mechanism is the
+conjunction and the two "fixes" are two ways of breaking one pair. fixed above
+with the missing cell printed and the readings in both readmes and the index row
+restated; no measured number moved.
+
+the rule it adds, and it is the sharpest version of a rule this ledger keeps
+re-learning: a control row that removes an effect identifies a *sufficient*
+fix, never a sole cause. one knob held is one knob of evidence — to claim a
+cause you need the cell where the other knob moves alone, and if the table
+already has it, read it before writing the sentence. the four prior catches
+(03's rrf, 26's ceiling tie, 04's script gap, 07's s-curve) were all mechanisms
+credited with effects they mostly did not produce; this one is the inverse and
+more humbling, a correction that over-corrected, because the control was real
+and the reading of it was not. four findings left open — two medium (the pacing
+section naming the rate half of the same pair, the header pacer's censoring
+guard calling every new high-water reading a cap) and two low, both in the
+remaining-only estimator's bookkeeping and neither moving a published number.
 
 07 reproduces exactly and reasons about its own numbers almost everywhere. all
 127 committed tests passed before the fix, main.py is byte-identical across two
