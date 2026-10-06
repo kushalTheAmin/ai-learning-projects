@@ -188,6 +188,80 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-06] 10 — "sentence packing costs nothing and fixes all of it"
+  was read off three columns that are true and one that was never measured. the
+  readme's second bullet backed "costs nothing" with same index size (5391
+  words, no duplication), 0% splits at every budget, sentence-80 beating
+  fixed-80 on every quality column (hit@5 0.850 vs 0.500, mrr@10 0.698 vs
+  0.445) and a smaller context bill (333.7 vs 388.2) — every one of those
+  correct, and none of them the cost side. the control the reading needed is
+  the 40 queries split by whether fixed-80 cut the answer: on the 23 it kept
+  whole there is no boundary damage left to repair, and packing still drops
+  mrr@10 0.774 to 0.683, hit@1 0.696 to 0.609, with 4 of the 23 ranking worse
+  and q11, q18 and q32 falling out of the top 10 entirely. so the headline
+  +0.253 is +0.305 recovered on the 17 cut answers minus 0.052 given back on
+  the 23 whole ones — the two terms sum to the aggregate move exactly, since
+  fixed-80 scores a flat zero on everything it cut — and a sixth of what
+  packing wins is handed straight back. the drag is not an artifact of one
+  budget: -0.004 at 40, -0.090 at 80, -0.036 at 160, negative at all three,
+  though hit@1 moves the other way at 40 (0.692 to 0.769) so only the mrr
+  effect is claimed there. mechanism: packing redraws every chunk, not only
+  the ones that were cutting an answer, so the chunk holding the answer shrinks
+  80.0 to 70.9 words on those 23 and loses query terms the arbitrary window
+  happened to span. q11 is the clean case — the answer sits in
+  `rate-limit-design#2` under both strategies, rank 1 under fixed-80 and
+  nowhere in the top 10 under sentence-80, because the window carried 5 of the
+  query's terms (and, limit, over, requests, which) where the sentence-packed
+  chunk carries 2, the rest having landed in the next sentence group. same
+  shape as 03's rrf, 07's s-curve and 06's burst: an effect credited to one
+  mechanism where an arithmetic control separates what it earns from what it
+  costs. the ordering itself survives — packing still wins every aggregate
+  column and 0% splits is real — so nothing in the table or the root index row
+  moves. fix: the entry point prints the decomposition at all three budgets,
+  `tests/test_sentence_packing_is_not_free.py` pins the drag, the
+  recovery/drag identity, the shrinking relevant chunk, q11's term loss and
+  the hit@1 reversal at 40, and holds the readme to the measured split. no
+  measured number moves — the published table is byte-identical, every figure
+  reproduces across three runs and again from a fresh clone, 74 tests to 83
+
+- [medium] 10 — the overlap bullet's "overlap moves every boundary rather than
+  only adding windows" is a property of the stride, not of overlap, and the
+  other row in the same table nearly refutes it. the claim explains ov-20's one
+  newly-split answer, and for ov-20 it is right: stride 60 against window 80
+  puts 44 of fixed-80's 72 window spans outside ov-20's set entirely. but
+  ov-40's stride is 40, which divides 80, so its windows re-cut the document on
+  the same grid and only 4 of those 72 are absent — all of them tail windows,
+  where `fixed_chunks` stops at the first `window_start + size >= len(words)`
+  and a shorter stride can reach the last word a window early. that is why
+  ov-40's newly-split count is 0 and why it recovers 16 of 17 rather than 15:
+  near-structural, not measured luck. `main.py` prints the same parenthetical
+  on both rows, including the one where almost nothing moves. the honest
+  version names the stride: a stride that does not divide the window size
+  moves every boundary, one that divides it only adds windows apart from the
+  tail. found 2026-10-06
+
+- [medium] 10 — more overlap buys containment and costs ranking, and the table
+  shows it while the prose does not. the bullet reads ov-20 and ov-40 as the
+  same fix at two prices ("recovers 15 of the 17 splits for +30.4% index size,
+  ov-40 gets 16 of 17 for +89.0%"), but ov-40 recovers the extra split and
+  ranks worse doing it: hit@1 0.450 against ov-20's 0.525, mrr@10 0.578
+  against 0.632. only hit@5 improves (0.800 vs 0.775). so the sweep has an
+  interior optimum on the metrics the readme leads with, and +89% index growth
+  buys one split back and gives up 0.054 mrr. nothing published is false — both
+  rows are printed and the bullet's two claims are each true — it is the
+  non-monotonicity that goes unsaid, in the paragraph a reader uses to pick an
+  overlap. found 2026-10-06
+
+- [low] 10 — `_best_covering_chunk` returns the first chunk reaching maximum
+  coverage in index order, which under overlap need not be the relevant chunk
+  the ranking surfaced first, so `best_chunk_rank` and `1 / rr_at_k` can name
+  two different chunks for the ov-* configs. nothing published reads
+  `best_chunk_rank` for an overlap config — the autopsy prints it only for
+  fixed-40/80/160, where no answer has two relevant chunks — and
+  `test_whole_answers_rank_exactly_where_the_reciprocal_rank_says` pins the
+  agreement at fixed-80 only, so the gap is untested rather than wrong. found
+  2026-10-06
+
 - [fixed 2026-10-06] 05 — the hostile arrival order's peak was priced against
   an order the sentence did not name. measurement 6 prints count cap 8's byte
   high-water under six arrival orders — five seeded (as generated 49061,
@@ -4471,7 +4545,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 13-ann-hnsw | 2026-09-06 |
 | 12-groundedness-scoring | 2026-09-06 |
 | 11-prompt-caching | 2026-09-05 |
-| 10-chunking-strategies | 2026-09-04 |
+| 10-chunking-strategies | 2026-10-06 |
 | 09-concurrency | 2026-09-05 |
 | 08-agent-tool-loop | 2026-09-05 |
 | 07-near-duplicates | 2026-10-05 |
