@@ -188,6 +188,90 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-06] 09 — the cancellation section credited the ugly success
+  tail to cancel mode, and the mode's own zero-delay row moves p95 by one
+  millisecond. the p95 paragraph read "in abandon mode p95 is 109ms because the
+  only successes that exist are first attempts served fast" and then "in cancel
+  mode the queue is short enough that a late retry sometimes gets served inside
+  its timeout, so successes now include multi-attempt slogs at 6.5-12s p95.
+  more tasks succeed and the successful tail gets much uglier". the control is
+  already in the same table: immediate-x4 is the x4 policy with zero backoff
+  delay, and in cancel mode it prints 110ms against abandon's 109ms, so the
+  quoted range is three of the four x4 schedules and the fourth sits 1ms from
+  where it started. the decomposition splits cleanly in two. first, whether p95
+  can see a slog at all is the share: cancellation does create multi-attempt
+  successes in all four x4 policies (18, 32, 120, 88 of them, 3.4%, 5.9%, 19.1%
+  and 14.8% of each row's successes), but the 95th percentile only reaches them
+  past 5%, so immediate-x4's 18 slogs sit at 4955ms p95 invisible behind the
+  cut while expo-x4 at 19.1% prints 12013ms. second, how slow a slog runs is
+  the retry schedule's own ceiling, five timeouts plus its cumulative delay —
+  5.0s for immediate-x4, 7.0s for fixed-500 (5x1000 + 4x500), 12.5s for expo-x4
+  and jitter-x4 (5x1000 + 500+1000+2000+4000) — and the measured slowest
+  multi-attempt success lands just under each one (4964, 6999, 12499, 11669ms).
+  so 6.5-12s is fixed-500's and expo's schedules, and immediate-x4's own 5.0s
+  ceiling sits below the whole published range. the abandon half of the sentence
+  is also not universal: the four x4 abandon rows do carry exactly zero
+  multi-attempt successes, which is what makes their 109ms right, but
+  jitter+budget10 abandon already lands 4 of them and prints 257ms. same shape
+  as 03's rrf, 06's burst, 07's s-curve, 08's sweep cap and 10's packing — an
+  effect credited to one mechanism where a control separates the two, and this
+  time the control was already printed one column over. fix: `summarize` gains
+  `multiAttemptOk`, `multiAttemptOkPct` and `p95MultiAttemptLatencyMs`, cancel
+  experiment 1 prints the last two as `multi ok` and `p95 multi`, and the
+  paragraph quotes the columns and names the ceiling arithmetic; the open
+  question that restated the claim ("cancel mode's successes run to 12s p95")
+  now names expo-x4's 12.5s ceiling. new `tests/cancel-tail-control.test.ts`,
+  14 tests: three pin the measurement (the fields agree with the records for
+  all twelve rows, exactly zero on every x4 abandon row, the four cancel
+  counts), five pin the control and the decomposition (the 109/110 split, the
+  3.4% share under the 5% cut with its 4955ms p95, p95 moving iff the share
+  clears 5% across all four, the per-schedule ceiling bound, and the budget
+  row refuting a uniform 109ms), two hold the entry point and the readme block
+  character for character, and four hold the prose off whitespace-normalized
+  text so a line wrap cannot make them pass (23's trap), with the `## fixes`
+  section exempt since it quotes the retired sentence and one test asserting
+  the quote is still there. 11 of the 14 fail on the old code. no measured
+  number moved — `npm start`, `start:flaky`, `start:storm` and
+  `start:storm-breaker` print byte-identical output to their pre-fix runs,
+  `start:cancel` differs by exactly the two new columns, and every
+  pre-existing column of experiment 1 is character for character what it was.
+  the revert check splits cleanly in a fresh clone: reverting src/ alone fails
+  the 8 measurement and output tests with all 157 others green, reverting
+  README.md alone fails exactly the 4 block and prose tests. 151 tests → 165.
+  the root index row quotes the cancellation bill and queue depths, not the
+  p95 tail, so nothing to update there, and no other project imports 09's
+  storm summary or credits a latency tail to a mode, so nothing to port.
+  found and fixed 2026-10-06
+
+- [medium] 09 — the flaky study's one-by-one floor is conditional and the
+  column it explains is not. "once the first call fails it pays its fixed floor
+  of 32 singleton calls no matter how mild the flake was, which is why its
+  calls column sits near 33 wherever the first call usually fails" reads an
+  unconditional mean as if it were the conditional floor. the column is
+  1 + p(first call fails) x (32 + expected singleton retries), so it tracks the
+  first-fail rate rather than sitting anywhere: at 1 flaky item flaking 0.7 the
+  first call fails 70.0% of the time and the column reads 24.5, which is
+  1 + 0.700 x (32 + 1.533) to the digit, nowhere near 33. and above it the
+  retries carry it past 33 instead — 38.6 at 4 items flaking 0.7 and 42.9 at
+  4 x 0.9, where 4 items each spend an expected 2.439 extra singleton attempts.
+  only two of the ten cells land near 33 (32.1 at 1 x 0.9, 33.5 at 4 x 0.5),
+  and they do it by the first-fail rate being near 1 while the retry load is
+  still small. the mechanism the sentence argues is right — the floor is real
+  and it is what bisect escapes — but the published column is not the floor.
+  found 2026-10-06
+
+- [low] 09 — `SimulatedApi.call` short-circuits the flake draws for a poisoned
+  call. the rejection test is `items.some((item) => item.poisoned) ||
+  this.drawFlakes(items)`, so a call carrying any poisoned item never runs
+  `drawFlakes`, and `drawFlakes`'s own docstring promises the opposite: "one
+  draw per flaky item in call order, never short-circuited, so the flake rng
+  advances by exactly the call's flaky-item count no matter the outcomes". the
+  promise is what keeps the flaky study's trials paired across strategies, and
+  it only breaks for an item that is both poisoned and flaky, which nothing
+  constructs — `makeFlakyItems` sets `poisoned: false` on every item and
+  `makeItems` sets no `flakeRate` — so no published number is exposed. found
+  2026-10-06
+
 - [fixed 2026-10-06] 08 — the signature-guard limit sweep credited its
   flattening stubborn-model-calls column to the feedback cap, and the cap
   accounts for 1 of the 3 model calls at the row that flattens. the readme read
@@ -4606,13 +4690,49 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 12-groundedness-scoring | 2026-09-06 |
 | 11-prompt-caching | 2026-09-05 |
 | 10-chunking-strategies | 2026-10-06 |
-| 09-concurrency | 2026-09-05 |
+| 09-concurrency | 2026-10-06 |
 | 08-agent-tool-loop | 2026-10-06 |
 | 07-near-duplicates | 2026-10-05 |
 | 05-token-streaming | 2026-10-06 |
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+09 was last reviewed on 2026-09-05 and the catch this time sits one column
+away from the two things that review added. all 151 committed tests passed
+before the fix, typecheck is clean, and all five entry points are
+byte-identical across three local runs and again from a fresh clone —
+determinism is structural, every wait goes through 06's `VirtualClock` and
+the three rng streams (api latency, flake draws, backoff jitter) are each
+seeded off the run seed, so a run is a pure function of it. every one of the
+21 fenced blocks in the readme matches what the entry points print today,
+line for line, checked mechanically before and after. the shared mechanisms
+are real reuse rather than reimplementation (06's clock, percentile, backoff
+policies and circuit breaker, 05's rng), nothing else in the repo imports
+09's storm summary, and no other project credits a latency tail to a mode,
+so there is no drift to reconcile. the flaky study's own headline answer was
+checked rather than assumed: the published token crossover at 4 items flaking
+90%, 1.03, is real and not a sampling artefact — paired on the shared trial
+seeds the bootstrap ratio interval is [1.015, 1.052] at 250 trials and
+[1.031, 1.040] at 4000, and the mean paired difference excludes zero, so the
+one cell the project points at as the crossover holds.
+
+what was wrong is the attribution again, and this time the control was
+already on the page. the p95 paragraph had the mechanism right (a short
+queue lets a late retry get served inside its timeout) and then put the
+mode's name on a number range the mode does not set: 6.5-12s is fixed-500's
+and expo's own schedules, five timeouts plus their cumulative backoff, and
+immediate-x4 — the x4 policy with zero delay, sitting in the same table —
+moves from 109ms to 110ms. the rule it adds is narrower than the usual one
+because no new instrument was needed to see it: when a claim quotes a range
+across a group of rows, the row that would falsify it is usually the
+group's own zero of whatever the claim credits, and here that row was
+printed four columns to the left of the number being explained. the
+corollary is about percentiles specifically — a p95 is blind to anything
+under 5% of its population, so a tail can appear, be slow, and leave the
+column untouched, which is exactly what immediate-x4 does with 18 successes
+at 4955ms. a share and a quantile are two measurements and the paragraph was
+reading one as the other.
 
 08 was last reviewed on 2026-09-05 and the catch this time is in the paragraph
 that previous review wrote. all 161 committed tests passed before the fix,
