@@ -82,7 +82,7 @@ that, from scratch, and measures each one.
 
 ```
 npm ci
-npm test        # 141 tests
+npm test        # 147 tests
 npm start       # the seven measurements below
 npm run typecheck
 ```
@@ -224,8 +224,8 @@ orders, steady producer, consumer takes one chunk per tick:
 
 The count cap's memory is ordering luck: the five seeded orders sit between
 35570 and 59971 bytes, and the adversarial order (all huge chunks first)
-holds 221864, 4.5x the friendliest seed, because eight slots filled with
-32KB chunks cost what eight 32KB chunks cost. Its only real promise is
+holds 221864, 6.2x the friendliest of those five, because eight slots filled
+with 32KB chunks cost what eight 32KB chunks cost. Its only real promise is
 8 x 32706 = 261648 bytes. The byte cap holds exactly 65536 under every
 ordering, including the hostile one; a budget in the unit memory is spent
 in cannot be gamed by arrival order.
@@ -378,6 +378,12 @@ of the well-formed fixture parse byte-identical to the uncapped reference.
   properties of admission alone.
 
 ## fixes
+
+- 2026-10-06 — measurement 6 priced the hostile arrival order at "4.5x the
+  friendliest seed" and 4.5x is 221864/49061 — the as-generated order, fourth
+  friendliest of the five. the friendliest is shuffle 3 at 35570, so against
+  the order the sentence names it is 6.2x. the ratio only — every peak in the
+  table was already right and no measured number moves, 141 tests → 147
 
 - 2026-09-04 — measurement 5 published a `speedup` column, a ratio of two
   wall clocks, at two significant figures — 662.5x at 64KB, and the root
