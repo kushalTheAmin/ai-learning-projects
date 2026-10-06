@@ -72,10 +72,22 @@ what the table says:
   scores zero without the ranking ever being read. ask the ranking anyway and it
   did fine: take the chunk holding the biggest piece of each split answer and
   14 of the 17 land in the top 5 anyway, 7 of them at rank 1.
-- sentence packing costs nothing and fixes all of it. same index size (5391
+- sentence packing fixes all of it and is not free. same index size (5391
   words, no duplication), 0% splits at every budget, and sentence-80 beats
   fixed-80 on every quality column: hit@5 0.850 vs 0.500, mrr@10 0.698 vs
-  0.445, with a smaller context bill (333.7 vs 388.2 words).
+  0.445, with a smaller context bill (333.7 vs 388.2 words). but split the 40
+  queries by whether fixed-80 cut the answer and the aggregate +0.253 mrr is
+  +0.305 recovered on the answers fixed-80 cut, -0.052 given back on the 23 it
+  kept whole. on those 23 there is no boundary damage left to repair and
+  packing still drops mrr@10 from 0.774 to 0.683 — it redraws every chunk, not
+  only the ones that were cutting an answer, so the chunk holding the answer
+  shrinks 80.0 to 70.9 words and loses query terms the arbitrary window
+  happened to span. q11 is the sharpest: the answer sits in
+  rate-limit-design#2 either way, rank 1 under fixed-80 and out of the top 10
+  under sentence-80, because the words the question asks with land in the next
+  sentence group. the drag runs -0.004 at budget 40, -0.090 at 80 and -0.036
+  at 160, so it is real everywhere and still only a sixth of what packing
+  wins — the ordering stands, the "free" part doesnt.
 - overlap is the expensive version of the same fix. fixed-80/ov-20 recovers 15
   of the 17 splits for +30.4% index size, ov-40 gets 16 of 17 for +89.0%. and
   overlap moves every boundary rather than only adding windows: the stride
@@ -101,6 +113,15 @@ what the table says:
   mode belongs to 03s dense retrieval story, not to chunking.
 
 ## fixes
+
+- 2026-10-06 — "sentence packing costs nothing and fixes all of it" was read
+  off three columns that are true and one that was never measured: on the 23
+  answers fixed-80 already kept whole, where there is no split left to fix,
+  packing drops mrr@10 0.774 to 0.683 and three answers fall out of the top 10
+  entirely. the entry point now prints the split by whether fixed-80 cut the
+  answer, so the headline +0.253 reads as +0.305 recovered minus 0.052 given
+  back, and the bullet prices both halves. no measured number moved — the
+  table is byte-identical, the decomposition is new output.
 
 - 2026-09-04 — "the retriever never got a chunk worth ranking" was never
   measured, and the run refutes it: a split answer scores zero because its

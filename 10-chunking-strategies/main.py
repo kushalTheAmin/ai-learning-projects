@@ -7,8 +7,8 @@ containment. Deterministic: no randomness anywhere, same output every run.
 
 from pathlib import Path
 
-from chunking.chunkers import fixed_chunks, sentence_chunks
-from chunking.corpus import load_docs, load_queries, validate
+from chunking.chunkers import fixed_chunks, sentence_chunks, word_count
+from chunking.corpus import Doc, load_docs, load_queries, validate
 from chunking.evaluate import HIT_K, ConfigResult, evaluate_config
 from chunking.retrieval import mean
 from chunking.sentences import split_sentences
@@ -92,6 +92,55 @@ def print_split_autopsy(results: dict[str, ConfigResult]) -> None:
         )
 
 
+def print_packing_cost(results: dict[str, ConfigResult], docs: list[Doc]) -> None:
+    """What sentence packing does to the answers fixed chunking kept whole.
+
+    Packing redraws every chunk, not only the ones that were cutting an
+    answer, so its aggregate win is a recovery on the cut answers netted
+    against a drag on the rest. Splitting the two is the control the
+    "costs nothing" reading never had.
+    """
+    print("\n== is sentence packing free? ==")
+    for size in (40, 80, 160):
+        fixed, packed = results[f"fixed-{size}"], results[f"sentence-{size}"]
+        by_fixed = {r.query.id: r for r in fixed.per_query}
+        by_packed = {r.query.id: r for r in packed.per_query}
+        whole = [q for q, r in by_fixed.items() if not r.answer_split]
+        cut = [q for q, r in by_fixed.items() if r.answer_split]
+        n = len(fixed.per_query)
+        fixed_mrr = mean([by_fixed[q].rr_at_k for q in whole])
+        packed_mrr = mean([by_packed[q].rr_at_k for q in whole])
+        cut_mrr = mean([by_packed[q].rr_at_k for q in cut])
+        print(
+            f"fixed-{size} kept {len(whole)}/{n} answers whole: "
+            f"mrr@10 {fixed_mrr:.3f} -> {packed_mrr:.3f} under sentence-{size} "
+            f"({packed_mrr - fixed_mrr:+.3f}); on the {len(cut)} it cut, "
+            f"sentence-{size} scores {cut_mrr:.3f}"
+        )
+        print(
+            f"  overall {fixed.mrr_at_k:.3f} -> {packed.mrr_at_k:.3f} = "
+            f"{len(cut) * cut_mrr / n:+.3f} recovered on the cut answers, "
+            f"{len(whole) * (packed_mrr - fixed_mrr) / n:+.3f} given back on the whole ones"
+        )
+        # no overlap in either strategy, so a whole answer has exactly one
+        # relevant chunk and "the chunk holding the answer" is unambiguous
+        words = {}
+        for doc in docs:
+            for c in fixed_chunks(doc.id, doc.text, size=size):
+                words["f" + c.id] = word_count(c.text)
+            for c in sentence_chunks(doc.id, doc.text, budget=size):
+                words["s" + c.id] = word_count(c.text)
+        print(
+            "  the relevant chunk shrinks "
+            f"{mean([float(words['f' + by_fixed[q].relevant_chunk_ids[0]]) for q in whole]):.1f} -> "
+            f"{mean([float(words['s' + by_packed[q].relevant_chunk_ids[0]]) for q in whole]):.1f} "
+            f"words on those {len(whole)}, "
+            f"{sum(1 for q in whole if by_packed[q].rr_at_k < by_fixed[q].rr_at_k)} rank worse, "
+            f"{sum(1 for q in whole if by_fixed[q].rr_at_k > 0 and by_packed[q].rr_at_k == 0.0)} "
+            "fall out of the top 10"
+        )
+
+
 def print_category_split(results: dict[str, ConfigResult]) -> None:
     print("\n== keyword vs paraphrase (mrr@10) ==")
     for name in ("fixed-80", "fixed-80/ov-20", "sentence-80"):
@@ -120,6 +169,7 @@ def main() -> None:
 
     print_table(results)
     print_split_autopsy(by_name)
+    print_packing_cost(by_name, docs)
     print_category_split(by_name)
 
 
