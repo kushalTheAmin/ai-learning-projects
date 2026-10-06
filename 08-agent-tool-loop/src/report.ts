@@ -181,6 +181,19 @@ export function renderDriftReport(report: DriftReport): string {
     );
   }
   lines.push("");
+  lines.push(`cap control on the sweep (feedback cap lifted so only the guard stops a task):`);
+  lines.push(`limit  published  cap-lifted  cap-accounts-for  uncapped trip rounds`);
+  for (const row of report.sweep) {
+    const trips = Object.entries(row.shapeTripRounds)
+      .map(([id, round]) => `${id}=${round}`)
+      .join(", ");
+    lines.push(
+      `${pad(row.limit, 5)}${pad(row.stubbornModelCalls, 11)}` +
+        `${pad(row.stubbornModelCallsUncapped, 12)}` +
+        `${pad(row.stubbornModelCallsUncapped - row.stubbornModelCalls, 18)}  ${trips}`,
+    );
+  }
+  lines.push("");
   const o = report.originalSuite;
   lines.push(
     `original ${o.tasks}-task suite, same seeds: guarded ${o.guardedCompleted}/${o.tasks}, ` +

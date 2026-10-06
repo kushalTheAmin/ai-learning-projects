@@ -160,7 +160,7 @@ describe("the readme says what the run says about rotation", () => {
 
   it("records that raising the limit to 4 is what actually loses the rotation", () => {
     const prose = readmeLiveProse();
-    expect(prose).toContain("at limit 4 rotate-3's trip round moves to 10");
+    expect(prose).toContain("at limit 4 rotate-3 trips at emission 8, past the cap at 7");
     // the saturation is checkable off the published sweep column
     expect(prose).toContain("+9, +6, +4, +4");
   });

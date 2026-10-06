@@ -172,13 +172,40 @@ at limit 4 the signature guard spares every corrector in the suite (the slow
 correctors emit 3 same-signature calls, never 4) and still caps the stubborn
 drifters at 30 model calls against feedback's 42, 44.2% of the stubborn tokens
 saved with zero completion loss. what waiting costs is the longest rotation:
-at limit 4 rotate-3's trip round moves to 10, past the cap, so it dies
-feedback-exhausted at 7 and the guard buys nothing on it at all. that
-saturation is already visible in the sweep's own stubborn-model-calls column -
-it steps +9, +6, +4, +4 instead of +6 a row, because the two shape drifters
-stop moving once they hit the cap. the sweep says the guard key decides what
-you can see and the limit decides how long you wait, and on this suite waiting
-one extra round buys back every false positive and gives up the rotation.
+at limit 4 rotate-3 trips at emission 8, past the cap at 7, so it dies
+feedback-exhausted and the guard buys nothing on it at all.
+
+8, not the 10 the (l-1)*c+1 rule predicts - and the gap is the suite, not the
+rule. each drift list carries 6 authored variants and then repeats its last
+one, so from the 7th emission every drifter is a fixed point and the guard
+counts it like any verbatim repeat. the rule holds while the rotation is still
+rotating, which runs out at emission 7, exactly where the cap sits - so limit 3
+is the last row the arithmetic describes on its own. alternate goes the same
+way: 3, 5, 7 match (l-1)*2+1, then 8 and 9 where it predicts 9 and 11.
+
+that clamp, not the cap, is also most of what flattens the sweep's
+stubborn-model-calls column. re-running the sweep with the cap lifted, so only
+the guard can stop a task, is the control:
+
+```
+cap control on the sweep (feedback cap lifted so only the guard stops a task):
+limit  published  cap-lifted  cap-accounts-for  uncapped trip rounds
+    2         15          15                 0  shape-drift-alternate=3, shape-drift-rotate3=4
+    3         24          24                 0  shape-drift-alternate=5, shape-drift-rotate3=7
+    4         30          31                 1  shape-drift-alternate=7, shape-drift-rotate3=8
+    5         34          37                 3  shape-drift-alternate=8, shape-drift-rotate3=9
+    6         38          43                 5  shape-drift-alternate=9, shape-drift-rotate3=10
+```
+
+the published column steps +9, +6, +4, +4 and the cap-lifted one steps
++9, +7, +6, +6, so the counterfactual was never a flat +6 a row. one model call
+per stubborn task per step gives +6, but that only holds for the 4 drifters
+whose signature cycle is 1 - a c-rotating drifter adds c per step while it is
+still rotating, which is the same rule again. at the 3 to 4 row, where the
+published step falls from +9 to +6, the cap accounts for 1 model call and the
+clamp for the other 2. the sweep says the guard key decides what you can see
+and the limit decides how long you wait, and on this suite waiting one extra
+round buys back every false positive and gives up the rotation.
 
 the check that had to pass before any of this counts: on the original 25 tasks,
 same seeds, the signature guard completes the same 21/25 as the exact guard and
@@ -371,6 +398,15 @@ unions over message types, and async loop control, and the strict compiler
 holds the message-passing honest end to end.
 
 ## fixes
+
+- 2026-10-06 — the limit sweep blamed the feedback cap for its flattening
+  stubborn-model-calls column ("+9, +6, +4, +4 instead of +6 a row") and said
+  rotate-3's "trip round moves to 10" at limit 4, read off (l-1)*c+1 rather
+  than measured. the cap-lifted control says the column would step
+  +9, +7, +6, +6 and rotate-3 trips at 8 - every drift list clamps to its last
+  variant after 6 rounds, so the rotation ends at emission 7 and the rule ends
+  with it. at limit 4 the cap accounts for 1 model call and the clamp for 2.
+  the entry point prints the control now; no published number moved
 
 - 2026-09-05 — the drift section said rotating three broken shapes "walks past
   the guard entirely and dies in the feedback cap at 7", and the open questions

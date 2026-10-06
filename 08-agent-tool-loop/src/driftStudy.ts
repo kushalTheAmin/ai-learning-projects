@@ -61,6 +61,17 @@ export interface SweepRow {
   stubbornModelCalls: number;
   stubbornTokens: number;
   totalTokens: number;
+  /**
+   * The same limit with the feedback cap lifted, so only the guard can stop a
+   * task. The control that separates what the cap takes off the published
+   * column from what the authored drift lists take off it by running out:
+   * each carries 6 variants and then repeats its last one, so from the 7th
+   * emission every rotation is a fixed point and trips far sooner than
+   * (limit - 1) * cycle + 1 predicts.
+   */
+  stubbornModelCallsUncapped: number;
+  /** Uncapped trip round of each shape drifter at this limit, by task id. */
+  shapeTripRounds: Record<string, number>;
 }
 
 export interface OriginalSuiteCheck {
@@ -103,6 +114,22 @@ function policyByName(name: string): LoopPolicy {
  * latency draws on identical tasks.
  */
 const DRIFT_POLICY_INDEX_BASE = 100;
+
+/** Disjoint again for the cap control, which runs the same limits twice over. */
+const DRIFT_CONTROL_INDEX_BASE = 200;
+
+/**
+ * The same policy with the feedback cap lifted to the model-call budget, so
+ * the guard is the only thing that can end a task. A control, never a
+ * published policy: it says what the guard alone would have spent.
+ */
+export function liftFeedbackCap(policy: LoopPolicy): LoopPolicy {
+  return {
+    ...policy,
+    name: `${policy.name}-uncapped`,
+    maxFeedbackPerIntent: policy.maxModelCalls,
+  };
+}
 
 async function runSuite(
   tasks: TaskSpec[],
@@ -192,6 +219,19 @@ export async function runDriftStudy(inputs: DriftStudyInputs): Promise<DriftRepo
         inputs,
         clock,
       );
+      const uncapped = await runSuite(
+        inputs.tasks,
+        liftFeedbackCap(policy),
+        DRIFT_CONTROL_INDEX_BASE + limit,
+        inputs,
+        clock,
+      );
+      const shapeTripRounds: Record<string, number> = {};
+      inputs.tasks.forEach((task, i) => {
+        if (driftCategory(task) === "shape-drift") {
+          shapeTripRounds[task.id] = uncapped[i]!.modelCalls;
+        }
+      });
       sweep.push({
         limit,
         completed: outcomes.filter((o) => o.ok).length,
@@ -199,6 +239,8 @@ export async function runDriftStudy(inputs: DriftStudyInputs): Promise<DriftRepo
         stubbornModelCalls: stubbornSum(outcomes, (o) => o.modelCalls),
         stubbornTokens: stubbornSum(outcomes, (o) => o.tokensIn + o.tokensOut),
         totalTokens: outcomes.reduce((acc, o) => acc + o.tokensIn + o.tokensOut, 0),
+        stubbornModelCallsUncapped: stubbornSum(uncapped, (o) => o.modelCalls),
+        shapeTripRounds,
       });
     }
 
