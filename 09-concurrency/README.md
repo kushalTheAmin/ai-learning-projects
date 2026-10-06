@@ -481,19 +481,19 @@ npm run start:cancel
 ### 1. the same 15s dip, abandon vs cancel
 
 ```
-         policy     mode     ok   amp  wasted  cancelled  queue max      p95  recovery  drained  $/1k ok
-       no-retry  abandon  66.9%  1.00   33.1%       0.0%        259    110ms     15.0s    90.1s    $2.73
-       no-retry   cancel  84.4%  1.00    5.2%      10.4%         25    110ms      0.0s    90.1s    $1.94
-   immediate-x4  abandon  22.6%  4.10   94.5%       0.0%       6261    109ms     NEVER   250.1s   $33.21
-   immediate-x4   cancel  23.4%  4.10   26.8%      67.5%        125    110ms     NEVER    94.7s   $10.43
-   fixed-500-x4  abandon  22.6%  4.10   94.5%       0.0%       6187    109ms     NEVER   250.1s   $33.21
-   fixed-500-x4   cancel  24.0%  4.10   27.5%      66.7%        125   6591ms     NEVER    96.5s   $10.41
-        expo-x4  abandon  22.6%  4.10   94.5%       0.0%       6020    109ms     NEVER   250.1s   $33.21
-        expo-x4   cancel  27.9%  4.10   28.3%      64.9%        127  12013ms     NEVER   101.6s    $9.44
-      jitter-x4  abandon  22.6%  4.10   94.5%       0.0%       6136    109ms     NEVER   250.1s   $33.21
-      jitter-x4   cancel  26.5%  4.09   27.3%      66.3%        144   9322ms     NEVER    99.4s    $9.52
-jitter+budget10  abandon  60.1%  1.04   42.4%       0.0%        303    257ms     21.3s    90.1s    $3.18
-jitter+budget10   cancel  84.5%  1.02    5.1%      12.0%         36    110ms      0.0s    90.1s    $1.94
+         policy     mode     ok   amp  wasted  cancelled  queue max      p95  multi ok  p95 multi  recovery  drained  $/1k ok
+       no-retry  abandon  66.9%  1.00   33.1%       0.0%        259    110ms      0.0%          -     15.0s    90.1s    $2.73
+       no-retry   cancel  84.4%  1.00    5.2%      10.4%         25    110ms      0.0%          -      0.0s    90.1s    $1.94
+   immediate-x4  abandon  22.6%  4.10   94.5%       0.0%       6261    109ms      0.0%          -     NEVER   250.1s   $33.21
+   immediate-x4   cancel  23.4%  4.10   26.8%      67.5%        125    110ms      3.4%     4955ms     NEVER    94.7s   $10.43
+   fixed-500-x4  abandon  22.6%  4.10   94.5%       0.0%       6187    109ms      0.0%          -     NEVER   250.1s   $33.21
+   fixed-500-x4   cancel  24.0%  4.10   27.5%      66.7%        125   6591ms      5.9%     6971ms     NEVER    96.5s   $10.41
+        expo-x4  abandon  22.6%  4.10   94.5%       0.0%       6020    109ms      0.0%          -     NEVER   250.1s   $33.21
+        expo-x4   cancel  27.9%  4.10   28.3%      64.9%        127  12013ms     19.1%    12406ms     NEVER   101.6s    $9.44
+      jitter-x4  abandon  22.6%  4.10   94.5%       0.0%       6136    109ms      0.0%          -     NEVER   250.1s   $33.21
+      jitter-x4   cancel  26.5%  4.09   27.3%      66.3%        144   9322ms     14.8%    10683ms     NEVER    99.4s    $9.52
+jitter+budget10  abandon  60.1%  1.04   42.4%       0.0%        303    257ms      0.3%     5562ms     21.3s    90.1s    $3.18
+jitter+budget10   cancel  84.5%  1.02    5.1%      12.0%         36    110ms      0.2%     3626ms      0.0s    90.1s    $1.94
 ```
 
 Two different stories in one table, and telling them apart is the point.
@@ -552,13 +552,25 @@ Wasted work collapses from 94.5% to about 27%, the queue from ~6200 deep to
 drain time from 250.1s to under 102s, and cost per thousand completions
 from $33.21 to about $10. Same outage, one third the bill.
 
-The p95 column has a story too. In abandon mode p95 is 109ms because the
-only successes that exist are first attempts served fast; anything slower
-timed out into the void. In cancel mode the queue is short enough that a
-late retry sometimes gets served inside its timeout, so successes now
-include multi-attempt slogs at 6.5-12s p95. More tasks succeed and the
-successful tail gets much uglier, which is exactly the trade a caller with
-a per-attempt timeout and no per-task deadline signed up for.
+The p95 column has a story too, and the `multi ok` and `p95 multi` columns
+say whose it is. In abandon mode all four x4 rows carry zero multi-attempt
+successes — every success is a first attempt served fast, anything slower
+timed out into the void, so p95 is 109ms and nothing else can be in there.
+Cancel mode creates them in all four: a late retry meets a queue short
+enough to get served inside its own timeout. But that is the whole of what
+cancellation decides. How slow a slog runs is the retry schedule's own
+ceiling, five timeouts plus its cumulative delay — 5.0s for immediate-x4,
+7.0s for fixed-500, 12.5s for expo-x4 — so the 6.5-12s the p95 column shows
+is those last two schedules, not something the mode set. And whether p95
+sees a slog at all is the share: immediate-x4 cancel holds 3.4% of its
+successes there, under the 5% the 95th percentile can reach, so it prints
+110ms against abandon's 109ms while 18 slogs sit at 4955ms p95 just behind
+the cut — expo-x4 at 19.1% prints 12013ms. Abandon mode isnt uniformly
+109ms either, jitter+budget10 already lands 4 of them and prints 257ms. So
+more tasks succeed and the successful tail gets much uglier only where the
+retries are spaced out, which is still the trade a caller with a
+per-attempt timeout and no per-task deadline signed up for — just priced
+per retry schedule, not per mode.
 
 ### 2. the capacity cliff with cancellation
 
@@ -757,6 +769,12 @@ extension's backoff policies come from 06-rate-limiting, the seeded rng from
 
 ## fixes
 
+- 2026-10-06 — the cancellation section read the ugly success tail as cancel
+  mode's, "multi-attempt slogs at 6.5-12s p95", and immediate-x4 cancel
+  prints 110ms against abandon's 109ms. experiment 1 prints `multi ok` and
+  `p95 multi` now: cancel creates multi-attempt successes in all four x4
+  policies, p95 only sees them past 5% of successes, and the slog ceiling is
+  the backoff's own — 5.0s immediate, 12.5s expo. no measured number moved
 - 2026-09-05 — the cancellation section read the post-dip backlog as "259
   requests in the FIFO, two thirds of them ghosts whose clients gave up" —
   two thirds was the ok column next to it, not a ghost share. the api logs
@@ -830,8 +848,9 @@ extension's backoff policies come from 06-rate-limiting, the seeded rng from
 - the storm's timeout is fixed per attempt; a per-task deadline spent across
   attempts, or a timeout tracking observed p99, would fail differently, and
   an adaptive timeout under overload risks chasing the queue upward. The
-  cancellation numbers sharpen this: cancel mode's successes run to 12s p95
-  across attempts, a tail only a per-task deadline would cap
+  cancellation numbers sharpen this: cancel mode's slowest successes run out
+  to expo-x4's 12.5s ceiling across attempts, a tail only a per-task
+  deadline would cap
 - cancellation here is free and instant; parameterizing an abort latency
   (the abort races admission over a network hop) would draw the curve from
   these upper-bound numbers down to abandon mode, and where real stacks sit

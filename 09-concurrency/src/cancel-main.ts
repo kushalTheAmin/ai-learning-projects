@@ -7,6 +7,12 @@
  * for a slot; an attempt already in service completes as an orphan either
  * way. The question: how much of the metastable storm survives when only
  * in-service work is unkillable?
+ *
+ * Experiment 1 also prints the success tail as two columns rather than one:
+ * `multi ok` is the share of successes that needed more than one attempt and
+ * `p95 multi` is their own p95, because the `p95` column cannot see them
+ * until they clear 5% of the successes, and how slow they run is the retry
+ * schedule's cumulative delay rather than anything the mode decides.
  */
 import type { ApiOptions } from "./api.js";
 import {
@@ -107,6 +113,8 @@ async function main(): Promise<void> {
         pct(s.cancelledPct),
         String(s.maxQueueDepth),
         ms(s.p95LatencyMs),
+        pct(s.multiAttemptOkPct),
+        ms(s.p95MultiAttemptLatencyMs),
         lag === undefined ? "NEVER" : seconds(lag),
         seconds(s.drainedAtMs),
         s.usdPer1kDone === undefined ? "-" : `$${s.usdPer1kDone.toFixed(2)}`,
@@ -150,6 +158,8 @@ async function main(): Promise<void> {
         "cancelled",
         "queue max",
         "p95",
+        "multi ok",
+        "p95 multi",
         "recovery",
         "drained",
         "$/1k ok",

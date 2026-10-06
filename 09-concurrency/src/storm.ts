@@ -357,6 +357,16 @@ export interface StormSummary {
   breakerStats?: BreakerRunStats;
   p50LatencyMs?: number;
   p95LatencyMs?: number;
+  /** Successes that needed more than one attempt. */
+  multiAttemptOk: number;
+  /** Those successes as a percentage of all successes. */
+  multiAttemptOkPct: number;
+  /**
+   * p95 of the multi-attempt successes' own latencies; absent when there are
+   * none. Separate from `p95LatencyMs`, which cannot see them until they are
+   * more than 5% of the successes.
+   */
+  p95MultiAttemptLatencyMs?: number;
   costUsd: number;
   usdPer1kDone?: number;
   drainedAtMs: number;
@@ -370,6 +380,13 @@ export function summarize(result: StormResult): StormSummary {
   const firstAttempts = result.records.filter((r) => r.attempts >= 1).length;
   const latencies = result.records
     .filter((r) => r.ok)
+    .map((r) => r.latencyMs!)
+    .sort((a, b) => a - b);
+  // A success that took more than one attempt waited out every timeout and
+  // backoff delay before the attempt that landed, so its latency is a
+  // different population from a first attempt served fast.
+  const multiAttemptLatencies = result.records
+    .filter((r) => r.ok && r.attempts > 1)
     .map((r) => r.latencyMs!)
     .sort((a, b) => a - b);
   return {
@@ -395,6 +412,13 @@ export function summarize(result: StormResult): StormSummary {
     breakerStats: result.breakerStats,
     p50LatencyMs: latencies.length === 0 ? undefined : percentile(latencies, 0.5),
     p95LatencyMs: latencies.length === 0 ? undefined : percentile(latencies, 0.95),
+    multiAttemptOk: multiAttemptLatencies.length,
+    multiAttemptOkPct:
+      succeeded === 0 ? 0 : (multiAttemptLatencies.length / succeeded) * 100,
+    p95MultiAttemptLatencyMs:
+      multiAttemptLatencies.length === 0
+        ? undefined
+        : percentile(multiAttemptLatencies, 0.95),
     costUsd: result.costUsd,
     usdPer1kDone: succeeded === 0 ? undefined : (result.costUsd / succeeded) * 1000,
     drainedAtMs: result.drainedAtMs,
