@@ -188,6 +188,75 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-06] 05 — the hostile arrival order's peak was priced against
+  an order the sentence did not name. measurement 6 prints count cap 8's byte
+  high-water under six arrival orders — five seeded (as generated 49061,
+  shuffle 1 59971, shuffle 2 54583, shuffle 3 35570, shuffle 4 35750) and one
+  adversarial (huge first 221864) — then read the spread off as "the five seeded
+  orders sit between 35570 and 59971 bytes, and the adversarial order ... holds
+  221864, 4.5x the friendliest seed". 4.5x is 221864/49061, the as-generated
+  order, which is the fourth friendliest of those five; the friendliest is
+  shuffle 3 at 35570 and the hostile order is 6.2x that. unlike 03's rrf or 06's
+  burst this is not a mechanism misattributed — every peak in the table is
+  right, the sentence just divided by a row it did not name, and it understated
+  its own point, since ordering luck spans 6.2x and not 4.5x. so nothing
+  downstream moved: the root readme row and this ledger's own 05 byte-budget row
+  both state the span 35570-59971 against the 221864 hostile peak and quote no
+  ratio, and neither needed touching. fix: the sentence prices the hostile order
+  at 6.2x the friendliest of those five, and
+  `tests/countCapOrderingSpread.test.ts` pins all six peaks to a real replay,
+  pins the friendliest at shuffle 3 rather than at as-generated, and holds the
+  readme to that basis. no measured number moves — every exact figure the entry
+  point prints is identical across three runs and again from a fresh clone,
+  141 tests to 147
+
+- [medium] 05 — the one wall clock measurement 5 still states as a fact is the
+  one no run reproduces. the section retired its whole speedup column because
+  two significant figures of wall clock move further than the figure does, and
+  the table above it says so in as many words ("those four are one run and the
+  ratio between the two time columns is not a property of the code") — but the
+  paragraph that follows carries "at 1048586 chars the resumable view finishes
+  the whole replay in 76.0ms over 84070 fragments, about 0.9µs per fragment"
+  with no such hedge, and the design notes then reason off it ("`view()` per
+  fragment is ~0.8µs, so the next bottleneck in a real client is probably the
+  consumer reacting to every fragment"). three runs here land 109.9ms, 120.5ms
+  and 127.8ms, so 1.31 to 1.52µs per fragment, every one further from the
+  published figure than the spread the section quotes for its own 8273 and 65619
+  rows. nothing measured is wrong and the reasoning survives — same order of
+  magnitude, the consumer is still the likely bottleneck, and the load-bearing
+  number in the same sentence is a counted 44074751901 chars — it is just the
+  same clock-as-result the 2026-09-04 fix removed everywhere else, left in the
+  two places that state it without the caveat. left out of the fix commit to
+  keep that diff one intentional change
+
+- [low] 05 — `replayTimed`'s median is the upper middle value on an even repeat
+  count. `resumableBench.ts:164` takes `times[Math.floor(times.length / 2)]`, so
+  the "median of 50 repeats" the readme names is the 26th smallest and the
+  median of 20 is the 11th, not the mean of the two middle values. only the wall
+  clock columns run through it and those are already named run-dependent, so
+  nothing published moves — it is a statistic the section states more precisely
+  than it computes
+
+- [low] 05 — `SseParser` strips a BOM the decoder has already removed, so the
+  guard can only ever fire on a second one. `sse.ts:252-255` drops a leading
+  `\uFEFF` from the first line, but `new TextDecoder("utf-8")` leaves
+  `ignoreBOM` false and has already taken one leading BOM off the stream, so the
+  only wire that reaches the guard starts with two. the spec keeps that second
+  BOM as part of the field name, which makes the line an unknown field and the
+  event undeliverable; this parser strips it and delivers the event. checked: a
+  single-BOM wire is identical either way, and nothing in the fixture or the two
+  study rigs emits a BOM at all
+
+- [low] 05 — `retry:` is modelled per event where the spec makes it
+  connection-level. `sse.ts:272` clears `this.retry` at every dispatch, so
+  `retry: 100` then two events gives the first retry 100 and the second
+  undefined, where the spec sets the reconnection time once and keeps it until
+  another `retry:` changes it. the `SseEvent` field comment documents the
+  behaviour at the type ("from a `retry:` field on this event"), but the readme's
+  "follows the WHATWG processing model where it matters" lists five things it
+  does follow and does not name this as one it deliberately does not. nothing
+  here reconnects, so no measured number depends on it
+
 - [fixed 2026-10-05] 06 — the oracle's 11 failures were credited to the
   20-wide t=0 burst alone, and the row two above that control holds the same
   burst and fails nothing. the header extension's headroom sweep printed one
@@ -4406,10 +4475,44 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 09-concurrency | 2026-09-05 |
 | 08-agent-tool-loop | 2026-09-05 |
 | 07-near-duplicates | 2026-10-05 |
-| 05-token-streaming | 2026-09-04 |
+| 05-token-streaming | 2026-10-06 |
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+05 is the cleanest code in the repo on this pass and the catch is arithmetic,
+not mechanism. all 141 committed tests passed before the fix, typecheck is
+clean, and every exact figure the entry point prints is identical across three
+local runs and again from a fresh clone — only the wall clock columns move, and
+the readme already says they do. the three components were checked against their
+references rather than against themselves: the sse parser matches the whatwg
+processing model case by case (lf/crlf/bare-cr, cr on a chunk boundary, one
+leading space stripped, a bare `data` field dispatching empty data, a blank line
+with no data dispatching nothing, `id` with a nul ignored, non-digit `retry`
+ignored, event type reset at dispatch while last-event-id persists), and its
+output is invariant to slicing — twelve hostile and tricky wires at seven chunk
+sizes by eight seeds, uncapped and under both failure modes, all byte-identical
+to the one-shot parse. the two partial-json parsers were differentially fuzzed
+rather than trusted: 39k prefixes over seeded documents mixing escapes,
+surrogate pairs, `__proto__` keys, lone high surrogates and malformed number and
+literal tokens, plus every prefix of nineteen hand-written documents, and the
+resumable scanner answers identically everywhere except the two divergences the
+readme names on purpose. the queue holds its two stated promises under stress —
+480 configurations of mixed-size workloads kept fifo exactly and never exceeded
+max(budget, largest item). every other arithmetic claim ties out: 32706/3 =
+10902x span, 2 x 32706 = 65412 against the 65536 budget, 858/2000 = the 43%
+delivery-time tax, 293111 of 620116 is nearly half the stream, 66560/4194310 =
+1.6% of the poison, 2100 x 512 + 2099 = 1077299 accumulated chars.
+
+what was wrong is one ratio divided by the wrong row of its own table, and the
+table was printed six lines above the sentence. the fix restates it at 6.2x and
+pins the basis by test. the rule it adds is smaller than 06's but the same
+family: when a sentence names the comparison it makes ("the friendliest seed"),
+the number has to come from that comparison and not from the row that happened
+to be first. four findings left open — one medium (the 1MB wall clock stated as
+a fact in the one section that retired wall clocks as results) and three low,
+the median-of-even definition and two spec edges in the sse parser, none of them
+moving a published number.
 
 06 is the most thoroughly reasoned project in the repo and that is exactly how
 it got caught. all 158 committed tests passed before the fix, typecheck is
