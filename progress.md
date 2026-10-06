@@ -188,6 +188,66 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-06] 08 — the signature-guard limit sweep credited its
+  flattening stubborn-model-calls column to the feedback cap, and the cap
+  accounts for 1 of the 3 model calls at the row that flattens. the readme read
+  the column as stepping "+9, +6, +4, +4 instead of +6 a row, because the two
+  shape drifters stop moving once they hit the cap", and put rotate-3's limit-4
+  trip round at 10, read off the (l-1)*c+1 rule rather than measured. the
+  control is the same sweep with the feedback cap lifted so only the guard can
+  stop a task: the column would step +9, +7, +6, +6, never a flat +6 — one
+  model call per stubborn task per limit step holds only for the 4 drifters
+  whose signature cycle is 1, and a c-rotating drifter adds c per step, which
+  is the same rule the readme quotes two paragraphs earlier. the cap accounts
+  for 0, 0, 1, 3, 5 model calls across limits 2-6, so at the 3→4 row where the
+  published step falls from +9 to +6 the cap takes 1 and the other 2 come from
+  the authored flawDrift lists running out: each carries 6 variants and then
+  clamps to its last one, so from the 7th emission every rotation is a fixed
+  point that the guard counts like any verbatim repeat. that clamp is also why
+  rotate-3 trips at emission 8 under limit 4 and not 10 — the rule holds only
+  while the rotation is still rotating, which ends at emission 7, exactly where
+  the cap sits, so limit 3 is the last row the arithmetic describes on its own.
+  alternate goes the same way: 3, 5, 7 match (l-1)*2+1, then 8 and 9 where it
+  predicts 9 and 11. the conclusion survives — at limit 4 rotate-3 still dies
+  feedback-exhausted at 7 and the guard buys nothing on it — but the margin is
+  one round, not three. the existing `rotationIsCaught` test looked like it
+  pinned the rule and did not: it short-circuits to the cap branch whenever the
+  predicted round exceeds 7, so the wrong 10 was never checked by the test
+  written to check exactly that. same shape as 03's rrf, 06's burst, 07's
+  s-curve and 10's packing — an effect credited to one mechanism where a
+  control separates the two. fix: the sweep runs each limit a second time with
+  the cap lifted and the entry point prints the control (published, cap-lifted,
+  cap-accounts-for, and each shape drifter's uncapped trip round),
+  `tests/sweepCapControl.test.ts` pins the control, the rule's range and the
+  decomposition and holds the readme to all three. no measured number moves —
+  the policy tables, the limit sweep and every other published figure are
+  byte-identical, verified across three local runs and again from a fresh
+  clone, 161 tests to 172
+
+- [medium] 08 — the flaw-cost table's summary sentence generalizes a one-round
+  correction across two rows that never corrected. the prose under the table
+  reads "a one-round correction costs one extra model call and roughly 140 to
+  220 extra tokens, because the retry pays for the flawed emission, the error
+  message, and a re-read of the whole longer history", and the stubborn (153)
+  and slow-corrector (172) rows both land inside that range while completing 0
+  of their tasks — for those two the real cost is the task, not the extra call,
+  and the extra-model-calls 1.0 they print is the guard aborting rather than a
+  correction being paid for. nothing in the table is false and the `ok` column
+  prints 0 for both; it is the sentence that reads all six rows as the same
+  kind of event. found 2026-10-06
+
+- [medium] 08 — the loop counts a tool-reported error as a completed intent. a
+  call that parses pushes `{ role: "tool", result }` into the history whatever
+  `result.ok` says, and `scriptedModelTurn` advances `completed` on every tool
+  message, so a tool that legitimately fails (unknown city, divide by zero,
+  fetch exhausted) moves the scripted model to the next intent instead of
+  letting it retry, while `{last}` silently carries the previous successful
+  value or "(no result)". no published task reaches it — every correct call in
+  all three suites resolves, and the two tasks carrying transient fetch faults
+  carry 4 against the retry policy's 4 — so the path is unmeasured and
+  untested at the loop level, though the tool-level error returns themselves
+  are covered in `tests/tools.test.ts`. found 2026-10-06
+
 - [fixed 2026-10-06] 10 — "sentence packing costs nothing and fixes all of it"
   was read off three columns that are true and one that was never measured. the
   readme's second bullet backed "costs nothing" with same index size (5391
@@ -4547,12 +4607,39 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 11-prompt-caching | 2026-09-05 |
 | 10-chunking-strategies | 2026-10-06 |
 | 09-concurrency | 2026-09-05 |
-| 08-agent-tool-loop | 2026-09-05 |
+| 08-agent-tool-loop | 2026-10-06 |
 | 07-near-duplicates | 2026-10-05 |
 | 05-token-streaming | 2026-10-06 |
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+08 was last reviewed on 2026-09-05 and the catch this time is in the paragraph
+that previous review wrote. all 161 committed tests passed before the fix,
+typecheck is clean, and the entry point is byte-identical across three local
+runs and again from a fresh clone — determinism is structural here, since every
+wait goes through 06's `VirtualClock` and both jitter sources are seeded, so a
+run is a pure function of the seed. the shared mechanisms are real reuse rather
+than reimplementation (06's clock, bounded retry and percentile, 05's rng), so
+there is no drift between this project and its sources. the cache pricing was
+checked against its own definition — read = the previous call's whole input,
+write = the new suffix, and readMult = writeMult = 1 reproduces the uncached
+bill exactly — and every arithmetic claim ties out: 3210/3969 = 80.9%,
+15341/17 = 902.4x, (8375-3218)/8375 = 61.6%, (8375-4676)/8375 = 44.2%.
+
+what was wrong is the corroboration, not the conclusion. the sweep paragraph
+had the right verdict (limit 4 spares every corrector and gives up the longest
+rotation) and reached it through a counterfactual nobody ran: "+6 a row" is the
+stubborn task count, not the unsaturated column, and the rule-predicted trip
+round of 10 is not what the suite produces. the rule it adds is the one 03, 06,
+07 and 10 kept teaching in different clothes, now pointed at a baseline rather
+than an effect: when a sentence says a column flattened "instead of" something,
+the something has to be a run, and the run that produces it is usually one
+policy field away. the corollary is about tests — `rotationIsCaught` asserted
+the trip rule and then skipped every case where the rule and the measurement
+could disagree, so the assertion that would have caught this was written and
+immediately branched around. two findings left open, both medium, neither
+moving a published number.
 
 05 is the cleanest code in the repo on this pass and the catch is arithmetic,
 not mechanism. all 141 committed tests passed before the fix, typecheck is
