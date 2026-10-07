@@ -60,13 +60,13 @@ from `python main.py` over the committed dataset:
 ```
 method              AUC  mean sup mean unsup    thr   prec  recall    FPR      J
 overlap           0.521     0.685      0.675  1.000  0.640   0.914  0.720  0.194
-sentence_cosine   0.432     0.668      0.762  1.000  0.647   0.943  0.720  0.223
-numeric_gated     0.560     0.668      0.599  0.328  1.000   0.229  0.000  0.229
-negation_aware    0.622     0.570      0.435  0.328  0.789   0.429  0.160  0.269
+sentence_cosine   0.433     0.668      0.762  1.000  0.640   0.914  0.720  0.194
+numeric_gated     0.561     0.668      0.599  0.328  1.000   0.229  0.000  0.229
+negation_aware    0.626     0.570      0.435  0.328  0.789   0.429  0.160  0.269
 ```
 
 the AUC column is the story. overlap at 0.521 is a coin flip, and sentence
-cosine at 0.432 is worse than a coin flip: on this dataset the average
+cosine at 0.433 is worse than a coin flip: on this dataset the average
 hallucinated claim scores HIGHER than the average supported one (0.762 vs
 0.668). thats not a bug, its the mechanism. the hallucinations here are edits
 of real sentences, so they keep nearly all their words, while honest
@@ -86,17 +86,20 @@ fabricated         unsup   6     6/6  (1.00)     6/6  (1.00)     2/6  (0.33)    
 outside_knowledge  unsup   4     4/4  (1.00)     4/4  (1.00)     0/4  (0.00)     0/4  (0.00)
 number_swap        unsup   7     7/7  (1.00)     7/7  (1.00)     6/7  (0.86)     6/7  (0.86)
 entity_swap        unsup   7     7/7  (1.00)     7/7  (1.00)     0/7  (0.00)     0/7  (0.00)
-negation_flip      unsup   7     6/7  (0.86)     7/7  (1.00)     0/7  (0.00)     7/7  (1.00)
+negation_flip      unsup   7     6/7  (0.86)     6/7  (0.86)     0/7  (0.00)     7/7  (1.00)
 antonym_flip       unsup   4     2/4  (0.50)     2/4  (0.50)     0/4  (0.00)     0/4  (0.00)
 ```
 
 reading it:
 
 - the two lexical methods have no usable threshold. their sweep lands at 1.000,
-  meaning flag everything that isnt a perfect score: they catch the
+  meaning flag everything that isnt a perfect score: they catch most of the
   hallucinations by also flagging every paraphrase, synthesis and negated
-  paraphrase in the dataset (FPR 0.720). the only claims they trust are the
-  verbatim copies
+  paraphrase in the dataset (FPR 0.720). they land on the same row to three
+  places (0.640 / 0.914 / 0.720 / 0.194) while trusting different claims —
+  each trusts the 7 verbatim copies plus 3 hallucinations that score a perfect
+  1.0, the two bag-identical reorderings both ways, and then overlap keeps
+  c07-4 while cosine keeps c01-5
 - the numeric gate is the opposite temperament: precision 1.000 at FPR 0.000.
   but it is `min(cosine, numeric)`, so it flags through two channels and only
   6 of its 8 flags are numeric — the other two are c07-6 and c09-5,
@@ -120,7 +123,7 @@ reading it:
 ## tradeoffs and where it breaks
 
 - lexical grounding is cheap, deterministic and explainable, and this project
-  shows its ceiling: AUC 0.622 with both consistency checks stacked. the gap
+  shows its ceiling: AUC 0.626 with both consistency checks stacked. the gap
   to a useful detector is exactly the part that needs meaning, not surface:
   entity swaps (0/7 at the tuned threshold), bag-identical reorderings (0.50
   recall at best), and paraphrase vs fabrication (the gated methods flag only
@@ -146,6 +149,19 @@ keeps one implementation of each mechanism per language instead of a second
 opinion in typescript.
 
 ## fixes
+
+- 2026-10-07 — three of the four published AUCs were float noise. the tf-idf
+  cosine lands a few 1e-16 either side of its true value, and `auc` counts a
+  tie by exact equality, so of the 21 pairs that sit mathematically on 1.0 —
+  7 verbatim quotes against c01-5, c04-5, c09-6, all bag-identical to the
+  sentence they match — only 6 compared equal, the rest scored as wins or
+  losses worth 1e-16 in whichever direction python happened to round. the
+  cosine is rounded to 12 places now, 4 orders above the noise and 8 below the
+  closest real gap, so the same run prints the same numbers on 3.11 and 3.13.
+  sentence_cosine AUC 0.432 → 0.433, numeric_gated 0.560 → 0.561,
+  negation_aware 0.622 → 0.626, and sentence_cosine's operating point loses
+  the free catch it got from the noise band: 0.647/0.943/0.223 → 0.640/0.914/
+  0.194, negation_flip 7/7 → 6/7
 
 - 2026-09-06 — the reading of the numeric gate row described it as
   "catching only claims whose numbers the context never states", and the

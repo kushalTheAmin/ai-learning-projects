@@ -73,8 +73,16 @@ class ContextBundle:
             return 0.0, None
         sentence_id, score = hits[0]
         # cosine over nonnegative vectors lives in [0, 1]; float rounding
-        # can overshoot 1 by an epsilon on a self-match
-        return min(score, 1.0), self._by_id[sentence_id]
+        # can overshoot 1 by an epsilon on a self-match, and undershoot it
+        # by one on a claim carrying the same token bag as the sentence.
+        # evaluate.py counts a tie by exact equality, so that epsilon
+        # decides whether two mathematically equal scores read as tied or
+        # as separated, and which way it falls changes with the
+        # interpreter's float summation. rounding settles it: the noise is
+        # ~1e-16 and the closest two genuinely distinct scores in this
+        # dataset sit 5.7e-4 apart, so 12 places keeps every real
+        # difference and drops every artefact.
+        return round(min(score, 1.0), 12), self._by_id[sentence_id]
 
 
 def overlap(claim: str, bundle: ContextBundle) -> float:
