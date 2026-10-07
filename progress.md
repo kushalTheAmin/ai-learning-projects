@@ -52,7 +52,7 @@ OPEN THREADS for the questions worth answering next.
 | 15-embedding-quantization | 2026-08-28 | python | scalar quantization of vector stores behind 13's unchanged indexes (search runs on the dequantized reconstruction, queries stay float): symmetric per-vector int8 (max abs / 127 scale, zero-vector guard) + asymmetric per-dimension uniform grid at parameterized levels (256/16) with min/max or quantile fit, constant-dimension step-0 guard, out-of-grid clipping + int4 nibble packing two codes per byte + exact per-scheme byte accounting (codes plus float32 scales or grid params) + rmse reconstruction error + float rerank recovery (quantized flat top-C, full-precision rerank to top-k with id tie-break, duplicate collapse) + authored dual failure injections (near-constant rogue dimension ~40, rogue outlier rows in U(-40,40)); imports 13's ExactIndex/HnswIndex/datasets and ann_recall (itself 02's recall_at_k); measured — int8-asym flat recall@10 0.985 clustered / 0.989 uniform at 3.99x under fp32 where int4 drops to 0.797 / 0.888 at 7.96x, hnsw's quantization gap is flat +0.013..0.017 across ef 10-160 (converges to the 0.985 flat ceiling, more ef buys nothing back), rerank C=20 makes int8 exact and C=50 makes int4 exact, one rogue dimension crushes per-vector symmetric 0.987→0.515 (informative dims keep ~6 of 255 levels) leaving per-dim at 0.987, five rogue vectors stretch the min/max grid 0.987→0.649 (mean step 0.2051 vs 0.0062 needed) leaving per-vector at 0.987, and quantile-0.002 fit recovers 0.983 |
 | 14-context-window | 2026-08-28 | typescript | context assembly under a token budget as pure policy functions (full history, sliding window keeping a contiguous suffix of whole turns, head-and-tail with pinned first turns, summarize-evicted reserving a budget share for an extractive summary and degenerating to sliding-window while everything fits; system prompt and current user turn always pinned, over-budget flagged, context tokens defined as the sum of per-part estimates so fitting and reporting share one arithmetic) + luhn 1958 extractive salience (frequency-significant words, best cluster scored count^2/span under a gap cap) vs rarity salience (mean ln(N/sentence-frequency) over unique content words) behind one summarize interface + seeded ops-conversation generator planting 12 single-occurrence nonce facts per conversation (standalone vs buried sentence classes, probes ask by key at lag buckets 1-2/3-8/9-20 exchanges, generation-time validation that each value occurs exactly once) + retention-by-lag/class metrics with per-call token and dollar accounting; imports 08's token estimator and pricing and 05's rng; measured — sliding window is a step function in lag (100% inside the 800-token window, 23.8% past it), luhn summarization is worse than no summary at all (71.3% vs 74.6% overall, 15.0% long-lag, falling to 61.7% as the summary share rises to 50%) because frequency salience keeps the chatter and a once-stated decision is the rarest thing in a transcript, rarity salience at identical budget and cost reaches 85.8% overall and 57.5% long-lag (92.5% at 50% share, where luhn and rarity slope in opposite directions), the standalone/buried split doesnt survive the rest of its own column (rarity-25% at 800 is 89.2% standalone vs 82.5% buried, but luhn-25% goes the other way and sliding-window, which never scores a sentence, splits widest, and no row in the sweep clears z=2), and cost is flat across policies at a fixed budget ($0.0739-0.0744/conv vs $0.1091 full-history) while full-history's call size grows 66.9 to 1876.7 tokens over 30 exchanges |
 | 13-ann-hnsw | 2026-08-28 | python | hnsw approximate nearest neighbor from scratch (geometric level assignment floor(-ln u / ln M), per-layer greedy descent, best-first beam search of width ef with (distance, id) tie-breaking, bidirectional linking with degree caps M / 2M and re-selection shrink, the paper's algorithm-4 neighbor-selection heuristic with fill-from-discarded, naive M-closest ablation mode) + exact flat index as one vectorized squared-L2 scan with id tie-break + distance-computation accounting on both indexes + layer-0 reachability integrity check + seeded gaussian-mixture and uniform synthetic vector datasets with uniform outlier queries; imports 02's recall_at_k (exact top-10 as the relevant set); measured — recall 0.979 at 18.5x fewer distance computations than exact and 0.995 at 15.9x, with the last 0.005 of recall costing ef 80→320 and a fall to 2.5x; M=4 builds at 445 dists/vector for 0.963 vs M=32 at 7373 for 0.998; the selection heuristic vs naive M-closest on tight clusters is 0.997 vs 0.809 with 145 of 2000 nodes stranded unreachable on layer 0 (uniform control: 0.015 apart, 4 nodes), uniform 32-d is harder than clustered for both (0.861 vs 0.997 at identical settings); wall clock at n=3000 is a near-tie with the vectorized exact scan because python per-node overhead eats the ~15x distance-count win — the count is the portable number |
-| 12-groundedness-scoring | 2026-08-28 | python | lexical groundedness scorers as unsupported-claim detectors: content-token overlap precision with a stopword filter + max per-sentence tf-idf cosine (02's TfidfIndex fitted on the context's own sentences, 10's splitter) + numeric consistency gate (digit-literal extraction with thousands joining, fraction of claim numbers present in context, no-numbers passes) + negation-parity heuristic (7-cue list, hard zero on mismatch with the best-matching sentence) + exact pairwise ROC-AUC with half-credit ties + Youden's J threshold sweep (flag-everything scores J=0, unlike best-F1 which degenerated on the 25/35 class balance) + authored 10-context / 60-claim hallucination taxonomy (verbatim/paraphrase/synthesis/negated-paraphrase supported, entity/number/negation/antonym edits + fabrications + outside-knowledge unsupported); measured — sentence cosine ranks hallucinations ABOVE truth (AUC 0.432, mean unsup 0.762 vs sup 0.668) because minimal edits keep a sentence's words while paraphrases lose them, the two lexical methods' best thresholds land at 1.000 (trust only verbatim copies, FPR 0.720), the numeric gate is precision 1.000 at FPR 0.000 but misses the 1-of-2-numbers-real swap (score 0.5), negation parity buys 7/7 flip recall for 4/4 zeroed negated paraphrases, and 2 of 4 antonym flips are bag-of-words-identical to a true sentence and score 1.0 under every method |
+| 12-groundedness-scoring | 2026-08-28 | python | lexical groundedness scorers as unsupported-claim detectors: content-token overlap precision with a stopword filter + max per-sentence tf-idf cosine (02's TfidfIndex fitted on the context's own sentences, 10's splitter) + numeric consistency gate (digit-literal extraction with thousands joining, fraction of claim numbers present in context, no-numbers passes) + negation-parity heuristic (7-cue list, hard zero on mismatch with the best-matching sentence) + exact pairwise ROC-AUC with half-credit ties + Youden's J threshold sweep (flag-everything scores J=0, unlike best-F1 which degenerated on the 25/35 class balance) + authored 10-context / 60-claim hallucination taxonomy (verbatim/paraphrase/synthesis/negated-paraphrase supported, entity/number/negation/antonym edits + fabrications + outside-knowledge unsupported); measured — sentence cosine ranks hallucinations ABOVE truth (AUC 0.433, mean unsup 0.762 vs sup 0.668) because minimal edits keep a sentence's words while paraphrases lose them, the two lexical methods' best thresholds land at 1.000 and on the same row to three places (0.640/0.914/0.720/0.194), each trusting the 7 verbatim copies plus 3 hallucinations scoring a perfect 1.0 (FPR 0.720), the numeric gate is precision 1.000 at FPR 0.000 but misses the 1-of-2-numbers-real swap (score 0.5), negation parity buys 7/7 flip recall for 4/4 zeroed negated paraphrases, and 2 of 4 antonym flips are bag-of-words-identical to a true sentence and score 1.0 under every method |
 | 11-prompt-caching | 2026-08-27 | typescript | simulated provider-side prefix cache modeling the documented semantics (longest-cached-prefix hit with exact length-prefixed keys, writes billed only for the delta past the hit, ttl expiry with free refresh-on-read at the entry's own ttl, min cacheable prefix 1024 tokens, 4-breakpoint cap, 20-block lookback per breakpoint) + read/write cost multipliers per ttl (0.1x reads, 1.25x 5m writes, 2x 1h writes over parameterized base pricing) + breakpoint placement strategies (none, static prefix, incremental tail, lookback-spaced) + seeded phrase-bank agent workload with interleaved conversations, volatile-header cache-bust variant, unique one-shot requests, and tool-heavy turns; imports 08's token estimator and 05's rng; measured — incremental breakpoints save 78.0% input cost vs no caching (hit rate 89.6%) where static-only saves 44.2%, one volatile header line drops hits 59/60 to 0/60 and lands at 1.250x of not caching, unique one-shot prompts with caching on bill exactly 1.250x, a gap sweep flips the 5m ttl from 0.246x to a pure 1.250x loss the moment turn gaps pass the ttl (1h ttl holds 0.341x until 70m, then 2.000x), and 26-block turns outrun the 20-block lookback so the naive tail breakpoint rewrites all history every turn (1.072x, worse than no caching) until one spaced marker restores 0.362x |
 | 10-chunking-strategies | 2026-08-27 | python | regex sentence splitter with character spans (abbreviation guard, non-ascii-safe uppercase boundary check via str.isupper) + fixed word-window chunker with optional overlap + greedy sentence-packing chunker under a word budget, all emitting exact doc substrings with [start, end) offsets + exact answer-containment relevance over chunks with split-rate, best-coverage (char overlap of answer span with best chunk), and context-words-at-k metrics, over an authored 10-doc / 40-query ops corpus with verbatim-unique answer sentences; imports 02's bm25/tokenizer/metrics (chunking changes the index contents, not the scorer); measured — fixed-80 splits 42.5% of answers and 17 of its 20 hit@5 misses are boundary splits not ranking failures, sentence packing at identical index size (5391 words) holds splits at 0% and wins hit@5 0.850 vs 0.500 with a smaller context bill (333.7 vs 388.2 words), overlap-20 buys back 15/17 splits for +30.4% index but newly splits 1 answer plain fixed-80 kept whole (stride 60 moves every boundary, overlap does not just add windows), and a split answer's best chunk still holds 71.1% of it on average |
 | 09-concurrency | 2026-08-27 | typescript | fifo counting semaphore (direct permit handoff, double-release guard, high-water/queue stats) + bounded-parallelism map over it (fail-fast and per-item settled variants, input-order results) + micro-batcher with size/deadline dual flush trigger and a batch-identity check against stale uncancellable virtual timers + simulated llm batch endpoint (80ms + 20ms/item ±10% seeded jitter, fifo admission cap 8, 400-token per-call overhead + 60/30 per-item tokens, whole-batch validation rejection naming no item) + poisoned-batch recovery strategies (fail-all, capped retry-whole, one-by-one, bisect) + seeded exponential inter-arrival process; imports 06's clock/percentile and 05's rng; measured — workers past the server cap hold 79.3 req/s while request p50 doubles per doubling (100ms at 8 workers → 793ms at 64, the queueing just moves server-side), batch 8 captures 90% of batch 32's overhead amortization ($1.830 → $0.780 per 1k items) while a call's duration and an item's wait point opposite ways on that sweep (call p50 100ms → 724ms as the batch grows, item p50 3040ms → 771ms, because every item is queued behind the other 239 at t=0 and a bigger batch drains that queue sooner), the latency batching actually costs shows up only once items arrive over time — holding a micro-batch open 100ms on ~20ms arrivals cuts cost 55% for +175ms p50 — and bisect isolates 1 poisoned item of 32 in 11 calls vs 33 one-by-one but inverts by k=4 (31 calls and 21520 input tokens vs 17040, failing halves repay the overhead at every tree level) |
@@ -187,6 +187,58 @@ remote and its local copy was removed.
 Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
+
+- [fixed 2026-10-07] 12 — three of the four published AUCs were float noise,
+  and they changed with the interpreter. the tf-idf cosine lands a few 1e-16
+  either side of its true value and `auc` counts a tie by exact equality, so
+  of the 21 supported x unsupported pairs sitting mathematically on 1.0 — the
+  7 verbatim quotes against c01-5, c04-5 and c09-6, each of whose
+  in-vocabulary token bag is its best sentence's — only 6 compared equal on
+  3.11 and 7 on 3.13, the rest scored as strict wins or losses worth 1e-16 in
+  whichever direction the float summation rounded. cpython 3.12 switched
+  `sum()` over floats to neumaier compensation, so `python main.py` printed
+  sentence_cosine 0.432 / numeric_gated 0.560 / negation_aware 0.622 on 3.11
+  and 0.437 / 0.565 / 0.627 on 3.13 while the readme published the 3.11 triple
+  and said "python 3.11+". neither triple was the right one. worse than the
+  AUCs: sentence_cosine's operating point was read off a threshold the sweep
+  put *inside* the noise band at 1.0, which flagged c01-5 for free and bought
+  recall 0.943 / J 0.223 / precision 0.647 and a negation_flip 7/7 cell — all
+  of it an artefact, since no threshold can separate c01-5 from a verbatim
+  quote it ties. the cosine is rounded to 12 places at the boundary now (noise
+  ~1e-16, closest genuinely distinct pair of scores 5.7e-4 apart), so main's
+  output is byte-identical on 3.11 and 3.13. AUC 0.432 → 0.433, 0.560 → 0.561,
+  0.622 → 0.626; sentence_cosine's point 0.647/0.943/0.223 → 0.640/0.914/0.194
+  and its negation_flip cell 7/7 → 6/7. bound by tests/test_score_precision.py
+
+- [high] 12 — the tradeoffs section credits bag-identical reorderings with
+  "0.50 recall at best", and that 0.50 belongs to the other half of the class.
+  the antonym_flip row reads 2/4 for both lexical methods, but the two it
+  catches are c02-5 and c07-5, which introduce a token the context never uses
+  ("most", "before"); the two the bullet is actually naming, c04-5 and c09-6,
+  score exactly 1.0 under every method and are 0/2 at every tuned threshold —
+  which the reading three paragraphs above states outright ("no threshold
+  fixes a score that is identical to the truth's"). so the hardest class in
+  the project is published at half recall when its real recall is zero, and
+  the readme contradicts itself one screen apart. the fix is the bullet, not
+  the code: name the subclass's own 0/2 and keep the category's 0.50 where it
+  belongs
+
+- [medium] 20, and 22 — `rocAuc` in `20-guardrails/src/metrics.ts` is the same
+  mann-whitney form as 12's `auc`, cites it in its own comment, and counts
+  ties the same way, by `p === n` on summed floats. 12's fix was needed
+  because a mathematically-tied pair was being scored as a 1e-16 win; whether
+  either of these feeds it pairs that are mathematically tied is unchecked. no
+  node release has done to `Array.prototype.reduce` what cpython 3.12 did to
+  `sum()`, so the cross-version exposure is smaller — but a tie miscounted as
+  a win is wrong on one interpreter too. check whether any supported x
+  unsupported pair in 20 or 22 sits within 1e-9 without comparing equal, and
+  if so quantize there the way 12 now does
+
+- [low] 12 — `extract_numbers` drops a leading minus sign, so a claim asserting
+  "-5" and a context asserting "5" check out against each other, and
+  `_THOUSANDS_COMMA_RE` joins any digit-comma-digit pair, so "1,0" reads as 10
+  rather than two figures. no claim in the dataset carries a negative or a
+  bare comma pair, so no published number moves
 
 - [fixed 2026-10-07] 11 — the COMPLETED ledger row published a number 11's own
   readme retired. the row says the volatile header "drops hits 59/60 to 0/60 and lands
@@ -4817,7 +4869,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 15-embedding-quantization | 2026-09-07 |
 | 14-context-window | 2026-09-06 |
 | 13-ann-hnsw | 2026-09-06 |
-| 12-groundedness-scoring | 2026-09-06 |
+| 12-groundedness-scoring | 2026-10-07 |
 | 11-prompt-caching | 2026-10-07 |
 | 10-chunking-strategies | 2026-10-06 |
 | 09-concurrency | 2026-10-06 |
@@ -5589,10 +5641,13 @@ the fifth reached for a baseline computed elsewhere in the function, and the
 catches it is structural, not arithmetic — for every ratio, name the
 denominator's population out loud and see whether it is the numerator's.
 
-12 came back clean on the evaluation and dirty on one scorer's input. the AUC
+12 came back clean on the evaluation and dirty on one scorer's input. that
+verdict was half right and the 2026-10-07 review says where: the arithmetic
+below is all correct, but reading the pairwise form as correct stopped at the
+formula and never asked what feeds it. the AUC
 is the mann-whitney statistic done exactly over all 25x35 pairs with ties at
 0.5 and it reads in the right direction (P(unsupported below supported), so
-sentence_cosine's 0.432 really is worse than chance); the youden sweep tries
+sentence_cosine's 0.433 really is worse than chance); the youden sweep tries
 every threshold producing a distinct flagging — each unique score plus one
 above the max, which is the complete set for a strict `<` rule — and ties go
 to the lowest, which flags least; precision, recall and FPR are each computed
