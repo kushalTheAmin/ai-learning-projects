@@ -87,6 +87,12 @@ this is the day-job side of the portfolio: cache accounting is the kind of thing
 
 ## fixes
 
+- 2026-10-07 — the repo ledger row still published the volatile header at
+  1.252x, the value the 2026-08-29 own-baseline fix retired here — nothing
+  bound that row to the run. tests/ledger-row.test.ts recomputes every
+  measured figure in it now. row reads 1.250x, same as the readme and
+  `npm start`. no measured number moved
+
 - 2026-10-07 — the 20-block lookback only reached 19 blocks back, so a turn
   appending exactly 20 blocks scored a miss where the rule it models hits. the
   window takes the twentieth block now — collapse threshold 20/turn → 21, no
