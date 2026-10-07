@@ -188,8 +188,8 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
-- [high] 11 — the COMPLETED ledger row publishes a number 11's own readme
-  retired. the row says the volatile header "drops hits 59/60 to 0/60 and lands
+- [fixed 2026-10-07] 11 — the COMPLETED ledger row published a number 11's own
+  readme retired. the row says the volatile header "drops hits 59/60 to 0/60 and lands
   at 1.252x of not caching". 1.252x is the pre-fix figure: the 2026-08-29 fix
   divided the volatile variant by its own no-caching baseline instead of the
   stable workload's and the ratio landed on exactly the write multiplier,
@@ -203,11 +203,21 @@ Fixed items stay listed with their fix date so the history reads in one place.
   hit rate, 44.2% static-only, 59/60 to 0/60, one-shot exactly 1.250x, the ttl
   sweep 0.246x / 1.250x / 0.341x / 2.000x, and experiment 5's 1.072x and 0.362x.
   the row's "20-block lookback per breakpoint" is true as of today's fix and was
-  one block off before it. fix is the number plus the `ledger_row` fixture the
-  blanket finding prescribes, so the row is bound to the entry point from then
-  on rather than corrected by hand again. found 2026-10-07, during 11's review;
-  not fixed in the same run because it wants its own regression test and the
-  pass already shipped the lookback fix.
+  one block off before it. found 2026-10-07, during 11's review; not fixed in
+  the same run because it wants its own regression test and the pass already
+  shipped the lookback fix. fixed 2026-10-07 in the next pass: the row reads
+  1.250x, and new `tests/ledger-row.test.ts` (8 tests) is the `ledger_row`
+  fixture the blanket finding prescribes — it scopes to the COMPLETED section
+  so the REVIEWED date row cannot match, takes the base row rather than the
+  position-extension row above it, and recomputes every measured figure the row
+  quotes from the same `runStrategyComparison` / `runVolatileHeader` /
+  `runOneShot` / `runTtlSweep` / `runLookback` calls `src/main.ts` prints, plus
+  `DEFAULT_CACHE_CONFIG.lookbackBlocks` for the window, so none of them can be
+  typed stale again. the two window tests fail on the reverted fix in a fresh
+  clone, verified. no measured number moved — both entry points are
+  byte-identical before and after, since the row was the only surface still
+  carrying 1.252x (readme body, readme fixes entry and the root readme index row
+  all already said 1.250x). 114 tests green, typecheck clean from a fresh clone.
 
 - [fixed 2026-10-07] 11 — the 20-block lookback only reached 19 blocks back.
   `PrefixCache.process` searched each breakpoint's window with
@@ -898,7 +908,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
   entry point matches, and reverting just the progress.md digit fails the two
   new tests.
 
-- [medium] every project but 03, 07, 14, 17, 21, 22, 23, 25 — the COMPLETED ledger
+- [medium] every project but 03, 07, 11, 14, 17, 21, 22, 23, 25 — the COMPLETED ledger
   row is unbound, and that is the drift just fixed in 03 sitting in 19 more
   places. the row is the surface another project reads before reusing a
   mechanism, it quotes measured figures, and `grep -rl progress.md` finds a test
@@ -916,7 +926,12 @@ Fixed items stay listed with their fix date so the history reads in one place.
   mutant recall 0.879, retired to 0.812 by its own 2026-09-03 fix 32 days
   earlier — so the mechanism has now produced the failure it was logged to
   predict, and "no number is known wrong today" was only true of the rows
-  nobody had recomputed yet
+  nobody had recomputed yet. 2026-10-07: 11's row did it again, volatile header
+  1.252x against the 1.250x its own 2026-08-29 fix landed on, 39 days stale and
+  bound now. every row a review pass has recomputed so far has come back
+  carrying a retired figure — 03, 07, 11, 14, 17, 21 and 25 — so this is not a
+  rare drift, it is what an unbound row does. the exclusion list above is the
+  record of which are bound
 
 - [medium] 03 — overall recall@1 has a ceiling of 0.9875 and nothing says so.
   p13 ("ship a small production image that pulls fast") is the one query of the
