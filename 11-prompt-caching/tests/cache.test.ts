@@ -163,11 +163,11 @@ describe("PrefixCache limits", () => {
     expect(() => cache.process({ blocks: [block("a")], breakpoints: [0.5], ttlMs: TTL }, 0)).toThrow(/outside/);
   });
 
-  it("finds an entry 19 blocks behind a breakpoint but not 20", () => {
+  it("finds an entry 20 blocks behind a breakpoint but not 21", () => {
     const pad = (n: number): Block[] => Array.from({ length: n }, (_, i) => ({ text: `pad ${i} `.repeat(10) }));
     for (const [distance, hit] of [
-      [19, true],
-      [20, false],
+      [20, true],
+      [21, false],
     ] as const) {
       const cache = new PrefixCache({ ...SMALL, minCacheableTokens: 1 });
       const base = pad(5);

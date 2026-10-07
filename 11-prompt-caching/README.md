@@ -32,7 +32,7 @@ node 20+. no network calls at runtime, everything is offline and deterministic (
 
 **4. turn gap vs ttl, 12 turns.** with 1m or 4m between turns the 5m ttl wins (0.246x vs 0.341x for the 1h ttl, whose writes cost 2x for nothing extra, since every read refreshes the timer for free and keeps the entry alive indefinitely). at 8m or 25m gaps the 5m cache expires between every turn and becomes a pure loss, exactly 1.250x, while the 1h ttl still delivers 0.341x. at 70m both expire: 1.250x and 2.000x. the ttl choice is a function of one number, the start-to-start gap between requests sharing the prefix, and picking wrong doesnt degrade gracefully, it flips the sign of the whole feature.
 
-**5. the 20-block lookback.** each breakpoint only walks back 20 content blocks to find a prior cache entry. at 10 blocks per turn the tail breakpoint always finds last turns entry and the naive and spaced strategies price identically (0.340x). at 26 blocks per turn (a tool-heavy agent turn) the tail breakpoint cant see back far enough: hit rate collapses from 77.2% to 15.5%, every turn rewrites the whole history, and the naive strategy costs 1.072x, worse than not caching, while adding one intermediate breakpoint 15 blocks before the tail restores 0.362x. same code, same traffic, $0.1291 against $0.0436, from where two markers sit.
+**5. the 20-block lookback.** each breakpoint only walks back 20 content blocks to find a prior cache entry. the tail breakpoint of turn n sits exactly one turns worth of blocks behind the entry turn n-1 wrote, so the naive strategy survives up to 20 blocks a turn and collapses at 21. at 10 blocks per turn the tail breakpoint always finds last turns entry and the naive and spaced strategies price identically (0.340x). at 26 blocks per turn (a tool-heavy agent turn) the tail breakpoint cant see back far enough: hit rate collapses from 77.2% to 15.5%, every turn rewrites the whole history, and the naive strategy costs 1.072x, worse than not caching, while adding one intermediate breakpoint 15 blocks before the tail restores 0.362x. same code, same traffic, $0.1291 against $0.0436, from where two markers sit.
 
 ## the position extension: where the volatile block sits
 
@@ -86,6 +86,11 @@ three findings.
 this is the day-job side of the portfolio: cache accounting is the kind of thing that ships inside a typescript api gateway or agent runtime, and the project imports the token estimator from 08 and the seeded rng from 05 rather than reimplementing either. strict mode, no `any`, exhaustive small tests on the billing arithmetic, since the whole value of a cost model is that the arithmetic binds.
 
 ## fixes
+
+- 2026-10-07 — the 20-block lookback only reached 19 blocks back, so a turn
+  appending exactly 20 blocks scored a miss where the rule it models hits. the
+  window takes the twentieth block now — collapse threshold 20/turn → 21, no
+  published number moved
 
 - 2026-09-05 — "the aware curve falls monotonically toward the stable floor"
   was read off nine sampled positions that step 38 straight to the tail, and

@@ -86,10 +86,12 @@ export class PrefixCache {
     }
     const totalTokens = cum[blocks.length]!;
 
-    // Longest unexpired entry reachable from any breakpoint's lookback window.
+    // Longest unexpired entry reachable from any breakpoint's lookback
+    // window: the breakpoint's own prefix plus the `lookbackBlocks` block
+    // boundaries behind it, so an entry exactly that far back still hits.
     let hit = -1;
     for (const bp of breakpoints) {
-      for (let q = bp; q > bp - this.config.lookbackBlocks && q >= 0 && q > hit; q--) {
+      for (let q = bp; q >= bp - this.config.lookbackBlocks && q >= 0 && q > hit; q--) {
         const entry = this.entries.get(prefixKey(blocks, q));
         if (!entry) continue;
         if (entry.expiresAtMs <= nowMs) {
