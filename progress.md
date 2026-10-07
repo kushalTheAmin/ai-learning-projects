@@ -210,18 +210,28 @@ Fixed items stay listed with their fix date so the history reads in one place.
   0.622 → 0.626; sentence_cosine's point 0.647/0.943/0.223 → 0.640/0.914/0.194
   and its negation_flip cell 7/7 → 6/7. bound by tests/test_score_precision.py
 
-- [high] 12 — the tradeoffs section credits bag-identical reorderings with
-  "0.50 recall at best", and that 0.50 belongs to the other half of the class.
-  the antonym_flip row reads 2/4 for both lexical methods, but the two it
-  catches are c02-5 and c07-5, which introduce a token the context never uses
-  ("most", "before"); the two the bullet is actually naming, c04-5 and c09-6,
-  score exactly 1.0 under every method and are 0/2 at every tuned threshold —
-  which the reading three paragraphs above states outright ("no threshold
-  fixes a score that is identical to the truth's"). so the hardest class in
-  the project is published at half recall when its real recall is zero, and
-  the readme contradicts itself one screen apart. the fix is the bullet, not
-  the code: name the subclass's own 0/2 and keep the category's 0.50 where it
-  belongs
+- [fixed 2026-10-07] 12 — the tradeoffs section credited bag-identical
+  reorderings with "0.50 recall at best", and that 0.50 belonged to the other
+  half of the class. the antonym_flip row reads 2/4 for both lexical methods,
+  but the two it catches are c02-5 and c07-5, which introduce a token the
+  context never uses ("most", "before" — one unseen content token each,
+  nothing else); the two the bullet was actually naming, c04-5 and c09-6,
+  carry their best-matching sentence's exact content-token bag and score
+  exactly 1.0 under all four methods, tied with all 7 verbatim quotes, so
+  they are 0/2 at every tuned threshold — and the only thresholds in the
+  whole sweep that reach them flag all 7 verbatim claims too, J <= 0, so the
+  subclass's recall is 0 at every operating point, not just the tuned one.
+  the reading three paragraphs above already said it ("no threshold fixes a
+  score that is identical to the truth's"), so the readme contradicted itself
+  one screen apart and published the hardest class in the project at half
+  recall when its real recall is zero. the bullet names the subclass's own
+  0/2 now and hands the 0.50 back to the category, with c02-5 and c07-5
+  named as the pair that earns it. no measured number moved — the code was
+  right, main's output is byte-identical on 3.11 and 3.13 and every number in
+  the readme still matches it. bound by tests/test_reordering_recall.py: six
+  mechanism tests pin the bag identity, the 1.0 scores, the verbatim tie, the
+  0/2 at the tuned threshold, the J <= 0 over the whole sweep, and the 2/4
+  tracing to c02-5 and c07-5; five prose tests pin the readme to them
 
 - [medium] 20, and 22 — `rocAuc` in `20-guardrails/src/metrics.ts` is the same
   mann-whitney form as 12's `auc`, cites it in its own comment, and counts
