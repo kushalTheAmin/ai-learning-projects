@@ -188,6 +188,121 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [high] 11 — the COMPLETED ledger row publishes a number 11's own readme
+  retired. the row says the volatile header "drops hits 59/60 to 0/60 and lands
+  at 1.252x of not caching". 1.252x is the pre-fix figure: the 2026-08-29 fix
+  divided the volatile variant by its own no-caching baseline instead of the
+  stable workload's and the ratio landed on exactly the write multiplier,
+  1.250x, which is what both the readme body and `npm start` print today and
+  what the readme's own fixes entry records as "1.252x → 1.250x". the ledger row
+  never got the update, so it has been 39 days stale. this is the mechanism in
+  the blanket ledger finding producing its second confirmed wrong number, after
+  07's mutant-mutant recall — and the same shape, a figure retired by the
+  project's own fix that nothing recomputed. every other figure in 11's row was
+  checked against today's output and is right: 78.0% incremental saving, 89.6%
+  hit rate, 44.2% static-only, 59/60 to 0/60, one-shot exactly 1.250x, the ttl
+  sweep 0.246x / 1.250x / 0.341x / 2.000x, and experiment 5's 1.072x and 0.362x.
+  the row's "20-block lookback per breakpoint" is true as of today's fix and was
+  one block off before it. fix is the number plus the `ledger_row` fixture the
+  blanket finding prescribes, so the row is bound to the entry point from then
+  on rather than corrected by hand again. found 2026-10-07, during 11's review;
+  not fixed in the same run because it wants its own regression test and the
+  pass already shipped the lookback fix.
+
+- [fixed 2026-10-07] 11 — the 20-block lookback only reached 19 blocks back.
+  `PrefixCache.process` searched each breakpoint's window with
+  `q > bp - lookbackBlocks`, so with `lookbackBlocks: 20` it tried bp and the
+  19 boundaries behind it and stopped one short. everything in the repo that
+  describes the window says 20: the config field is `lookbackBlocks: 20`, the
+  module docstring says "each breakpoint only looks back 20 content blocks for
+  a prior entry", the readme says "a 20 content-block lookback per breakpoint"
+  and again "each breakpoint only walks back 20 content blocks to find a prior
+  cache entry", and the rule being modelled is that the provider checks the
+  ~20 content-block boundaries preceding an explicit breakpoint. the old
+  behaviour was pinned rather than accidental — `tests/cache.test.ts` carried
+  "finds an entry 19 blocks behind a breakpoint but not 20", whose own name
+  states the mismatch — and it was one block tighter than every statement
+  about it, including the test comment in `tests/experiment.test.ts` that
+  reads "once a turn appends more than 20 blocks". it does not: experiment 5's
+  tail breakpoint of turn n sits exactly `blocksPerTurn` blocks behind the
+  entry turn n-1 wrote, so measured on the old code the collapse already
+  landed at 20 blocks/turn (1.039x, hit rate 18.3%) while 19 still priced
+  0.355x at 77.8%. a 0-block window was also broken in the same way: it
+  skipped the loop body entirely, so even an exact repeat of the breakpoint's
+  own prefix missed. fix is one character, `>` to `>=`, plus the inline
+  comment naming the window (the breakpoint's own prefix plus the
+  `lookbackBlocks` boundaries behind it) and the existing test renamed to the
+  boundary it now pins. nothing published moved — both entry points are
+  byte-identical before and after, checked by diff, because experiment 5
+  samples 10 and 26 blocks/turn and sits either side of the window, the
+  volatile study runs 4 history blocks a turn, and no other experiment appends
+  near 20 blocks at once. the collapse threshold moves from 20 blocks/turn to
+  21, which is what the prose claimed all along. new
+  `tests/lookback-window.test.ts`, 9 tests: four pin the window itself (reach
+  at exactly `lookbackBlocks`, miss at one past it, both scaled across
+  lookbacks 1/2/5/13/20/37 so no magic 20 is baked in, and an exact repeat
+  found at window 0), three pin the end-to-end threshold (17-20 blocks/turn
+  all price under 1.000x, 21/22/26 all over it, and the collapse sits one
+  block past the window rather than inside it), and two hold the published
+  experiment-5 rows at 10 and 26 blocks/turn to the fourth decimal so the fix
+  cannot move them. all five of the window tests fail on the reverted fix in a
+  fresh clone, verified. 106 tests green, typecheck clean, both entry points
+  byte-identical from a fresh clone.
+
+- [medium] 11 — experiment 5's "hit rate collapses from 77.2% to 15.5%" quotes
+  a before-value the sentence is not about. the paragraph sets up "at 10 blocks
+  per turn ... (0.340x)" and then "at 26 blocks per turn ... the tail
+  breakpoint cant see back far enough: hit rate collapses from 77.2% to 15.5%",
+  so 77.2% reads as the 10-blocks figure. it is not: the naive strategy prints
+  79.1% at 10 blocks/turn, and 77.2% is the spaced-15 row at 26 blocks/turn,
+  one row down the same table. the number is not wrong about anything, it is
+  just sourced from the other strategy rather than the other block count, and
+  the magnitudes are close enough (79.1 vs 77.2) that the conclusion holds
+  either way. what makes it worth fixing rather than dropping is that 77.2%
+  turns out to be the right counterfactual for a reason the readme never
+  states: lifting the lookback instead of adding a breakpoint recovers the
+  naive strategy to exactly the spaced-15 row — measured, `lookbackBlocks` 64
+  or 1000 at 26 blocks/turn prints 0.362x at 77.2% for both strategies, while
+  20 prints 1.072x at 15.5% for naive — so the window really is the whole
+  mechanism and 77.2% really is naive-with-the-window-lifted. the honest
+  version either quotes 79.1% as the before, or keeps 77.2% and says it is the
+  counterfactual, ideally with the lookback control printed, since that control
+  is what proves the attribution and nothing in the project currently runs it.
+  same shape as the 03/06/07/08/09/10 attribution findings except the number
+  happens to be right.
+
+- [low] 11 — the same paragraph closes "same code, same traffic, $0.1291
+  against $0.0436, from where two markers sit". the gap is a third marker, not
+  where two sit: `incremental` places 2 breakpoints and `spaced-15` places 3.
+  the sentence before it says so correctly ("adding one intermediate
+  breakpoint"), so this is the summary line disagreeing with its own paragraph.
+
+- [low] 11 — a read refreshes only the entry it hit, so shallower nested
+  entries age out on their original write time. once a request hits past the
+  static prefix, the breakpoint at block 1 is skipped by `if (bp <= hit)
+  continue`, which means no rewrite and no refresh, and the static-prefix entry
+  expires 5 minutes after the one request that wrote it. the readme's "free ttl
+  refresh on every read" is narrower than it sounds. nothing published moves:
+  in experiment 1 the 6 conversations start 5s apart so every first request
+  reaches the static entry well inside its ttl, and every other experiment is a
+  single conversation. it would bite a workload whose conversations start more
+  than a ttl apart but share a static prefix, which is the common shape in real
+  traffic.
+
+- [low] 11 — the strategies hand the cache a negative breakpoint on a
+  zero-block request. `incremental` returns `[1, -1]` and `staticOnly` returns
+  `[1]` when `blocks` is empty, and the error the caller sees is the cache's
+  "breakpoint 1 is outside the request's 0 blocks" rather than anything about
+  the empty request. not reachable from any experiment — every rendered request
+  carries at least tools, system and a user message — but it is the one input
+  shape the strategies have no guard for.
+
+- [low] 11 — `renderConversation` prices output as `Math.ceil(len / 4)` while
+  every input token in the project goes through 08's `estimateTokens`, which is
+  `Math.max(1, Math.ceil(len / 4))`. the two disagree only on empty text, 0
+  against 1, and `inputCost` zeroes `outputTokens` anyway, so nothing published
+  moves. still two estimators where the readme says one is imported.
+
 - [fixed 2026-10-06] 09 — the cancellation section credited the ugly success
   tail to cancel mode, and the mode's own zero-delay row moves p95 by one
   millisecond. the p95 paragraph read "in abandon mode p95 is 109ms because the
@@ -4688,7 +4803,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 14-context-window | 2026-09-06 |
 | 13-ann-hnsw | 2026-09-06 |
 | 12-groundedness-scoring | 2026-09-06 |
-| 11-prompt-caching | 2026-09-05 |
+| 11-prompt-caching | 2026-10-07 |
 | 10-chunking-strategies | 2026-10-06 |
 | 09-concurrency | 2026-10-06 |
 | 08-agent-tool-loop | 2026-10-06 |
@@ -4697,6 +4812,54 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+11 was last reviewed on 2026-09-05 and the catch this time is in the cache
+model itself rather than the prose. all 97 committed tests passed before the
+fix, typecheck is clean, and both entry points are byte-identical across three
+local runs and again from a fresh clone — determinism is structural, the only
+rng is 05's seeded generator threaded off `DEFAULT_SEED` through the phrase
+bank and the arrival times, so a run is a pure function of the seed. every
+figure the readme quotes was checked against today's output mechanically: the
+21 fenced sweep rows line for line, and each of the quoted dollar figures,
+ratios and percentages found in one of the two entry points' output, with four
+exceptions that are derived rather than printed and each recomputed by hand —
+$0.000164 as 328 x $2/MTok x 0.25, the 0.6% spread across positions 42 to 46,
+11.4% as 1 - 0.886, and 1.252x which is the retired figure inside a fixes
+entry. the extension's two load-bearing claims were re-derived rather than
+trusted: swept at every index 0 through 47 the aware curve does bottom at 42
+(0.2993x) and rise to 0.3011x at the tail, reads do saturate at 37591 tokens
+from 42 onward, and the 328-token gap is entirely the last request's own write
+— per-request billing shows requests 0 through 10 identical between the two
+positions and only request 11 differing, 0 tokens written at 42 against 328 at
+the tail. the 882-token tools block and the 1333-token static prefix both
+check out, and the 2.4x assembly-order swing is 0.066849/0.027707 = 2.413.
+
+what was wrong is the lookback window, one character. `q > bp - lookbackBlocks`
+reaches 19 blocks back, not 20, where the config field, the module docstring,
+two readme sentences and the provider rule being modelled all say 20. the old
+behaviour was pinned by a test whose own name admits the mismatch ("finds an
+entry 19 blocks behind a breakpoint but not 20"), which is the part worth
+keeping: a test can hold a defect in place and read as coverage, and the tell
+was that the name had to state a number the config contradicted. the
+consequence is small but exactly on the boundary experiment 5 exists to
+measure — the collapse landed at 20 blocks/turn where every statement in the
+repo, the experiment's own test comment included, says more than 20 — and no
+published number moved, because the experiment samples 10 and 26 and steps
+clean over the edge. the rule it adds: when a window is a config value, test
+the window at its own value, not at a literal. the new tests sweep lookbacks
+1/2/5/13/20/37 and assert reach at exactly the configured number, so the
+off-by-one cannot come back under a different constant.
+
+the review also ran the control experiment 5 never prints. lifting
+`lookbackBlocks` to 64 or 1000 at 26 blocks/turn recovers the naive strategy to
+exactly the spaced-15 row, 0.362x at 77.2% for both, against 1.072x at 15.5%
+at a window of 20 — so the window is the whole mechanism and the readme's
+attribution is right, but the 77.2% it quotes as the before-value is that
+counterfactual rather than the 10-blocks figure the sentence sets up, which is
+79.1%. logged medium. cross-project: 08 also prices a prompt cache but as a
+documented telescoping model with no window, no minimum and no breakpoint cap,
+which is a deliberately simpler model rather than drift, and `grep` finds no
+other lookback window in the repo, so there was nothing to port.
 
 09 was last reviewed on 2026-09-05 and the catch this time sits one column
 away from the two things that review added. all 151 committed tests passed
