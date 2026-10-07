@@ -125,10 +125,11 @@ reading it:
 - lexical grounding is cheap, deterministic and explainable, and this project
   shows its ceiling: AUC 0.626 with both consistency checks stacked. the gap
   to a useful detector is exactly the part that needs meaning, not surface:
-  entity swaps (0/7 at the tuned threshold), bag-identical reorderings (0.50
-  recall at best), and paraphrase vs fabrication (the gated methods flag only
-  2 of 6 fabrications at their threshold because a fabricated sentence shares
-  topic words with the context)
+  entity swaps (0/7 at the tuned threshold), bag-identical reorderings (0/2 at
+  every threshold — the antonym_flip row's 0.50 is the other two, c02-5 and
+  c07-5, which each introduce a word the context never uses), and paraphrase
+  vs fabrication (the gated methods flag only 2 of 6 fabrications at their
+  threshold because a fabricated sentence shares topic words with the context)
 - the dataset is deliberately hard-mode for lexical methods: every swap and
   flip is a minimal edit. real model hallucinations include sloppier failures
   that overlap would catch. the numbers here bound the adversarial end, not
@@ -149,6 +150,14 @@ keeps one implementation of each mechanism per language instead of a second
 opinion in typescript.
 
 ## fixes
+
+- 2026-10-07 — the tradeoffs bullet published "0.50 recall at best" for the
+  bag-identical reorderings, and that 0.50 is the antonym_flip row's — earned
+  by c02-5 and c07-5, which each add a word the context never uses. the two
+  the bullet names, c04-5 and c09-6, score exactly 1.0 under all four methods,
+  tied with every verbatim quote, so theyre 0/2 at every threshold — which the
+  reading one screen above already said. the bullet names the subclass's own
+  zero now. no measured number moved, the code was already right
 
 - 2026-10-07 — three of the four published AUCs were float noise. the tf-idf
   cosine lands a few 1e-16 either side of its true value, and `auc` counts a
