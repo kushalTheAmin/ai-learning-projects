@@ -186,8 +186,42 @@ remote and its local copy was removed.
 
 Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
-Fixed items stay listed with their fix date so the history reads in one place.
+Fixed items stay listed with their fix date so the history reads in one place;
+cleared items are the ones a review checked and found correct, kept so the same
+question is not reopened.
 
+- [fixed 2026-10-08] 15 — the open question priced hnsw's ef knob at the last
+  row of 13's sweep instead of the cheapest row that reaches the recall it
+  names. the sentence read "13 showed hnsw ef 20 to 320 buys 0.5 points (0.995
+  to 1.000) for 6.5x the distance budget (188 to 1221 per query)", and 13's
+  published sweep reaches 1.000 twice — ef 160 at 581 dists/query and ef 320 at
+  1221 — so the target it prices costs 3.1x, and the sentence put 2.1x too much
+  on the ef side of the comparison it exists to set up ("per byte of RAM, which
+  knob is cheaper at a fixed recall target"). recomputed at full precision on
+  the identical data (same n, dim, clusters, seed, M and efConstruction, and 15's
+  own sweep already reproduces 13's fp64 curve row for row): ef 160 is recall@10
+  exactly 1.000000 over 150 queries at 581.3 dists/query, so no rounding reading
+  makes 320 the row that first gets there. it is the second endpoint error in
+  this one sentence — the 2026-08-30 fix moved the lower endpoint from 80 to 20
+  because that pair made the already-published magnitudes (0.5 points, ~6x) come
+  out true, which fits a pair to the numbers rather than asking which pair prices
+  the target. the cause is test coverage narrower than the claim, the same shape
+  as the 14 finding one day earlier: the two tests that fix added pin the quoted
+  figures to whichever pair the sentence names, so they pass for any pair in 13's
+  table and passed for this one. one live surface carried it and it follows; the
+  root index row quotes no ef number, so it is untouched. 70 tests → 71: the new
+  one asserts the upper endpoint is the cheapest row in 13's sweep reaching the
+  quoted recall and fails on the old text with the 2.1x spelled out, and the
+  revert splits cleanly in a fresh clone. no measured number moved — the entry
+  point is byte-identical before and after. found and fixed 2026-10-08
+- [low] 15 — residual of the same fix: the 2026-08-30 entry in 15's own `##
+  fixes` section still reads "now names ef 20 and quotes both pairs it derives
+  from (0.995 to 1.000, 188 to 1221 per query)", and the live sentence now quotes
+  188 to 581. the section is newest first and today's entry two above it names
+  the move, so a reader in sequence is not misled, and rewriting a dated entry
+  would falsify the record it exists to be — but the retired pair is greppable
+  and quotable as current. same shape as the open 25 finding on retired brackets
+  living in dated history entries. found 2026-10-08
 - [fixed 2026-10-08] 14 — the split bullet claimed no gap in the sweep clears
   two standard errors and one does. the bullet read "thats 120 probes a side and
   no gap anywhere in the sweep clears two standard errors — the biggest is
@@ -1546,13 +1580,16 @@ Fixed items stay listed with their fix date so the history reads in one place.
   scan during the 25 run, not off a review of 17, so its REVIEWED date stays
   2026-09-07 and it is the oldest in the table.
 
-- [low] 15 — the ledger row carries a uniform-dataset recall the readme never
-  publishes. the row reads "int8-asym flat recall@10 0.985 clustered / 0.989
-  uniform at 3.99x"; 0.985 is the headline table's value but 0.989 is in neither
-  table nor prose, where the only uniform figure is int4's 0.888. so it is not
-  shown to be wrong — the uniform arm may well print it — it is unverified from
-  the readme alone, and that is the gap the 25 and 17 rows both fell through.
-  worth one run of 15's entry point to confirm or retire. found 2026-10-03
+- [cleared 2026-10-08] 15 — the ledger row carries a uniform-dataset recall the
+  readme never publishes. the row reads "int8-asym flat recall@10 0.985
+  clustered / 0.989 uniform at 3.99x"; 0.985 is the headline table's value but
+  0.989 is in neither table nor prose, where the only uniform figure is int4's
+  0.888. so it is not shown to be wrong — the uniform arm may well print it — it
+  is unverified from the readme alone, and that is the gap the 25 and 17 rows
+  both fell through. worth one run of 15's entry point to confirm or retire.
+  found 2026-10-03. ran it 2026-10-08: the uniform block prints int8-asym-dim at
+  recall@10 0.989, rmse 0.0011, 96256 bytes, 3.99x, so the row is right and the
+  readme simply does not publish that arm. the row stands as written
 
   the same scan cleared 13 and 07: 13's "last 0.005 of recall" is the readme's
   "last half percent" (0.995 to 1.000) derived, and 07's "0.031 at k=128" is the
@@ -4992,7 +5029,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 18-semantic-caching | 2026-09-30 |
 | 17-confidence-calibration | 2026-09-07 |
 | 16-llm-as-judge | 2026-09-07 |
-| 15-embedding-quantization | 2026-09-07 |
+| 15-embedding-quantization | 2026-10-08 |
 | 14-context-window | 2026-10-08 |
 | 13-ann-hnsw | 2026-10-08 |
 | 12-groundedness-scoring | 2026-10-07 |
@@ -5005,6 +5042,53 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+15 was last reviewed on 2026-09-07 and the catch this time is a price read off
+the wrong end of a sibling's table. all 70 committed tests passed before the fix
+and the entry point is deterministic — two local runs and a third from a fresh
+clone print every recall, rmse and byte figure byte-identical, which is
+structural: the only rng is the seeded `default_rng` behind the datasets and the
+two injected failure modes, so every table is a pure function of SEED = 42. the
+arithmetic checks out term by term — symmetric scale max|x| / 127 with codes in
+[-127, 127] for 255 levels, the per-dimension grid at (hi - lo) / (levels - 1),
+nibble packing round-tripping at dims 1, 2, 7, 8 and 33, the byte columns
+recomputing from `total_bytes` cell by cell, and recall@10 imported from 02
+through 13 rather than restated (`recall_at_k` with the exact top 10 as the
+relevant set, denominator the relevant set, no off-by-one). no leakage: the grid
+is fitted on the corpus only, queries stay float, and the ground truth is a
+separate `ExactIndex` over the float64 vectors. every number in the readme was
+checked against today's output line for line — the 4 scheme rows, the 5 ef rows
+and their gaps, the 6 rerank cells and both failure blocks — and the two prose
+reasons with them: the uniform arm really is narrower (per-dim span 0.9992
+against clustered 1.7823) and really is less lumpy (nearest-neighbour distance
+4.13 int4 grid steps against 1.39), so int4's 0.888 against 0.797 has the cause
+the readme gives it.
+
+what was wrong is "ef 20 to 320 buys 0.5 points for 6.5x the distance budget".
+13's sweep reaches 1.000 twice, ef 160 at 581 dists/query and ef 320 at 1221, so
+the recall the sentence prices costs 3.1x and it charged 2.1x too much — in the
+one line that sets up "per byte of RAM, which knob is cheaper at a fixed recall
+target". ef 160 recomputes at recall@10 exactly 1.000000 over 150 queries, so no
+rounding makes 320 the row that first gets there. it is the second endpoint error
+in this sentence: the 2026-08-30 fix moved the lower endpoint to 20 because that
+pair made the already-published 0.5 points and ~6x come out true, which fits the
+pair to the numbers instead of asking which pair prices the target.
+
+the rule it adds: when a sentence prices a target, the endpoint is the cheapest
+row that reaches it, not the last row of the table — and a test that pins quoted
+figures to whichever pair the sentence names will bless any pair. that is the same
+coverage-narrower-than-the-claim shape as the 14 finding one day earlier, one
+project over and in a cross-project quotation. the new test asserts the upper
+endpoint is the cheapest row in 13's sweep reaching the quoted recall, so either
+side drifting fails. no measured number moved and the root index row quotes no ef
+figure. seven findings left open on 15, one of them new: the readme's own
+2026-08-30 fixes entry still quotes the 188-to-1221 pair this fix retired. the
+2026-10-03 question about the ledger's uniform 0.989 is cleared — today's uniform
+arm prints exactly that, rmse 0.0011 at 3.99x. the three code findings all
+reproduce as logged and none is reachable from the published entry point: the
+levels-over-256 uint8 wrap (rmse 2.35 at levels=1024 against 0.0063 at 256),
+`float_rerank`'s negative id wrapping through numpy fancy indexing, and the
+quantile fit collapsing a sparse dimension to step 0.
 
 14 was last reviewed on 2026-09-06 and the catch this time is a significance
 claim read off the wrong row. all 110 committed tests passed before the fix,
