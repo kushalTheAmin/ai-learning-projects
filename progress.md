@@ -50,7 +50,7 @@ OPEN THREADS for the questions worth answering next.
 | 17-confidence-calibration | 2026-08-28 | python | confidence calibration measured and repaired: from-scratch multinomial softmax regression on bag-of-words counts over a train-only vocabulary (zero-init deterministic full-batch gd, l2 on weights only, continuable fit so a training curve is repeated fit calls) + reliability bins over max-softmax confidence (equal width, exact 1.0 lands in the last bin) + count-weighted ece / worst-bin mce / multiclass brier / stable log-sum-exp nll + temperature scaling fitted by golden-section search over inverse temperature (cross-entropy is convex in the logits and logits scale linearly in s, so the 1-d objective is convex and the search exact; positive scaling never reorders a row, accuracy untouched by construction and asserted) + selective auto-answer policy (answer iff confidence >= t) priced raw vs calibrated + seeded phrase-bank ticket generator whose per-slot intent-borrow rate is the irreducible-ambiguity knob, with a drifted variant (borrow 0.20→0.35 plus filler vocabulary unseen at training); imports 02's tokenizer; measured — val accuracy slides at every printed checkpoint, 0.835 at epoch 50 to 0.772 at 3200, and never turns back up, while val ece dips 0.061→0.034 by epoch 100 and rots from there to 0.159, so both pay for the extra epochs and calibration pays much the steeper price (ece 2.6x worse against the error rate's 1.4x), raw test reads accuracy 0.795 at ece 0.130 (919 of 1200 predictions claim 0.990 and deliver 0.886, the [0.70,0.80) bin claims 0.753 and delivers 0.450), one validation-fitted T=3.060 takes test ece 0.130→0.030 and nll 0.994→0.592 with zero predictions moved, the t=0.90 escalation policy on raw scores answers 76.6% at 0.886 accuracy (no raw threshold up to 0.99 delivers 0.95) where calibrated answers 37.9% at 0.980, mce 0.303→0.285 because the after-scaling worst bin holds 2 items, and shift (accuracy 0.795→0.539) explodes raw ece to 0.342 where the stale val T recovers only 0.140 and an oracle refit at T=5.691 reaches 0.024 — calibration is a property of the traffic, not the model |
 | 16-llm-as-judge | 2026-08-28 | typescript | scripted judge family as latent-utility scorers (quality weight + per-call gaussian noise + authored biases of known size: position bonus to the first-presented answer, ln-length verbosity term around a 120-token pivot, house-provenance self bonus, pass-threshold leniency; every verdict deterministic per (judge, item, presentation order) via fnv1a-derived mulberry32 streams with box-muller gaussians) + two eval modes over one cast (pointwise pass/fail vs pairwise forced choice, exact tie to first presented) + three presentation protocols (as-stored, seeded randomized shared across judges, both-order with abstain-on-flip) + cohen's kappa vs raw accuracy on a deliberately 0.70-imbalanced gold set (constant-rater case defined 0) + attribute-balanced pair sets built exact, not sampled (stored order, provenance, length each uncorrelated with gold by construction) + flip-rate diagnostic, decided/coverage/effective accuracy for abstentions, win-rate-vs-known-truth bias probes (champion-first, house inflation, longer-wins), per-protocol token and cost accounting; imports 05's rng and 08's estimator/pricing; measured — lenient passes 0.955 and still scores 0.745 accuracy on the 0.700 base rate where kappa says 0.198 (always-pass: 0.700 accuracy, kappa exactly 0.000), primacy flips 0.287 of order-swapped pairs yet is perfect (1.000) on the 0.713 it decides, champion-always-first drags a true 0.500 challenger to 0.380 and randomization restores 0.485 at no cost while both-order pays 2x ($2.53 vs $1.26 per 1k pairs) for per-item confidence rather than aggregate accuracy (primacy effective 0.857 vs randomized 0.887), self-preference (0.600) survives order debiasing untouched (0.620) because it rides identity not position, and the two modes are mutually blind: pointwise cannot express position bias (primacy 0.990, identical to calibrated) and pairwise cannot express leniency (lenient 1.000 randomized) |
 | 15-embedding-quantization | 2026-08-28 | python | scalar quantization of vector stores behind 13's unchanged indexes (search runs on the dequantized reconstruction, queries stay float): symmetric per-vector int8 (max abs / 127 scale, zero-vector guard) + asymmetric per-dimension uniform grid at parameterized levels (256/16) with min/max or quantile fit, constant-dimension step-0 guard, out-of-grid clipping + int4 nibble packing two codes per byte + exact per-scheme byte accounting (codes plus float32 scales or grid params) + rmse reconstruction error + float rerank recovery (quantized flat top-C, full-precision rerank to top-k with id tie-break, duplicate collapse) + authored dual failure injections (near-constant rogue dimension ~40, rogue outlier rows in U(-40,40)); imports 13's ExactIndex/HnswIndex/datasets and ann_recall (itself 02's recall_at_k); measured — int8-asym flat recall@10 0.985 clustered / 0.989 uniform at 3.99x under fp32 where int4 drops to 0.797 / 0.888 at 7.96x, hnsw's quantization gap is flat +0.013..0.017 across ef 10-160 (converges to the 0.985 flat ceiling, more ef buys nothing back), rerank C=20 makes int8 exact and C=50 makes int4 exact, one rogue dimension crushes per-vector symmetric 0.987→0.515 (informative dims keep ~6 of 255 levels) leaving per-dim at 0.987, five rogue vectors stretch the min/max grid 0.987→0.649 (mean step 0.2051 vs 0.0062 needed) leaving per-vector at 0.987, and quantile-0.002 fit recovers 0.983 |
-| 14-context-window | 2026-08-28 | typescript | context assembly under a token budget as pure policy functions (full history, sliding window keeping a contiguous suffix of whole turns, head-and-tail with pinned first turns, summarize-evicted reserving a budget share for an extractive summary and degenerating to sliding-window while everything fits; system prompt and current user turn always pinned, over-budget flagged, context tokens defined as the sum of per-part estimates so fitting and reporting share one arithmetic) + luhn 1958 extractive salience (frequency-significant words, best cluster scored count^2/span under a gap cap) vs rarity salience (mean ln(N/sentence-frequency) over unique content words) behind one summarize interface + seeded ops-conversation generator planting 12 single-occurrence nonce facts per conversation (standalone vs buried sentence classes, probes ask by key at lag buckets 1-2/3-8/9-20 exchanges, generation-time validation that each value occurs exactly once) + retention-by-lag/class metrics with per-call token and dollar accounting; imports 08's token estimator and pricing and 05's rng; measured — sliding window is a step function in lag (100% inside the 800-token window, 23.8% past it), luhn summarization is worse than no summary at all (71.3% vs 74.6% overall, 15.0% long-lag, falling to 61.7% as the summary share rises to 50%) because frequency salience keeps the chatter and a once-stated decision is the rarest thing in a transcript, rarity salience at identical budget and cost reaches 85.8% overall and 57.5% long-lag (92.5% at 50% share, where luhn and rarity slope in opposite directions), the standalone/buried split doesnt survive the rest of its own column (rarity-25% at 800 is 89.2% standalone vs 82.5% buried, but luhn-25% goes the other way and sliding-window, which never scores a sentence, splits widest, and no row in the sweep clears z=2), and cost is flat across policies at a fixed budget ($0.0739-0.0744/conv vs $0.1091 full-history) while full-history's call size grows 66.9 to 1876.7 tokens over 30 exchanges |
+| 14-context-window | 2026-08-28 | typescript | context assembly under a token budget as pure policy functions (full history, sliding window keeping a contiguous suffix of whole turns, head-and-tail with pinned first turns, summarize-evicted reserving a budget share for an extractive summary and degenerating to sliding-window while everything fits; system prompt and current user turn always pinned, over-budget flagged, context tokens defined as the sum of per-part estimates so fitting and reporting share one arithmetic) + luhn 1958 extractive salience (frequency-significant words, best cluster scored count^2/span under a gap cap) vs rarity salience (mean ln(N/sentence-frequency) over unique content words) behind one summarize interface + seeded ops-conversation generator planting 12 single-occurrence nonce facts per conversation (standalone vs buried sentence classes, probes ask by key at lag buckets 1-2/3-8/9-20 exchanges, generation-time validation that each value occurs exactly once) + retention-by-lag/class metrics with per-call token and dollar accounting; imports 08's token estimator and pricing and 05's rng; measured — sliding window is a step function in lag (100% inside the 800-token window, 23.8% past it), luhn summarization is worse than no summary at all (71.3% vs 74.6% overall, 15.0% long-lag, falling to 61.7% as the summary share rises to 50%) because frequency salience keeps the chatter and a once-stated decision is the rarest thing in a transcript, rarity salience at identical budget and cost reaches 85.8% overall and 57.5% long-lag (92.5% at 50% share, where luhn and rarity slope in opposite directions), the standalone/buried split doesnt survive the rest of its own column (rarity-25% at 800 is 89.2% standalone vs 82.5% buried, but luhn-25% goes the other way and sliding-window, which never scores a sentence, splits widest, and 1 of the 23 published rows clears z=2, rarity-50% at 800 where standalone sits at a 120-of-120 ceiling, against the 1.05 rows the threshold gives for free), and cost is flat across policies at a fixed budget ($0.0739-0.0744/conv vs $0.1091 full-history) while full-history's call size grows 66.9 to 1876.7 tokens over 30 exchanges |
 | 13-ann-hnsw | 2026-08-28 | python | hnsw approximate nearest neighbor from scratch (geometric level assignment floor(-ln u / ln M), per-layer greedy descent, best-first beam search of width ef with (distance, id) tie-breaking, bidirectional linking with degree caps M / 2M and re-selection shrink, the paper's algorithm-4 neighbor-selection heuristic with fill-from-discarded, naive M-closest ablation mode) + exact flat index as one vectorized squared-L2 scan with id tie-break + distance-computation accounting on both indexes + layer-0 reachability integrity check + seeded gaussian-mixture and uniform synthetic vector datasets with uniform outlier queries; imports 02's recall_at_k (exact top-10 as the relevant set); measured — recall 0.979 at 18.5x fewer distance computations than exact and 0.995 at 15.9x, with the last 0.005 of recall costing ef 80→320 and a fall to 2.5x; M=4 builds at 445 dists/vector for 0.963 vs M=32 at 7373 for 0.998; the selection heuristic vs naive M-closest on tight clusters is 0.997 vs 0.809 with 145 of 2000 nodes stranded unreachable on layer 0 (uniform control: 0.015 apart, 4 nodes), uniform 32-d is harder than clustered for both (0.861 vs 0.997 at identical settings); wall clock at n=3000 is a near-tie with the vectorized exact scan because python per-node overhead eats the ~15x distance-count win — the count is the portable number |
 | 12-groundedness-scoring | 2026-08-28 | python | lexical groundedness scorers as unsupported-claim detectors: content-token overlap precision with a stopword filter + max per-sentence tf-idf cosine (02's TfidfIndex fitted on the context's own sentences, 10's splitter) + numeric consistency gate (digit-literal extraction with thousands joining, fraction of claim numbers present in context, no-numbers passes) + negation-parity heuristic (7-cue list, hard zero on mismatch with the best-matching sentence) + exact pairwise ROC-AUC with half-credit ties + Youden's J threshold sweep (flag-everything scores J=0, unlike best-F1 which degenerated on the 25/35 class balance) + authored 10-context / 60-claim hallucination taxonomy (verbatim/paraphrase/synthesis/negated-paraphrase supported, entity/number/negation/antonym edits + fabrications + outside-knowledge unsupported); measured — sentence cosine ranks hallucinations ABOVE truth (AUC 0.433, mean unsup 0.762 vs sup 0.668) because minimal edits keep a sentence's words while paraphrases lose them, the two lexical methods' best thresholds land at 1.000 and on the same row to three places (0.640/0.914/0.720/0.194), each trusting the 7 verbatim copies plus 3 hallucinations scoring a perfect 1.0 (FPR 0.720), the numeric gate is precision 1.000 at FPR 0.000 but misses the 1-of-2-numbers-real swap (score 0.5), negation parity buys 7/7 flip recall for 4/4 zeroed negated paraphrases, and 2 of 4 antonym flips are bag-of-words-identical to a true sentence and score 1.0 under every method |
 | 11-prompt-caching | 2026-08-27 | typescript | simulated provider-side prefix cache modeling the documented semantics (longest-cached-prefix hit with exact length-prefixed keys, writes billed only for the delta past the hit, ttl expiry with free refresh-on-read at the entry's own ttl, min cacheable prefix 1024 tokens, 4-breakpoint cap, 20-block lookback per breakpoint) + read/write cost multipliers per ttl (0.1x reads, 1.25x 5m writes, 2x 1h writes over parameterized base pricing) + breakpoint placement strategies (none, static prefix, incremental tail, lookback-spaced) + seeded phrase-bank agent workload with interleaved conversations, volatile-header cache-bust variant, unique one-shot requests, and tool-heavy turns; imports 08's token estimator and 05's rng; measured — incremental breakpoints save 78.0% input cost vs no caching (hit rate 89.6%) where static-only saves 44.2%, one volatile header line drops hits 59/60 to 0/60 and lands at 1.250x of not caching, unique one-shot prompts with caching on bill exactly 1.250x, a gap sweep flips the 5m ttl from 0.246x to a pure 1.250x loss the moment turn gaps pass the ttl (1h ttl holds 0.341x until 70m, then 2.000x), and 26-block turns outrun the 20-block lookback so the naive tail breakpoint rewrites all history every turn (1.072x, worse than no caching) until one spaced marker restores 0.362x |
@@ -188,6 +188,67 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-08] 14 — the split bullet claimed no gap in the sweep clears
+  two standard errors and one does. the bullet read "thats 120 probes a side and
+  no gap anywhere in the sweep clears two standard errors — the biggest is
+  rarity-25% at 400, 11.7 points at z=1.84", and the share sweep printed three
+  blocks above it carries rarity-50% at 800: 100.0% standalone against 94.2%
+  buried, 120 of 120 against 113 of 120, 5.8 points at z=2.69 on the project's
+  own pooled two-proportion z. the reasoning error is reading the threshold off
+  the widest gap, as if the widest gap were the one most likely to clear it —
+  significance runs on the base rate as well as the width, so 5.8 points against
+  a 120-of-120 ceiling clears where 11.7 points at a 60% base rate does not. not
+  an artifact of the normal approximation at the boundary either: the exact
+  count, all 7 misses landing on one side of the 240, is p=0.0143 doubled. the
+  cause is test coverage narrower than the claim — `no row in the published
+  sweep clears two standard errors` iterated CLASS_ROWS_800 x 4 budgets, 16 of
+  the 23 rows `main.ts` prints with the two columns, and never the 6 share-sweep
+  rows where the exception lives. the honest reading is kept rather than swapped
+  for its opposite: one row of 23 is 1.05 rows at an uncorrected two-sided 2 SE
+  threshold, the rows share one conversation set so they are not 23 independent
+  draws, and the retraction the bullet exists for is untouched — the signs still
+  disagree across scorers and sliding-window, which never scores a sentence,
+  still splits widest at 800. four live surfaces carried the retired claim and
+  all four follow: the bullet, the readme's open question, this ledger's
+  COMPLETED row ("no row in the sweep clears z=2") and 14's open thread. 110
+  tests → 115: the scan now covers all 23 rows and asserts the clearing set is
+  exactly rarity-50%@800 rather than asserting it is empty, one pins that the
+  widest gap is not the strongest z, one pins the exact count, and three pin the
+  prose. 4 fail on the old prose and the revert splits cleanly in a fresh clone
+  — reverting README.md alone fails the 2 readme tests, reverting progress.md
+  alone fails the 2 ledger tests. no measured number moved: both entry points
+  are byte-identical before and after. found and fixed 2026-10-08
+- [medium] 14 — the summary block is fitted with one token arithmetic and
+  reported with another, and `policies.ts`'s own docstring says they are the
+  same. the header reads "context tokens are the sum of estimateTokens over each
+  rendered part ... so fitting decisions and the reported number use the same
+  arithmetic", but `summarize` fits sentences by summing `estimateTokens` per
+  sentence while `finish` estimates the one joined string `${SUMMARY_HEADER}
+  ${sentences.join(" ")}`, whose join separators the packer never charged for.
+  measured over 5 conversations x 7 shares x 7 budgets x both scorers, the
+  rendered block runs up to 2 tokens past the per-sentence sum it was packed
+  against, and one call ships a context 1 token over its budget (share 0.5,
+  budget 1000, luhn, exchange 21, 1001 tokens) with `overBudget` false, because
+  that flag only ever covers the pinned base parts. no published cell is
+  affected — every budget-sweep and share-sweep cell maxes at exactly its budget
+  — so nothing measured moves, but the invariant the docstring states does not
+  hold and nothing would catch a larger overshoot. found 2026-10-08
+- [medium] 14 — `generateConversation` validates the key bank and the event
+  slots but never that a lag bucket's floor fits the conversation, so a short
+  config fails with an error about something three steps downstream.
+  `LAG_RANGES.long` starts at 9 and `scheduleFact` clamps only the top end
+  (`maxLag = Math.min(hi, exchanges - 1)`), so at 6 exchanges it calls
+  `randInt(rng, 9, 5)`, whose `max - min + 1` is negative: the draw lands outside
+  the bucket, `intro = randInt(rng, 0, exchanges - 1 - lag)` can come back
+  negative, and the fact is planted in no turn at all.
+  `generateConversation({seed: 1, exchanges: 6, factCount: 3})` then throws
+  "fact value vega-juno-3 occurs 0 times, expected exactly 1" — the
+  single-occurrence validator naming a symptom, not the impossible lag; at 12
+  exchanges and 6 facts it throws "no free intro/probe slot for bucket long"
+  instead, also not the cause. the published configs are 30 and 60 exchanges so
+  nothing measured is touched, and the fix is one guard beside the two already
+  there: every bucket in BUCKET_CYCLE needs LAG_RANGES[bucket][0] <= exchanges
+  - 1. found 2026-10-08
 - [fixed 2026-10-08] 13 — the ablation published four nested layer-0 reach sets
   as four components of the graph. `miss_attribution` returned
   `sorted({len(reach) for reach in closures.values()})`, the block printed "in
@@ -4932,7 +4993,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 17-confidence-calibration | 2026-09-07 |
 | 16-llm-as-judge | 2026-09-07 |
 | 15-embedding-quantization | 2026-09-07 |
-| 14-context-window | 2026-09-06 |
+| 14-context-window | 2026-10-08 |
 | 13-ann-hnsw | 2026-10-08 |
 | 12-groundedness-scoring | 2026-10-07 |
 | 11-prompt-caching | 2026-10-07 |
@@ -4944,6 +5005,48 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+14 was last reviewed on 2026-09-06 and the catch this time is a significance
+claim read off the wrong row. all 110 committed tests passed before the fix,
+typecheck is clean, and both entry points are byte-identical across three local
+runs and again from a fresh clone — determinism is structural, the only rng is
+05's seeded mulberry32 behind the phrase bank, the fact scheduling and the nonce
+draws, so a conversation set is a pure function of its base seed. no leakage:
+every policy is a pure function of (system, history, currentUser, budget), the
+probe check is substring presence of a nonce the generator validates occurs
+exactly once, and nothing about a probe reaches the salience scorers. every
+number in both readme tables was checked against today's output line for line —
+the 17 budget-sweep rows, the 6 share-sweep rows, the growth pair and all 36
+rows of the irreversibility study — and the derived figures with them: the three
+work ratios (13.5x, 7.2x, 3.4x), the 4.3x regime growth, the 35/29/6 probe
+split, the 9.2-point share-50% gap and the 11.7-point / z=1.84 pair all
+recompute from the printed columns. the two attribution claims were re-derived
+rather than trusted: head-and-tail's 17.5% long-lag at 400 is 14 probes and all
+14 come from the pinned head with none from the tail or a summary, and
+sliding-window's 23.8% long-lag at 800 is 19 probes all from the raw tail.
+
+what was wrong is "no gap anywhere in the sweep clears two standard errors",
+with the share sweep three blocks above it holding rarity-50% at 800 — 100.0%
+standalone against 94.2% buried, z=2.69. the bullet reasoned from the widest
+gap, 11.7 points at z=1.84, as if the widest gap were the one most likely to
+clear the threshold. it is not: a two-proportion z runs on the base rate as well
+as the width, so 5.8 points against a 120-of-120 ceiling clears where 11.7
+points at a 60% base rate does not, and the exact count agrees (all 7 misses on
+one side, p=0.0143). the test that should have caught it was named for the
+published sweep and scanned 16 of the 23 rows that print the two columns, with
+the exception sitting in the 6 it skipped.
+
+the rule it adds: a claim quantified over a table has to be tested over that
+whole table, and the extreme the eye picks out is not the extreme the test cares
+about. the scan now covers all 23 rows and asserts the clearing set rather than
+its emptiness, so a row moving in or out of it fails. the bullet keeps its
+honest reading instead of flipping to the opposite claim — one row of 23 is 1.05
+rows at an uncorrected threshold, and the rows share one conversation set — and
+the retraction it exists for is untouched, since the signs still disagree across
+scorers and sliding-window still splits widest at 800. no measured number moved.
+eight findings left open on 14, two of them new: the summary block fitted with
+one token arithmetic and reported with another, and a lag bucket whose floor is
+never checked against the conversation length.
 
 13 was last reviewed on 2026-09-06 and the catch this time is a word that was
 doing the work of a measurement. all 50 committed tests passed before the fix
@@ -6990,7 +7093,7 @@ extended, not rewritten — the one sanctioned duplicate is documented below.
 - 14: increm-luhn-10% beats its own recompute row by half a point (76.3% vs 75.8%), lock-in protecting a fact from a later global re-rank; one cell is an anecdote, a small-share sweep would say whether it is systematic
 - 14: extractive selection cannot show paraphrase drift; an abstractive llm summarizer's irreversibility compounds through rewriting (the summary of a summary of a summary), and that measurement needs a model
 - 14: probes never restate values here, but real conversations re-mention decisions, which refreshes them into any recency window — how much of rarity-summarization's 57.5%-vs-23.8% long-lag edge survives a workload with re-mention?
-- 14: every standalone/buried gap in the sweep sits inside noise at 120 probes a side — does the split exist at all (more conversations, or the same fact planted at a controlled sentence length), and if it does, is it mean-based scoring diluting the nonce or just the extra tokens a buried turn costs a window?
+- 14: one of the 23 published standalone/buried gaps clears z=2 and the other 22 dont at 120 probes a side, about what the threshold gives for free — does the split exist at all (more conversations, or the same fact planted at a controlled sentence length), and if it does, is it mean-based scoring diluting the nonce or just the extra tokens a buried turn costs a window?
 - 14: retention is binary substring presence; a scripted answerer over these assembled contexts (08's pattern) would price a missing fact in wrong answers rather than percentage points
 - 14: the incremental extension ran a 60-exchange regime and the summary blocks saturate there (rarity-25% ends at 167-171 tokens of a ~180 block), widening the irreversibility gap from 3.7 to 5.4 points at budget 800; the 200-exchange support thread is still unrun, and past saturation every compaction is zero-sum, so the gap there is not an obvious extrapolation
 - 14: rarity salience wins partly because nonce values are maximally rare by construction; on real transcripts where decisions use words the conversation keeps repeating, the luhn/rarity gap should narrow — needs a real transcript corpus

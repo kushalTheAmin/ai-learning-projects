@@ -93,6 +93,25 @@ const CLASS_ROWS_800: { label: string; config: PolicyConfig }[] = [
   { label: "summ-rarity-25%", config: { name: "summarize-evicted", summaryShare: 0.25, summarizer: "rarity" } },
 ];
 
+// Every row main.ts prints with a standalone and a buried column: the
+// full-history row, the four policies across four budgets, and the six
+// share-sweep rows at 800. The class-gap scan used to cover only the middle
+// group, which is how a share-sweep row that clears two standard errors sat
+// under a readme sentence saying none did.
+const CLASS_ROWS_ALL: { label: string; config: PolicyConfig; budget: number }[] = [
+  { label: "full-history", config: { name: "full-history" }, budget: Number.MAX_SAFE_INTEGER },
+  ...[400, 800, 1600, 3200].flatMap((budget) =>
+    CLASS_ROWS_800.map(({ label, config }) => ({ label, config, budget })),
+  ),
+  ...(["luhn", "rarity"] as const).flatMap((summarizer) =>
+    [0.1, 0.25, 0.5].map((share) => ({
+      label: `${summarizer}-${Math.round(share * 100)}%`,
+      config: { name: "summarize-evicted", summaryShare: share, summarizer } as PolicyConfig,
+      budget: 800,
+    })),
+  ),
+];
+
 /** Two-proportion z for standalone vs buried retention on one row. */
 function classGapZ(r: CellResult): number {
   const s = r.byClass.standalone;
@@ -121,13 +140,53 @@ describe("standalone vs buried retention", () => {
     expect(gaps.get("sliding-window")!).toBeGreaterThan(gaps.get("summ-rarity-25%")!);
   });
 
-  test("no row in the published sweep clears two standard errors", () => {
-    for (const budget of [400, 800, 1600, 3200]) {
-      for (const { label, config } of CLASS_ROWS_800) {
-        const z = classGapZ(runCell(config, label, budget, PUBLISHED));
-        expect(Math.abs(z), `${label}@${budget} z=${z}`).toBeLessThan(2);
-      }
-    }
+  test("exactly one published row clears two standard errors, and it is rarity-50% at 800", () => {
+    expect(CLASS_ROWS_ALL).toHaveLength(23);
+    const clears = CLASS_ROWS_ALL
+      .map(({ label, config, budget }) => ({ label, budget, z: classGapZ(runCell(config, label, budget, PUBLISHED)) }))
+      .filter((r) => Math.abs(r.z) >= 2);
+    expect(clears.map((r) => `${r.label}@${r.budget}`)).toEqual(["rarity-50%@800"]);
+    expect(clears[0]!.z).toBeCloseTo(2.69, 2);
+  });
+
+  // The old scan reasoned from the widest gap, as if the widest gap were the
+  // one most likely to clear the threshold. It is not: significance runs on
+  // the base rate too, so the 5.8-point row at a 100% standalone ceiling
+  // clears where the 11.7-point row does not.
+  test("the widest gap is not the significant one, so width cannot stand in for the test", () => {
+    const scored = CLASS_ROWS_ALL.map(({ label, config, budget }) => {
+      const r = runCell(config, label, budget, PUBLISHED);
+      return {
+        at: `${label}@${budget}`,
+        gap: Math.abs(rate(r.byClass.standalone) - rate(r.byClass.buried)),
+        z: Math.abs(classGapZ(r)),
+      };
+    });
+    const widest = scored.reduce((a, b) => (b.gap > a.gap ? b : a));
+    const strongest = scored.reduce((a, b) => (b.z > a.z ? b : a));
+    expect(widest.at).toBe("summ-rarity-25%@400");
+    expect(strongest.at).toBe("rarity-50%@800");
+    expect(widest.z).toBeLessThan(2);
+    expect(strongest.gap).toBeLessThan(widest.gap);
+  });
+
+  test("the clearing row clears on an exact count too, not just the normal approximation", () => {
+    // standalone is 120 of 120 there, so the z is computed at a boundary. The
+    // exact version asks how often all the misses land on one side by chance.
+    const r = runCell(
+      { name: "summarize-evicted", summaryShare: 0.5, summarizer: "rarity" },
+      "rarity-50%",
+      800,
+      PUBLISHED,
+    );
+    const s = r.byClass.standalone;
+    const b = r.byClass.buried;
+    expect(s.hits).toBe(s.total);
+    const misses = s.total - s.hits + (b.total - b.hits);
+    let p = 1;
+    for (let i = 0; i < misses; i++) p *= (s.total - i) / (s.total + b.total - i);
+    expect(2 * p).toBeLessThan(0.05);
+    expect(2 * p).toBeCloseTo(0.0143, 4);
   });
 
   test("README quotes the per-class numbers the run actually produces", () => {
@@ -144,6 +203,35 @@ describe("standalone vs buried retention", () => {
     expect(bullet).toContain(`${rarS} of standalone facts against ${rarB} of buried ones`);
     expect(bullet).toContain(`(${luhnS} standalone, ${luhnB} buried)`);
     expect(bullet).toContain(`(${slideS} vs ${slideB})`);
+  });
+
+  test("the README bullet names the row that clears two standard errors instead of denying one exists", () => {
+    const clearing = runCell(
+      { name: "summarize-evicted", summaryShare: 0.5, summarizer: "rarity" },
+      "rarity-50%",
+      800,
+      PUBLISHED,
+    );
+    const s = `${(100 * rate(clearing.byClass.standalone)).toFixed(1)}%`;
+    const b = `${(100 * rate(clearing.byClass.buried)).toFixed(1)}%`;
+    const gap = 100 * (rate(clearing.byClass.standalone) - rate(clearing.byClass.buried));
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+    const bullet = readme.split("\n").find((l) => l.includes("standalone vs buried"));
+    expect(bullet, "README has no standalone-vs-buried bullet").toBeDefined();
+    expect(bullet).not.toContain("no gap anywhere in the sweep clears two standard errors");
+    expect(bullet).toContain(`${CLASS_ROWS_ALL.length} published rows`);
+    expect(bullet).toContain(`${s} standalone against ${b} buried`);
+    expect(bullet).toContain(`${gap.toFixed(1)} points at z=${classGapZ(clearing).toFixed(2)}`);
+  });
+
+  test("the README open question no longer says every gap sits inside noise", () => {
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+    const question = readme
+      .split("\n")
+      .find((l) => l.startsWith("- ") && /standalone vs buried gap/.test(l));
+    expect(question, "README has no standalone-vs-buried open question").toBeDefined();
+    expect(question).not.toContain("sits inside noise");
+    expect(question).toContain("one of the 23");
   });
 
   test("README quotes the widest gap and the turn sizes, neither of which main.ts prints", () => {
@@ -198,6 +286,16 @@ describe("standalone vs buried retention", () => {
     expect(row).toContain(`${s} standalone vs ${b} buried`);
   });
 
+  test("the ledger's completed row for 14 reports the row that clears z=2", () => {
+    const ledger = readFileSync(new URL("../../progress.md", import.meta.url), "utf-8");
+    const row = ledger
+      .split("\n")
+      .find((l) => l.startsWith("| 14-context-window |") && l.includes("| typescript |"));
+    expect(row, "progress.md has no COMPLETED row for 14").toBeDefined();
+    expect(row).not.toContain("no row in the sweep clears z=2");
+    expect(row).toContain(`1 of the ${CLASS_ROWS_ALL.length} published rows clears z=2`);
+  });
+
   test("the ledger's open thread for 14 asks whether the split exists at all", () => {
     // 120 a side is what makes every gap in the sweep noise, and it comes off
     // the workload: 20 conversations x 12 facts, half of each class.
@@ -212,6 +310,8 @@ describe("standalone vs buried retention", () => {
     expect(threads).toHaveLength(1);
     expect(threads[0]).not.toMatch(/tax|comes from/);
     expect(threads[0]).toContain(`${perClass} probes a side`);
+    expect(threads[0]).not.toContain("sits inside noise");
+    expect(threads[0]).toContain("one of the 23");
   });
 });
 
