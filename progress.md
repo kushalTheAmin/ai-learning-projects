@@ -188,6 +188,54 @@ Open issues found by review, worst first. High = wrong results or wrong
 claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place.
 
+- [fixed 2026-10-08] 13 — the ablation published four nested layer-0 reach sets
+  as four components of the graph. `miss_attribution` returned
+  `sorted({len(reach) for reach in closures.values()})`, the block printed "in
+  components of 61 / 88 / 1855 / 1926" and "the entry point's own component is
+  1855 of 2000", and the readme read that as "four components, one of them
+  bigger than the entry point's own". measured, the four sets nest: 61 and 88
+  are disjoint from each other but both are subsets of the 1855 the entry point
+  reaches, which is a subset of the 1926 the widest start reaches, and the four
+  sizes sum to 3930 on a 2000 node corpus — arithmetic that rules out a
+  partition from the published numbers alone. layer-0 links are one-way, so a
+  sink pocket sits *inside* a larger reach rather than beside it, and
+  "component" is the wrong word for every one of them. the fix returns the reach
+  sets instead of their sizes, since sizes cannot answer whether they nest, adds
+  `nesting_pairs` to report each set's smallest container, and prints "the reach
+  sets nest rather than partition: 61 in 1855, 88 in 1855, 1855 in 1926" with
+  the shape named only when exactly one set sits inside nothing larger, so a
+  real partition would print as one. the readme paragraph, the two sentences
+  that called the graph "in pieces" and the root index row's "breaks layer 0
+  into four components" all follow. 50 tests → 56: four pin the nesting and the
+  new helper (including a hand-built disjoint pair, which must report no
+  container), two hold the block and the readme off the retired word. 6 fail on
+  the old code and the revert splits cleanly in a fresh clone — reverting
+  main.py alone fails the 5 code and block tests, reverting README.md alone
+  fails the 3 prose and block tests. no measured number moved: every other line
+  of `python3 main.py` is byte-identical before and after. found and fixed
+  2026-10-08
+- [medium] 13 — the layer-0 beam breaks distance ties the opposite way from
+  `search`'s own docstring and from the ground truth it is scored against.
+  `_search_layer` keeps its results in a max-heap of `(-dist, node)`, so
+  `heappop` evicts the *smallest* id among the furthest tied candidates and the
+  beam retains the largest ones; `search` then sorts what survived and documents
+  itself as "nearest first, ties broken by id", which is true of the final sort
+  and false of which tied nodes reach it. `ExactIndex.search` lexsorts ids
+  ascending, so the two indexes disagree on exactly the queries where ties
+  decide the cut, and the disagreement is scored as a recall miss rather than a
+  tie. 8 unit vectors in 8-d, all at squared distance 1.0 from the origin:
+  `search(origin, 3, ef=3)` returns ids 0, 1, 4 where the exact index returns 0,
+  1, 2, and the full-width beam at ef=8 agrees with exact again, so the defect
+  only shows when ef is tight enough that tied candidates compete for the last
+  slot. `_shrink` ranks with an explicit `key=(dist, id)` and gets it right, so
+  the two tie-breaks inside one class point opposite ways. nothing published
+  moves — the gaussian datasets never tie exactly — but it compounds the
+  duplicate-corpus finding below, where every distance ties by construction.
+  found 2026-10-08
+- [low] 13 — "the ef=160 row nearly doubles cost over ef=80" understates its own
+  table. 581 against 260 dists/query is 2.23x, more than doubling, and the
+  sentence is the premise of the adaptive-ef open question it introduces, so the
+  understatement argues against the build it is proposing. found 2026-10-08
 - [fixed 2026-10-07] 12 — three of the four published AUCs were float noise,
   and they changed with the interpreter. the tf-idf cosine lands a few 1e-16
   either side of its true value and `auc` counts a tie by exact equality, so
@@ -4392,11 +4440,18 @@ Fixed items stay listed with their fix date so the history reads in one place.
   retrievable` uses 5 duplicates among 30, passes, and reads as a guarantee
   the index does not have. "tradeoffs and where it breaks" doesn't mention it.
   found 2026-08-29
-- [low] 13 — "the naive graph is literally disconnected" is the one word the
-  measurement doesn't support. layer 0 is a single weakly connected component
-  of 2000 in every ablation arm; the 145 stranded nodes still link out to the
-  core, the core just has no way back. directed unreachability, which is the
-  thing that matters for search, but not a split graph. found 2026-08-29
+- [fixed 2026-10-08] 13 — "the naive graph is literally disconnected" is the one
+  word the measurement doesn't support. layer 0 is a single weakly connected
+  component of 2000 in every ablation arm; the 145 stranded nodes still link out
+  to the core, the core just has no way back. directed unreachability, which is
+  the thing that matters for search, but not a split graph. found 2026-08-29,
+  carried by the components fix above: the phrase had become "it does break the
+  graph into pieces" and "the naive graph is genuinely in pieces", and both say
+  the same wrong thing the nesting measurement refutes, so leaving them while
+  the paragraph between them argued the opposite would have made the readme
+  contradict itself. they now read "it does leave queries in one-way pockets"
+  and "the naive graph traps a query wherever its descent lands" — directed
+  unreachability, stated as that
 - [low] 13 — the wall-clock section builds a fresh `ExactIndex` and starts the
   timer before the first search, so the lazy `np.vstack` of all 3000 rows is
   charged to the exact baseline inside the per-query loop: 2.07ms once, 0.014
@@ -4878,7 +4933,7 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 16-llm-as-judge | 2026-09-07 |
 | 15-embedding-quantization | 2026-09-07 |
 | 14-context-window | 2026-09-06 |
-| 13-ann-hnsw | 2026-09-06 |
+| 13-ann-hnsw | 2026-10-08 |
 | 12-groundedness-scoring | 2026-10-07 |
 | 11-prompt-caching | 2026-10-07 |
 | 10-chunking-strategies | 2026-10-06 |
@@ -4889,6 +4944,47 @@ Fixed items stay listed with their fix date so the history reads in one place.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+13 was last reviewed on 2026-09-06 and the catch this time is a word that was
+doing the work of a measurement. all 50 committed tests passed before the fix
+and the entry point is deterministic apart from the two labelled wall-clock
+columns — three local runs and a fourth from a fresh clone print every recall,
+distance and reachability figure byte-identical, which is structural: the only
+rng is the seeded `default_rng` behind the level draws and the datasets, so a
+build is a pure function of its seed. the algorithm checks out against the
+paper term by term — level draw `floor(-ln(u)/ln(M))` with mL = 1/ln(M), the
+heuristic keeping a candidate only when it is nearer the new node than any
+already kept and then backfilling from the discarded pile, M on insert against
+Mmax0 = 2M as the layer-0 cap, ep = W handed down a layer. no leakage: the
+ground truth is a separate `ExactIndex` over the same vectors, no query touches
+the build, and recall is imported from 02 rather than restated. every number in
+the readme was checked against today's output — the 6 ef rows, the 4 M rows,
+the 4 ablation rows and the whole attribution block line for line.
+
+what was wrong is the attribution block calling four reach sets "components of
+61 / 88 / 1855 / 1926", and the readme then reading that as four pieces of the
+graph with one of them bigger than the entry point's own. they are not pieces.
+measured, they nest: the 61 and 88 node pockets are disjoint from each other
+but both sit inside the 1855 the entry point reaches, which sits inside the
+1926 the widest start reaches. the tell was in the published numbers all along
+— 61 + 88 + 1855 + 1926 = 3930 on a 2000 node corpus, so they could not have
+been a partition of anything. so the naive graph's shape is one funnel with two
+one-way traps in it, not a split, and the earlier fix's own sentence ("one of
+them bigger than the entry point's own") was describing a superset as a rival.
+
+the rule it adds: a structural word — component, partition, cluster, disjoint —
+is a claim about set relations, and printing sizes never establishes one. the
+code returned `sorted({len(reach) for reach in closures.values()})`, which
+throws away the only thing that could have answered the question, and then the
+prose answered it anyway. `miss_attribution` now hands back the reach sets
+themselves and `nesting_pairs` reports each one's smallest container, so the
+block prints the containment it found and names the shape only when exactly one
+set sits inside nothing larger — a real partition prints as one. no measured
+number moved. the review also closed the standing low finding on the readme
+calling the graph "in pieces", which is the same claim in a different word and
+would have contradicted the paragraph the fix rewrote. eight findings left open
+on 13, two of them new: the beam's tie-break direction and an understated cost
+ratio in the open questions.
 
 11 was last reviewed on 2026-09-05 and the catch this time is in the cache
 model itself rather than the prose. all 97 committed tests passed before the
