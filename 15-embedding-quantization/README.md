@@ -67,6 +67,11 @@ python because the vectors, the indexes, and the recall metric all live in the p
 
 ## fixes
 
+- 2026-10-08 — the open question pricing hnsw's ef knob against int8 read its
+  endpoint off the last row of 13's sweep, so recall 1.000 came out at 6.5x the
+  distance budget — ef 160 reaches the same 1.000 at 3.1x. now names ef 20 to
+  160 (188 to 581 per query), halving the price the sentence puts on the ef
+  side of the comparison. no measured number moved
 - 2026-09-07 — the `float64 truth` row printed 2.00x in the `vs fp32` column,
   and every other cell in that column is fp32 bytes over row bytes — so the
   one store bigger than fp32 read as the second most compact thing in the
@@ -85,7 +90,7 @@ python because the vectors, the indexes, and the recall metric all live in the p
 
 ## open questions
 
-- int8 asym costs 1.5 recall points here, and 13 showed hnsw ef 20 to 320 buys 0.5 points (0.995 to 1.000) for 6.5x the distance budget (188 to 1221 per query). per byte of RAM, which knob is cheaper at a fixed recall target on one shared sweep
+- int8 asym costs 1.5 recall points here, and 13 showed hnsw ef 20 to 160 buys 0.5 points (0.995 to 1.000) for 3.1x the distance budget (188 to 581 per query). per byte of RAM, which knob is cheaper at a fixed recall target on one shared sweep
 - the quantile clip fraction is a hyperparameter with a cliff on each side, too small keeps the rogue stretch and too large clips real data. an adaptive rule from the observed per-dim histogram is the production question
 - product quantization is the standard next step past scalar, subvector codebooks trained by k-means. its extra recall per bit on these exact datasets is unmeasured here
 - hnsw built on floats then searched on codes (or the reverse) would split the constant +0.015 gap into build damage vs search damage
