@@ -40,9 +40,9 @@ landing in the wrong basin cant escape. the papers heuristic keeps a candidate
 only if it is closer to the new node than to every neighbor already kept,
 which suppresses redundant same-direction links and preserves the rare edge
 that crosses a gap. measured below: on tight clusters the naive rule drops
-recall to 0.809 where the heuristic holds 0.997, and it does break the graph
-into pieces — but the breakage is the smaller half of the story. only 51 of
-the 287 gold neighbors it misses are unreachable from where that query's
+recall to 0.809 where the heuristic holds 0.997, and it does leave queries in
+one-way pockets — but that breakage is the smaller half of the story. only
+51 of the 287 gold neighbors it misses are unreachable from where that query's
 layer-0 walk starts; the other 236 sit inside reach and the beam settles
 before it gets to them.
 
@@ -107,26 +107,30 @@ so the naive row's 0.188 breaks down like this:
 
 ```
 layer-0 walks start at the descent endpoint, not the entry point:
-  74 distinct starts over 150 queries, in components of 61 / 88 / 1855 / 1926
-  the entry point's own component is 1855 of 2000
+  74 distinct starts over 150 queries, reaching 61 / 88 / 1855 / 1926 of 2000
+  the reach sets nest rather than partition: 61 in 1855, 88 in 1855, 1855 in 1926
+  the entry point's own reach is 1855 of 2000
 1500 gold slots, 287 missed:
   51 unreachable from that query's own layer-0 start
   236 inside reach, the beam never walked there
 ```
 
-four components, one of them bigger than the entry point's own, and ten
-queries start inside a 61 or 88 node pocket they can never leave. that is
-real damage — but 236 of the 287 misses are nodes the walk could have
-reached and didn't, so the naive rule mostly hurts by making the beam settle
-early, not by cutting the graph.
+those four numbers are not four pieces of the graph. they nest — 61 and 88
+are disjoint sink pockets, both of them inside the 1855 the entry point
+reaches, which is inside the 1926 the widest start reaches. summed they come
+to 3930 on a 2000 node corpus, which is the tell. so the shape is one funnel
+with two traps in it, not a split: ten queries start inside a 61 or 88 node
+pocket they can never leave, which is real damage — but 236 of the 287 misses
+are nodes the walk could have reached and didnt, so the naive rule mostly
+hurts by making the beam settle early, not by cutting the graph.
 
 on uniform data the two rules are 0.015 apart, on tight clusters the gap is
-0.188 and the naive graph is genuinely in pieces. the heuristic is not a
-tuning detail, it is what makes hnsw survive clustered data, and real
-embedding spaces are clustered. also worth seeing: uniform 32-d data is
-harder for both (0.861 at settings where clustered scores 0.997); with no
-cluster structure every direction competes and the beam has to be wider for
-the same recall.
+0.188 and the naive graph traps a query wherever its descent lands. the
+heuristic is not a tuning detail, it is what makes hnsw survive clustered
+data, and real embedding spaces are clustered. also worth seeing: uniform
+32-d data is harder for both (0.861 at settings where clustered scores
+0.997); with no cluster structure every direction competes and the beam has
+to be wider for the same recall.
 
 ## wall clock, and where the distance count lies
 
@@ -158,6 +162,15 @@ distance computations, not 15x faster in this runtime.
 
 ## fixes
 
+- 2026-10-08 — the ablation printed the four layer-0 reach sizes as
+  "components of 61 / 88 / 1855 / 1926" and the readme read them as pieces of
+  the graph, one bigger than the entry point's own. they nest: 61 and 88 are
+  disjoint pockets inside the 1855 the entry point reaches, which is inside the
+  1926 the widest start reaches, and the four sum to 3930 on 2000 nodes.
+  `miss_attribution` now returns the reach sets instead of their sizes and
+  `nesting_pairs` measures the containment, so the block prints "nest rather
+  than partition: 61 in 1855, 88 in 1855, 1855 in 1926". no measured number
+  moved
 - 2026-09-06 — the ablation read its 145 stranded nodes as the reason naive
   recall drops to 0.809, and `layer-0 reachable` walked from the top-layer
   entry point, which is where the descent starts, not the layer-0 walk. added

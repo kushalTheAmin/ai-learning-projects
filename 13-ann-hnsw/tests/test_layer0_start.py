@@ -87,7 +87,7 @@ def test_layer0_entry_is_the_descent_endpoint_not_the_entry_point(naive_tight) -
     assert len(set(starts)) == 74
 
 
-def test_the_starts_sit_in_four_different_components(naive_tight) -> None:
+def test_the_starts_reach_four_different_amounts(naive_tight) -> None:
     index, data, _ = naive_tight
     sizes = sorted(
         {len(index.reachable_from_on_layer0(index.layer0_entry(q))) for q in data.queries}
@@ -95,6 +95,47 @@ def test_the_starts_sit_in_four_different_components(naive_tight) -> None:
     # the finding as an invariant: what a query can walk to on layer 0 is not
     # one number for the graph, it is four here
     assert sizes == [61, 88, 1855, 1926]
+
+
+def test_the_four_reach_sets_nest_rather_than_partition(naive_tight) -> None:
+    """The four sizes are not four pieces of the graph. Every reach set sits
+    inside the largest one, so they are nested funnels and the sizes do not add
+    up to anything — summed they exceed the corpus."""
+    index, data, _ = naive_tight
+    by_size = {
+        len(reach): reach
+        for reach in {
+            frozenset(index.reachable_from_on_layer0(index.layer0_entry(q)))
+            for q in data.queries
+        }
+    }
+    assert sorted(by_size) == [61, 88, 1855, 1926]
+    assert by_size[61] < by_size[1855] < by_size[1926]
+    assert by_size[88] < by_size[1855]
+    # the two pockets are disjoint from each other, which is the only
+    # partition-shaped thing here
+    assert not (by_size[61] & by_size[88])
+    # a partition of 2000 nodes could not sum to 3930
+    assert sum(by_size) == 3930
+
+
+def test_nesting_pairs_names_each_reach_sets_smallest_container(naive_tight) -> None:
+    index, data, truth = naive_tight
+    *_, reaches = main.miss_attribution(index, data, truth, ef=EF)
+    assert [len(reach) for reach in reaches] == [61, 88, 1855, 1926]
+    # exactly one set sits inside nothing larger: that is what nesting means,
+    # and a real partition would put None on all four
+    assert main.nesting_pairs(reaches) == [
+        (61, 1855),
+        (88, 1855),
+        (1855, 1926),
+        (1926, None),
+    ]
+
+
+def test_nesting_pairs_reports_a_real_partition_as_unnested() -> None:
+    disjoint = [frozenset({0, 1}), frozenset({2, 3, 4})]
+    assert main.nesting_pairs(disjoint) == [(2, None), (3, None)]
 
 
 def test_the_entry_points_component_is_neither_the_only_nor_the_largest(
@@ -147,11 +188,11 @@ def test_a_tiny_component_start_really_is_a_dead_end(naive_tight) -> None:
 
 def test_unreachability_is_the_smaller_half_of_the_naive_miss(naive_tight) -> None:
     index, data, truth = naive_tight
-    slots, unreachable, in_reach, starts, sizes = main.miss_attribution(
+    slots, unreachable, in_reach, starts, reaches = main.miss_attribution(
         index, data, truth, ef=EF
     )
     assert (slots, unreachable, in_reach) == (1500, 51, 236)
-    assert (starts, sizes) == (74, [61, 88, 1855, 1926])
+    assert (starts, [len(reach) for reach in reaches]) == (74, [61, 88, 1855, 1926])
     # recall 0.809 is 287 missed gold neighbors out of 1500
     assert unreachable + in_reach == 287
     # the claim the readme used to make, refuted: stranding accounts for well
@@ -192,6 +233,27 @@ def test_readme_prints_the_attribution_block(naive_tight) -> None:
     index, data, truth = naive_tight
     block = "\n".join(main.miss_attribution_block(index, data, truth, ef=EF, n=ABLATION_N))
     assert normalize(block) in normalize(README.read_text())
+
+
+def test_the_block_does_not_call_the_reach_sets_components(naive_tight) -> None:
+    index, data, truth = naive_tight
+    block = "\n".join(main.miss_attribution_block(index, data, truth, ef=EF, n=ABLATION_N))
+    assert "component" not in block
+    assert "nest rather than partition: 61 in 1855, 88 in 1855, 1855 in 1926" in block
+    assert "reaching 61 / 88 / 1855 / 1926 of 2000" in block
+
+
+def test_readme_does_not_read_the_reach_sets_as_four_components() -> None:
+    text = readme_without_fixes()
+    assert "four components" not in text
+    assert "in components of" not in text
+    assert "the entry point's own component" not in text
+
+
+def test_readme_names_the_nesting() -> None:
+    text = readme_without_fixes()
+    assert "nest rather than partition" in text
+    assert "61 and 88 are disjoint sink pockets" in text
 
 
 def test_readme_no_longer_reads_stranding_as_the_cause() -> None:

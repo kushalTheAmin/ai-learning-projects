@@ -57,7 +57,7 @@ def sweep_row(
 
 def miss_attribution(
     index: HnswIndex, data: Dataset, truth: list[list[tuple[int, float]]], ef: int
-) -> tuple[int, int, int, int, list[int]]:
+) -> tuple[int, int, int, int, list[frozenset[int]]]:
     """Splits missed gold neighbors two ways and reports where the walks began.
 
     A search descends the upper layers first, so its layer-0 beam starts at
@@ -66,7 +66,9 @@ def miss_attribution(
     one the beam could have reached and settled short of.
 
     Returns (gold slots, unreachable misses, in-reach misses, distinct layer-0
-    starts, sorted sizes of the components those starts sit in)."""
+    starts, the distinct reach sets those starts have, smallest first). The
+    reach sets themselves rather than their sizes, because whether they nest or
+    partition is the structural question and sizes cannot answer it."""
     closures: dict[int, set[int]] = {}
     slots = unreachable = in_reach = 0
     for query, exact in zip(data.queries, truth):
@@ -82,9 +84,30 @@ def miss_attribution(
                 in_reach += 1
             else:
                 unreachable += 1
-    return slots, unreachable, in_reach, len(closures), sorted(
-        {len(reach) for reach in closures.values()}
+    reaches = sorted(
+        {frozenset(reach) for reach in closures.values()},
+        key=lambda reach: (len(reach), min(reach)),
     )
+    return slots, unreachable, in_reach, len(closures), reaches
+
+
+def nesting_pairs(
+    reaches: list[frozenset[int]],
+) -> list[tuple[int, int | None]]:
+    """Each reach set's size paired with the size of the smallest strictly
+    larger set containing it, or None when nothing does.
+
+    Reach sets are not graph components: a one-way layer-0 edge lets a small
+    sink pocket sit inside a much larger reach rather than beside it. A real
+    partition puts None on every row; nesting leaves exactly one, the largest.
+    """
+    pairs: list[tuple[int, int | None]] = []
+    for position, reach in enumerate(reaches):
+        parent = next(
+            (len(bigger) for bigger in reaches[position + 1 :] if reach < bigger), None
+        )
+        pairs.append((len(reach), parent))
+    return pairs
 
 
 def miss_attribution_block(
@@ -96,12 +119,25 @@ def miss_attribution_block(
 ) -> list[str]:
     """The attribution as printed lines, returned rather than printed so a
     test can pin the readme against them without rerunning the whole file."""
-    slots, unreachable, in_reach, starts, sizes = miss_attribution(index, data, truth, ef)
+    slots, unreachable, in_reach, starts, reaches = miss_attribution(
+        index, data, truth, ef
+    )
+    pairs = nesting_pairs(reaches)
+    rootless = [size for size, parent in pairs if parent is None]
+    shape = (
+        "nest rather than partition"
+        if len(rootless) == 1
+        else f"do not all nest — {len(rootless)} sit inside nothing larger"
+    )
+    nesting = ", ".join(
+        f"{size} in {parent}" for size, parent in pairs if parent is not None
+    )
     return [
         "layer-0 walks start at the descent endpoint, not the entry point:",
-        f"  {starts} distinct starts over {len(data.queries)} queries, in components "
-        f"of {' / '.join(str(size) for size in sizes)}",
-        f"  the entry point's own component is {index.reachable_on_layer0()} of {n}",
+        f"  {starts} distinct starts over {len(data.queries)} queries, reaching "
+        f"{' / '.join(str(len(reach)) for reach in reaches)} of {n}",
+        f"  the reach sets {shape}: {nesting}",
+        f"  the entry point's own reach is {index.reachable_on_layer0()} of {n}",
         f"{slots} gold slots, {unreachable + in_reach} missed:",
         f"  {unreachable} unreachable from that query's own layer-0 start",
         f"  {in_reach} inside reach, the beam never walked there",
