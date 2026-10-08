@@ -190,6 +190,69 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [high] 16 — the COMPLETED ledger row publishes a figure 16's own readme
+  retired 38 days ago. the row reads "champion-always-first drags a true 0.500
+  challenger to 0.380 and randomization restores 0.485 at no cost", and 0.485
+  is the both-order column — crediting it to randomization is exactly the error
+  the 2026-08-31 fix found in the readme and corrected there, and `runChampion`
+  has printed the real randomized figure, 0.440, ever since. so the ledger row
+  still sells the cheap protocol on the 2x protocol's number, in the surface
+  another project reads before reusing the mechanism. this is the blanket
+  unbound-ledger finding producing the failure it predicts for the eighth time,
+  and 16 is not in its bound list. every other figure in the row recomputes
+  against today's output — 0.955 / 0.745 / 0.198, always-pass 0.700 and kappa
+  0.000, primacy 0.287 flips and 1.000 on 0.713 decided, $2.53 against $1.26,
+  effective 0.857 against randomized 0.887, self-pref 0.600 and 0.620, primacy
+  pointwise 0.990, lenient 1.000 randomized — so the fix is the one phrase plus
+  a `ledger_row` fixture binding the row's figures the way 03, 07, 11, 14, 17,
+  21 and 25 are bound. found 2026-10-08
+- [fixed 2026-10-08] 16 — the one sentence recommending order randomization
+  oversold it twice over. "randomizing the order per pair takes back most of
+  that (0.440), asking both orders takes back the rest (0.485)" prices a
+  recovery of 0.060 against a suppression of 0.120, so randomizing takes back
+  exactly half, and both-order's extra 0.045 is 0.750 of what randomizing
+  bought — "the rest" was the same size as the bulk. the cost paragraph then
+  repeated the claim on a second number that cannot support it: "core accuracy
+  0.847 to 0.887" is the primacy judge going from as-stored to randomized on
+  the core pairs, and `assertBalance` already pins that set's stored
+  arrangement at 75 of 150 with the better answer in slot a, so as-stored
+  presents the better answer first as often as randomizing does and there is no
+  arrangement bias there to remove. over 500 fresh noise identities at the
+  cast's 0.15 bonus randomizing lands 0.009 below as-stored on that set (95% ci
+  -0.011 to -0.007) and only 0.018 of order draws reach the published 0.040, so
+  the figure sold as the cheap protocol working is one draw 1.67 sd out with
+  the expected sign the other way. third finding on this sentence: the
+  2026-08-31 fix that stopped it quoting the both-order column for randomized
+  order is the one that introduced both of these. prose and the root index row
+  corrected, no measured number moved, nine tests pin it and four of them fail
+  on the old prose. found and fixed 2026-10-08
+- [cleared 2026-10-08] 16 — the open question asking whether the suppression
+  map integrated over a real gap distribution predicts the champion set's
+  measured 0.380 holds. interpolating the bonus-0.15 row of the map
+  (0.05:0.015, 0.10:0.090, 0.15:0.270, 0.20:0.455, 0.30:0.500) over the 100
+  actual champion gaps — 0.082 to 0.399, mean 0.239 — gives 0.386 against the
+  measured 0.380, inside one standard error on 100 pairs, so the readme's "the
+  original champion set's 0.380 is this map integrated over its own gap draw"
+  is a validated prediction rather than a description. the open question
+  itself is still live in the readme and could be retired with the number.
+  checked 2026-10-08
+- [low] 16 — the core pairwise table's caption names one protocol and the table
+  prints three. "pairwise on 150 balanced pairs, order swapped and re-asked
+  (both-order)" sits above a table whose first two columns, as-stored and
+  randomized, are single-call runs that ask once and never swap; only flip
+  rate, coverage, decided and effective come from the both-order run. the
+  column headers are right and the entry point's own heading is the neutral
+  "pairwise on balanced core pairs", so nothing published is wrong, but the
+  caption is the line a reader uses to decide what the 1.000 and 0.993 in the
+  first two columns mean. found 2026-10-08
+- [low] 16 — `buildText` is quadratic in the sentences it appends.
+  `parts.join(" ")` plus `estimateTokens` over the whole joined text runs once
+  per appended sentence, so an answer of n sentences rebuilds and remeasures
+  O(n^2) characters. n is bounded at about 20 by the 40-to-300 token targets
+  and the whole dataset builds in milliseconds, so this costs nothing at the
+  published sizes — it is quadratic in kind, not in effect, and only matters if
+  an answer-length study ever sweeps targets upward. tracking the running
+  length instead of re-joining is the whole fix. found 2026-10-08
 - [fixed 2026-10-08] 15 — the open question priced hnsw's ef knob at the last
   row of 13's sweep instead of the cheapest row that reaches the recall it
   names. the sentence read "13 showed hnsw ef 20 to 320 buys 0.5 points (0.995
@@ -1136,7 +1199,11 @@ question is not reopened.
   bound now. every row a review pass has recomputed so far has come back
   carrying a retired figure — 03, 07, 11, 14, 17, 21 and 25 — so this is not a
   rare drift, it is what an unbound row does. the exclusion list above is the
-  record of which are bound
+  record of which are bound. 2026-10-08: 16's row makes eight, and the worst
+  one yet — "randomization restores 0.485 at no cost" is the both-order column
+  credited to randomization, which is the same error its readme had corrected
+  38 days earlier, so an unbound row can also preserve a mistake a fix already
+  removed one file over
 
 - [medium] 03 — overall recall@1 has a ceiling of 0.9875 and nothing says so.
   p13 ("ship a small production image that pulls fast") is the one query of the
@@ -5028,7 +5095,7 @@ question is not reopened.
 | 20-guardrails | 2026-10-01 |
 | 18-semantic-caching | 2026-09-30 |
 | 17-confidence-calibration | 2026-09-07 |
-| 16-llm-as-judge | 2026-09-07 |
+| 16-llm-as-judge | 2026-10-08 |
 | 15-embedding-quantization | 2026-10-08 |
 | 14-context-window | 2026-10-08 |
 | 13-ann-hnsw | 2026-10-08 |
@@ -5042,6 +5109,70 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+16 was last reviewed on 2026-09-07 and the catch this time is a recovery claim
+sold at twice its size on one number and on noise for the other. all 155
+committed tests passed before the fix, typecheck is clean, and all three entry
+points are byte-identical between two local runs and a third from a fresh clone
+— determinism is structural, every verdict is a pure function of (judge name,
+item id, presentation order) through `fnv1a` into 05's mulberry32, so no table
+carries a wall clock or an unseeded draw. the statistic checks out term by term:
+`directionStats` counts a first-win as `forward === "a"` plus `reverse === "b"`,
+so an unflipped pair contributes exactly 1 of its 2 calls and lean reduces to
+(toward-first minus toward-second) / 2 — primacy's 0.287 and 0.000 give 0.1435,
+printed 0.143. kappa is (po - pe) / (1 - pe) off the two marginals with the
+both-constant case reported as 0, and always-pass really does compute to 0.000
+rather than hitting that branch. `empiricalCritical` takes the 475th of 500
+sorted |lean| values, so strictly exceeding it can happen on at most 25 of them
+— the realized 0.002 at sigma 0.04 is the discreteness the readme already names,
+lean on 50 pairs moving in steps of 0.01 against a null sd of 0.0077. the
+single-call and both-order leans do estimate the same quantity: a randomized
+call takes the forward or reverse call with probability one half each, so its
+expectation is the average of the two, which is the both-order statistic. the
+order coin is fair — 0.50035 over 200000 pair ids — and the gaussian reads mean
+-0.0015, sd 1.0008 over 200000 first draws. every number in the readme was
+checked against today's output line for line: 43 of the 45 table lines match a
+printed line exactly and the two that do not are the sigma-0.04 sweep printed as
+rows and quoted transposed, bonus for bonus. no leakage, and the balance the
+whole project rests on is enforced rather than sampled — `assertBalance` pins
+the grading pass rate at exactly 0.700, house-better and house-in-a at half
+each, long-better and long-in-a at half each, and the per-pair gap floor at
+0.08.
+
+what was wrong is "randomizing the order per pair takes back most of that
+(0.440), asking both orders takes back the rest (0.485)", and the cost
+paragraph's "randomized order is free and takes back most of a position bias —
+core accuracy 0.847 to 0.887, champion win rate 0.380 to 0.440". the champion
+half is half-sized: 0.440 against a truth of 0.500 off a champion-first 0.380 is
+0.060 of the 0.120 suppression, exactly 0.500 of it, and both-order's extra
+0.045 is 0.750 of what randomizing bought, so "the rest" was the same size as
+the bulk. the core half cannot be evidence at all. `assertBalance` already pins
+the core set's stored arrangement at 75 of 150 with the better answer in slot a,
+so as-stored presents the better answer first as often as randomizing does in
+expectation and there is no arrangement bias there to remove — the expected
+difference is the gap-distribution asymmetry between the two halves and nothing
+else. measured over 500 fresh noise identities at the cast's 0.15 bonus,
+randomizing lands 0.009 below as-stored on that set, 95% ci -0.011 to -0.007,
+and only 0.018 of order draws reach the published 0.040 gain, which sits 1.67 sd
+out. so the one sentence recommending the cheap protocol had the wrong fraction
+on the set where randomizing works and the wrong sign on the set where it does
+not.
+
+the rule it adds: a debiasing protocol can only be credited on a set whose
+stored arrangement carries the bias, and the fraction it recovers has to be
+read against the suppression, not asserted. that is the third finding in this
+project's history on the same sentence — 2026-08-31 found it quoting the
+both-order column for randomized order, and the fix that replaced it introduced
+both of today's errors — so the sentence is now bound by nine tests including
+the recovery fractions at 0.500 and 0.875, the 0.750 extra-over-gain ratio, the
+75/150 balance, the replicated gain with its spread, and four readme checks that
+fail on the old prose. no measured number moved and every printed table is byte
+identical. five findings left open on 16, two of them new and both low. the
+2026-09-07 open question asking whether the suppression map integrated over the
+champion set's own gap draw predicts its 0.380 is cleared: interpolating the
+bonus-0.15 row over the 100 actual champion gaps (0.082 to 0.399, mean 0.239)
+gives 0.386 against the measured 0.380, inside one standard error on 100 pairs,
+so the map really is a predictor and not just a description.
 
 15 was last reviewed on 2026-09-07 and the catch this time is a price read off
 the wrong end of a sibling's table. all 70 committed tests passed before the fix
