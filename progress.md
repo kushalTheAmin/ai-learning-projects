@@ -190,6 +190,60 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-09] 17 — the reordering section sold the logit margin as "an
+  ordering that no recalibration can ever touch", and one global temperature is
+  the only thing it is proof against. the justification it gives is the right
+  one for the narrow claim — T scales every top-two logit gap uniformly so the
+  ordering cannot move, and `test_logit_margin_ordering_survives_temperature`
+  asserts exactly 0.0000 — but "no recalibration" is universal, and the
+  counterexample is the fix this readme's own tradeoffs section recommends for
+  shaped miscalibration: a per-class temperature divides the top logit and the
+  runner-up by different numbers, so the gap stops scaling uniformly. measured
+  on the published pipeline, holding three classes at the fitted 3.060 and
+  putting auth 10% off it moves the logit margin ordering on 2.00% of pairs —
+  more than the whole fitted temperature moves the probability margin's
+  (1.62%), the figure the same paragraph cites as evidence that the orderings
+  do move. a one percent split already moves it (0.22%), the class is not
+  load-bearing (0.0177 to 0.0200 across the four), and a platt per-class bias
+  breaks it by addition rather than division (4.15% off a bias fitted on val).
+  nor is the counterexample hypothetical: a vector temperature fitted on the
+  same validation set, [2.70, 3.45, 3.00, 3.10], beats the global scalar on val
+  nll (0.5970 against 0.6001) and moves 4.55%. same shape as the 15 ef-endpoint
+  finding — the test coverage was exactly as wide as the true claim and the
+  prose was wider, so it passed. prose scoped to temperature with the limit
+  named, the counterexample now prints in section 3 beside the 0.0000, nine
+  tests added (104 → 113) of which three fail on the old readme and entry
+  point. no measured number moved: main.py is byte-identical and the signals
+  run gains two lines. found and fixed 2026-10-09
+- [medium] 17 — "raw scores break the promise at every threshold" is false at
+  four of the seven thresholds the policy table prints. the sentence's own
+  evidence is the threshold-against-accuracy reading — "the at least 90%
+  confident slice is 88.6% accurate, and even demanding 0.99 only buys 93.6%" —
+  and on that reading raw keeps the promise at t=0.50 (0.801), 0.60 (0.817),
+  0.70 (0.836) and 0.80 (0.859), one of which is a row the readme itself
+  excerpts. the next sentence reads the calibrated column the same way
+  ("calibrated scores keep the promise ... 0.980 at t=0.90"), where it does
+  hold at all seven, so the parallel is what fixes the reading. there is a
+  reading that saves the claim — the answered slice's mean confidence sits far
+  above t at every threshold, so the frequency promise really is broken
+  everywhere — but that is not the number the sentence offers, and nothing
+  printed carries the mean confidence of an answered slice. either narrow
+  "every" to t >= 0.90 or print that mean confidence next to the accuracy it is
+  supposed to match. found 2026-10-09
+- [medium] 17 — the shifted 5% budget operating point rides on a single item.
+  "the 5% error budget that covered 55.2% of test traffic covers 2.3% of
+  shifted traffic (28 of 1200 items)" closes the signals shift paragraph, and
+  those 28 answers contain exactly 1 error — the 0.036 risk printed beside them
+  is 1/28, and a 29th answer would take it to 0.069, past the budget. the
+  in-distribution figure it is contrasted against is 33 errors in 662, which is
+  a rate; this one is a draw. and `coverage_at_risk` returns the widest prefix
+  inside the budget, so the curve is free to have left the budget at smaller
+  coverages — on the shifted stream 12 of those 28 prefixes exceed 5%, peaking
+  at 0.125 at k=8, which no reader of "widest coverage inside a 5% error
+  budget" would expect. the collapse itself is not in doubt, 2.3% against 55.2%
+  is not a coin flip, but the specific 28 and the 0.036 are noise at that size.
+  found 2026-10-09
+
 - [fixed 2026-10-09] 16 — the COMPLETED ledger row published a figure 16's own readme
   retired 38 days ago. the row reads "champion-always-first drags a true 0.500
   challenger to 0.380 and randomization restores 0.485 at no cost", and 0.485
@@ -5105,7 +5159,7 @@ question is not reopened.
 | 21-vector-store-persistence | 2026-10-02 |
 | 20-guardrails | 2026-10-01 |
 | 18-semantic-caching | 2026-09-30 |
-| 17-confidence-calibration | 2026-09-07 |
+| 17-confidence-calibration | 2026-10-09 |
 | 16-llm-as-judge | 2026-10-08 |
 | 15-embedding-quantization | 2026-10-08 |
 | 14-context-window | 2026-10-08 |
@@ -5120,6 +5174,57 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+17 was last reviewed on 2026-09-07 and the catch this time is an invariance sold
+wider than the thing it is invariant to. all 104 committed tests passed before
+the fix and both entry points are deterministic — two local runs and a third
+from a fresh clone print byte-identical, which is structural: the model is
+zero-initialized and trained full-batch, the datasets come from seeded
+`default_rng`, the temperature search is golden-section on a convex 1-d
+objective, and nothing reads a clock. the arithmetic checks out term by term —
+ece is the count-weighted mean |mean confidence - accuracy| over equal-width
+bins with empty bins dropped, mce the worst of those bins, brier the multiclass
+mean squared distance to the one-hot, aurc the mean prefix error rate over every
+coverage, oracle aurc the closed form max(0, k - correct) / k averaged, and
+nll(s) really is convex in inverse temperature because logsumexp of a linear
+function is. no leakage: the vocabulary is built from train text only, unknown
+tokens are dropped at vectorize time, T is fitted on the 400 validation tickets
+and scored on the 1200 test ones. every figure in the readme body was checked
+against today's output — 59 of the 60 three-and-four-decimal values appear
+verbatim in a printed line, and so do all 13 percentages once converted, and the
+one value that does not, 0.228, is the error rate the readme derives out loud
+from the 0.772 accuracy beside it. no other project
+computes ece or aurc, so there is nothing to drift against.
+
+what was wrong is "but if you want an ordering that no recalibration can ever
+touch, the logit margin (top logit minus runner-up) is it". the reason it gives
+is sound and narrow — one global T scales every top-two logit gap by the same
+factor, so no pair can cross, and the suite asserts the disagreement at exactly
+0.0000 — but the claim it draws from it is universal, and the readme's own
+tradeoffs section names the counterexample four paragraphs later: shaped
+miscalibration needs per-class temperatures or a platt bias, and both of those
+touch the top and the runner-up unequally. on this pipeline a per-class vector
+fitted on the same validation set moves the logit margin ordering on 4.55% of
+pairs while beating the global scalar on val nll, and even holding three classes
+at 3.060 and putting one 10% off moves it on 2.00% — more than the fitted T
+moves the probability margin, which is the number the same paragraph publishes as
+the orderings moving.
+
+the rule it adds: an invariance is only as wide as the transform it was proved
+for, and "no X can ever" needs the widest X anyone would reach for, not the one
+in hand. this is the second finding of this exact shape in three days — 15's ef
+endpoint was a test pinned to the quoted pair rather than to the property, and
+here `test_logit_margin_ordering_survives_temperature` pins the true narrow
+claim and never looks at the wider one, so the suite could not have caught it.
+the sentence is now bound by nine tests: five recompute the counterexamples on
+the published pipeline (global T at exactly 0, the 10% per-class split at
+0.0200, a 1% split above 0, a platt bias above 0, and the per-class move beating
+what global T does to the probability margin) and four hold the surfaces —
+the readme cannot call the ordering recalibration-proof, must name the per-class
+temperature as what breaks it, must publish the 2.00%, and the entry point must
+print the counterexample. three of them fail on the old readme and entry point.
+the root index row and the ledger row both already said "temperature-proof" and
+"temperature-invariant" rather than the wider thing, so neither needed touching.
 
 16 was last reviewed on 2026-09-07 and the catch this time is a recovery claim
 sold at twice its size on one number and on noise for the other. all 155
