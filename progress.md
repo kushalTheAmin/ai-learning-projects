@@ -190,6 +190,62 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [medium] 18 — the typo comparison is a cross-featurizer raw count and does not
+  isolate typos. "char trigrams see through typos word features cant (233 of 287
+  typoed requests served semantically vs 157 at 0.75)" compares two featurizers
+  that serve at different rates on everything: on the 1713 untypoed requests
+  char serves 82.2% semantically against word's 77.8%, so part of the 233-vs-157
+  gap is char's higher baseline and not typo robustness. the claim is true and
+  the within-featurizer form is far stronger — word drops 77.8% to 54.7% on the
+  287 typoed requests, a 23.1-point penalty, while char drops 82.2% to 81.2%,
+  1.0 point — but that pair of rates is computed nowhere, and
+  `semanticHitsOnTypoed` has no untypoed counterpart to divide against.
+  replay.test.ts pins only the direction of the raw counts. one extra counter
+  and one printed line. found 2026-10-09
+
+- [low] 18 — "the pair analysis asks the only question that matters for a
+  similarity cache: do same-meaning pairs score above different-meaning pairs?
+  under lexical features, no." the blunt no holds for the paraphrase class and
+  not for the trivial one: trivial pairs are same-meaning and average 0.702
+  against near-miss's 0.372, so that comparison goes the right way by a wide
+  margin. the clause immediately after it publishes all three means and the next
+  paragraph draws the correct conclusion — a fuzzy-exact cache, which is exactly
+  "yes for wraps, no for paraphrases" — so the data corrects the sentence one
+  line later. the question as asked has two answers and the readme gives one.
+  found 2026-10-09
+
+- [low] 18 — the 99.2% inversion rate is measured against the most confusable
+  slice of cross-intent pairs only, and the readme does not say so. `buildPairs`
+  builds the near-miss class from (canonical|trivial) x (canonical|trivial)
+  across sibling intents and leaves the siblings' paraphrases out, which the
+  docstring discloses ("the trap pairs") and the readme does not: it reads
+  "99.2% of (paraphrase pair, near-miss pair) comparisons rank the wrong-answer
+  candidate above the right one" with no scope on the denominator. including the
+  siblings' paraphrases would lower the near-miss mean and the rate with it. the
+  adversarial slice is the project's whole point, so this is a missing clause on
+  a correct number, not a wrong one. found 2026-10-09
+
+- [low] 18 — a wrong serve from the exact layer cannot be counted. `runReplay`
+  credits an `exact` decision without comparing intents, and `insert` keeps the
+  first intent's answer for a normalized key — cache.test.ts's "stores one entry
+  per normalized key" sets that up on purpose with intent-a then intent-b and
+  asserts the first wins — so two intents sharing a normalized form would serve
+  the wrong answer free and silently, and the readme's "at zero risk" for the
+  exact baseline would be false with no column able to say so. not reachable on
+  the committed data: `validateDataset` bans collisions among the 120 base
+  phrasings, and scanning all 2000 requests on each of the 20 spread seeds for a
+  normalized form owned by two intents finds none, so the claim holds as
+  measured. the guard is upstream of the counter, not in it. found 2026-10-09
+
+- [low] 18 — char 0.75 under margin 0.10 publishes its spread's best draw. "char
+  0.75: margin 0.10 cuts 34 to 0 for 2.1 points" is scoped single draw by its
+  lead-in, and the seed section corrects the reading — "thats a different regime,
+  not a safety property; the worst seed still serves 13" — but the new
+  `draw(fewer/more)` column now prints that row as 0(0/13): the published 0 is
+  the minimum of the 20 seeds and 13 of them serve more. the 0.75 bullet names
+  its 8-of-20 after today's fix and this one still leans on the range. same
+  sentence length. found 2026-10-09
+
 - [fixed 2026-10-09] 17 — the reordering section sold the logit margin as "an
   ordering that no recalibration can ever touch", and one global temperature is
   the only thing it is proof against. the justification it gives is the right
@@ -2397,7 +2453,7 @@ question is not reopened.
   fix was written to prevent. "0 wrong serves on this draw, zero-wrong on 12 of
   20 seeds" is the same length. found 2026-10-02
 
-- [medium] 18 — "word at 0.75 spans 0 to 25, median 2. the "1 wrong per
+- [fixed 2026-10-09] 18 — "word at 0.75 spans 0 to 25, median 2. the "1 wrong per
   thousand" above is near the bottom of that" reverses the correction the bullet
   directly above it makes. the 0.80 bullet gets it right — "so the zero above is
   the median, not the value" — and one bullet later the default draw's 2 wrong
@@ -2407,7 +2463,20 @@ question is not reopened.
   is near the bottom of the *range*, which is what the sentence literally says
   and not what a reader takes from it, and the range is only that wide because
   one seed draws 25. same span-versus-distribution conflation, pointed the other
-  way, two lines apart. found 2026-09-30
+  way, two lines apart. found 2026-09-30, fixed 2026-10-09: the bullet now says
+  the quoted draw is that median and names both sides of it — 8 of the 20 seeds
+  serve more, 4 fewer, 8 tie — and that the span only reaches 25 because one
+  seed draws 25. the number it now quotes is printed rather than argued:
+  `seedSpread` carries `seedsBelowDefault`/`seedsAboveDefault` and both spread
+  tables print a `draw(fewer/more)` column, so every row says where its own
+  published draw sits and not just how wide its spread is (word 0.80 reads
+  0(0/8), word 0.75 reads 2(4/8), char 0.75 reads 34(17/2), which is the one
+  the readme already called high). five tests bind it: three recompute the two
+  counts off `perSeedWrong` for all three rows and two hold the prose. all five
+  fail on the old source and readme. no measured number moved — the clean-clone
+  run is byte-identical to the old one apart from the new column, and all 15
+  multi-decimal values and 14 percentages in the readme body still appear
+  verbatim in it.
 
 - [low] 18 — "every operating point from 0.50 to 0.95 has paraphrase recall at
   exactly 0.0%, while near-miss false positives only die out at 0.80" is true of
@@ -5158,7 +5227,7 @@ question is not reopened.
 | 19-eval-regression | 2026-10-01 |
 | 21-vector-store-persistence | 2026-10-02 |
 | 20-guardrails | 2026-10-01 |
-| 18-semantic-caching | 2026-09-30 |
+| 18-semantic-caching | 2026-10-09 |
 | 17-confidence-calibration | 2026-10-09 |
 | 16-llm-as-judge | 2026-10-08 |
 | 15-embedding-quantization | 2026-10-08 |
@@ -5174,6 +5243,58 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+18 was last reviewed on 2026-09-30 and the catch this time is the same
+span-versus-distribution conflation the reviewed section exists to correct,
+pointed the other way two bullets down. all 114 committed tests passed before
+the fix and both the suite and the entry point are deterministic — two local
+runs and a third from a fresh clone print byte-identical, which is structural:
+there is no clock and no unseeded source anywhere, the traffic comes from 05's
+seeded rng, the featurizers are pure hashed-lexical functions over the text, the
+store breaks similarity ties on insertion order, and `median` averages the two
+middle values rather than taking the upper one the way 05's does. the arithmetic
+checks out term by term — cosine is a dot product over l2-normalized sparse maps
+so the printed similarities are cosines, `rocAuc` is imported from 20 rather
+than reimplemented and is used in the direction its signature means (right-serve
+gaps as the positive side, so 0.894 reads as right serves on wider gaps,
+matching the 0.400-against-0.109 medians), the gap really is best minus the
+closest differing-answer entry and so cannot go negative, `wrongPer1k` and
+`savedVsNoCache` both guard their zero denominators, the paired sd is the
+n-1 form, and the pair classes count out exactly as the dataset implies: 40
+trivial, 60 paraphrase, 90 near-miss over 10 two-intent families, 180 unrelated.
+no leakage worth the name — the cache is built by the replay it is scored on,
+which is the mechanism under study rather than a leak, and the 20-seed resample
+discloses that its first seed is the published one. the only operating points
+quoted are swept, not tuned-then-reported. every figure in the readme body was
+checked against today's output: all 15 multi-decimal values and all 14
+percentages appear verbatim in a printed line. the one attribution i spot-checked
+by hand holds too — the 0.892 the readme hangs char's antonym blindness on really
+is `enable two factor authentication` against `disable two factor
+authentication`, and it really is char's near-miss maximum. no other project
+implements cosine, `normalizeText` or an inversion rate, so there is nothing to
+drift against; 18 imports every shared mechanism it uses.
+
+what was wrong is "word at 0.75 spans 0 to 25, median 2. the "1 wrong per
+thousand" above is near the bottom of that". the bullet directly above it makes
+exactly the right move on the 0.80 row — "so the zero above is the median, not
+the value" — and one line later the default draw's 2 wrong serves is called near
+the bottom of its span when it is the median of the distribution: sorted, the 20
+seeds read 0 0 1 1 2 2 2 2 2 2 2 2 3 3 3 4 4 6 7 25, so 4 seeds serve fewer, 8
+tie it and 8 serve more. it is near the bottom of the range, which is what the
+words literally say, and the range is only that wide because one seed draws 25.
+in the one section written to stop a reader taking a single draw for the
+distribution, that is the error the section is about.
+
+the rule it adds: a span has two endpoints and a draw has a rank, and quoting a
+draw against the endpoints says nothing about where it sits. the fix prints the
+rank rather than arguing it — both spread tables now carry a
+`draw(fewer/more)` column off two new `SeedSpread` fields, so word 0.80 reads
+0(0/8), word 0.75 reads 2(4/8) and char 0.75 reads 34(17/2), and each bullet can
+be checked against its own row. that column immediately earned itself: it shows
+char 0.75 under margin 0.10 publishing 0(0/13), its spread's best draw, which is
+now a low finding of its own. five tests bind the fix, three on the counts and
+two on the prose, and all five fail on the old source and readme. no measured
+number moved.
 
 17 was last reviewed on 2026-09-07 and the catch this time is an invariance sold
 wider than the thing it is invariant to. all 104 committed tests passed before
