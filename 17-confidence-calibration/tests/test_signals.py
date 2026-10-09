@@ -321,3 +321,133 @@ def test_entry_point_runs_and_reports(capsys):
     assert "risk-coverage on raw test scores" in out
     assert "temperature-invariant by construction" in out
     assert "oracle aurc" in out
+
+
+@pytest.fixture(scope="module")
+def pipeline():
+    """signals_main.py's own model: its test logits and its fitted T."""
+    train = generate_tickets(600, seed=101, ambiguity=0.20)
+    val = generate_tickets(400, seed=202, ambiguity=0.20)
+    test = generate_tickets(1200, seed=303, ambiguity=0.20)
+    vocabulary = build_vocabulary([t.text for t in train])
+    model = SoftmaxRegression(len(vocabulary), len(LABELS))
+    model.fit(
+        vectorize([t.text for t in train], vocabulary),
+        labels_array(train),
+        epochs=3200,
+        lr=0.5,
+        l2=1e-4,
+    )
+    logits_test = model.logits(vectorize([t.text for t in test], vocabulary))
+    temperature = fit_temperature(
+        model.logits(vectorize([t.text for t in val], vocabulary)),
+        labels_array(val),
+    )
+    return logits_test, temperature
+
+
+def _per_class(temperature: float, fraction: float) -> np.ndarray:
+    """One class's temperature `fraction` away from the other three — the
+    smallest departure from a single global scalar there is."""
+    vector = np.full(len(LABELS), temperature)
+    vector[0] *= 1.0 + fraction
+    return vector
+
+
+def _logit_margin_move(logits: np.ndarray, scaled: np.ndarray) -> float:
+    return pair_disagreement(logit_margin(logits), logit_margin(scaled))
+
+
+@pytest.fixture(scope="module")
+def readme_body() -> str:
+    """The readme without its `## fixes` log, which quotes the retired
+    wording on purpose."""
+    readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+    return readme.split("## fixes")[0]
+
+
+class TestLogitMarginInvarianceIsToOneScalarOnly:
+    """The logit margin's selling point is that temperature scaling
+    cannot touch the ordering it induces. That holds for one global
+    scalar and for nothing wider: a per-class temperature divides the top
+    and the runner-up by different numbers, and a per-class bias shifts
+    them by different amounts, so in both cases the top-two gap stops
+    scaling uniformly and the ordering moves. These recompute both
+    counterexamples on the published pipeline, then hold the readme and
+    the entry point to the narrower claim.
+    """
+
+    def test_one_global_temperature_leaves_the_ordering_alone(self, pipeline):
+        logits, temperature = pipeline
+        assert _logit_margin_move(logits, logits / temperature) == 0.0
+
+    def test_a_per_class_temperature_moves_the_ordering(self, pipeline):
+        """The published counterexample: hold three classes at the fitted
+        T and put the first 10% off it."""
+        logits, temperature = pipeline
+        rate = _logit_margin_move(logits, logits / _per_class(temperature, 0.10))
+        assert rate == pytest.approx(0.0200, abs=5e-4), rate
+
+    def test_even_a_one_percent_per_class_split_moves_the_ordering(self, pipeline):
+        """Nothing about the 10% figure is load-bearing: the invariance
+        breaks the moment the four temperatures stop being one number."""
+        logits, temperature = pipeline
+        assert _logit_margin_move(
+            logits, logits / _per_class(temperature, 0.01)
+        ) > 0.0
+
+    def test_a_per_class_bias_moves_the_ordering_too(self, pipeline):
+        """Platt scaling with a bias is the other recalibration the
+        tradeoffs section recommends, and it breaks the invariance by
+        addition rather than by division."""
+        logits, temperature = pipeline
+        bias = np.array([-0.16, 0.11, -0.05, 0.09])
+        assert _logit_margin_move(
+            logits, logits / temperature + bias
+        ) > 0.0
+
+    def test_the_per_class_move_outsizes_what_global_t_does_to_the_margin(
+        self, pipeline
+    ):
+        """The readme's comparison: a 10% per-class split moves the logit
+        margin ordering further than the whole fitted temperature moves
+        the probability margin's."""
+        logits, temperature = pipeline
+        per_class = _logit_margin_move(
+            logits, logits / _per_class(temperature, 0.10)
+        )
+        probability_margin = pair_disagreement(
+            margin(softmax(logits)), margin(softmax(logits / temperature))
+        )
+        assert per_class > probability_margin
+
+    def test_readme_does_not_call_the_logit_margin_recalibration_proof(
+        self, readme_body
+    ):
+        lowered = readme_body.lower()
+        for phrase in (
+            "no recalibration can ever touch",
+            "recalibration-proof",
+            "recalibration-invariant",
+        ):
+            assert phrase not in lowered, phrase
+
+    def test_readme_names_the_per_class_temperature_as_what_breaks_it(
+        self, readme_body
+    ):
+        assert "per-class temperature" in readme_body.lower()
+
+    def test_readme_publishes_the_per_class_disagreement(self, pipeline, readme_body):
+        logits, temperature = pipeline
+        rate = _logit_margin_move(logits, logits / _per_class(temperature, 0.10))
+        assert f"{rate:.2%}" in readme_body, rate
+
+    def test_entry_point_prints_the_per_class_counterexample(self, capsys):
+        path = Path(__file__).resolve().parents[1] / "signals_main.py"
+        spec = importlib.util.spec_from_file_location(
+            "calibration_signals_main_per_class", path
+        )
+        entry_point = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(entry_point)
+        entry_point.main()
+        assert "per-class" in capsys.readouterr().out

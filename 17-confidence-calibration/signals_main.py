@@ -35,6 +35,7 @@ SHIFT_AMBIGUITY = 0.35
 LR, L2 = 0.5, 1e-4
 EPOCHS = 3200
 RISK_BUDGET = 0.05
+PER_CLASS_NUDGE = 0.10  # one class's temperature this far off the other three
 COVERAGES = (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
 
 SIGNALS = (
@@ -146,6 +147,17 @@ def main() -> None:
     print(
         f"  logit margin  disagreement {lm_rate:.4f}"
         f"   (temperature-invariant by construction)"
+    )
+    per_class = np.full(len(LABELS), temperature)
+    per_class[0] *= 1.0 + PER_CLASS_NUDGE
+    pc_rate = pair_disagreement(
+        logit_margin(logits_test), logit_margin(logits_test / per_class)
+    )
+    print(
+        f"  logit margin  disagreement {pc_rate:.4f}"
+        f"   (per-class T: {LABELS[0]} {PER_CLASS_NUDGE:.0%} off the other"
+        f" three,\n                             so the invariance is to one"
+        f" scalar, not to recalibration)"
     )
 
     print("\n== 4. the same signals on shifted traffic ==")
