@@ -246,6 +246,45 @@ question is not reopened.
   its 8-of-20 after today's fix and this one still leans on the range. same
   sentence length. found 2026-10-09
 
+- [low] 19 — "the category-mean change is zero by construction" is zero only
+  before clipping. `p_correct` clamps at P_MAX 0.995, and masked-2.0's +0.048
+  pushes 22 of the 240 items past it against baseline's 2, so the authored
+  -0.24/+0.048 trade does not quite cancel: arithmetic really gains 0.0397 and
+  unit 0.0445, not 0.048 each, and the true aggregate delta is -0.0020 rather
+  than 0. model.py's own comment is careful ("the unclipped mean over
+  categories is unchanged") and the readme and main.py's ground-truth line both
+  drop the qualifier. 0.2 points against a +-7-point noise band changes no
+  conclusion in the project — the aggregate still cannot see the regression for
+  the reason stated — so this is a missing word on a correct argument. the same
+  clipping makes improved-3.0's "every category gains 4 points" really 3.41 on
+  arithmetic and 3.75 on unit. found 2026-10-09
+
+- [fixed 2026-10-09] 19 — the correction-cost claim rested on a sign test whose
+  null the construction forbids. the readme said "nine flips all one direction
+  out of fifty is a sign test at p = 2^-9, so the cost is real even though the
+  marginals dont show it", two sentences after asserting the nesting that makes
+  the other direction impossible: a slice clearing the bonferroni cut has
+  already cleared the uncorrected level, so a pair the corrected gate flags is
+  always a pair the plain gate flagged. all-one-direction was certain given the
+  count, whatever the truth, so 2^-9 measured nothing — and under a coherent
+  null of equal rates, nesting means zero discordant pairs, so nine of them
+  refute it outright rather than at 2^-9. the quantity that is actually sampled
+  is the count, and nesting also makes it the entire marginal difference: 34 -
+  25 = 9 of 50 pairs is exactly 68.0% - 50.0%, one binomial rather than a
+  difference of two. GateRates now carries that rate and its wilson interval,
+  the entry point prints both, and the readme quotes 18.0% [9.8%, 30.8%] (noise
+  12.0% [5.6%, 23.8%], drift 10.0% [4.3%, 21.4%]) in place of the sign test.
+  the gate rates themselves are untouched and no measured number moved. three
+  new tests: a structural check that any p_ge_zero at or below alpha/m puts the
+  97.5th percentile below zero at every resample count in use, the count
+  identity spared == plain - corrected over the published masked sweep with its
+  interval clearing zero, and readme assertions that the sign test is gone.
+  checked while there: bh's nesting holds too — its rank-6 threshold is alpha,
+  and exhaustively over n_resamples 2..1500 there is no count where bh could
+  fire and the plain interval not, so the docstring's generalisation to both
+  corrected gates is sound and not a finding. the clipping note above is the
+  only other thing this pass turned up.
+
 - [fixed 2026-10-09] 17 — the reordering section sold the logit margin as "an
   ordering that no recalibration can ever touch", and one global temperature is
   the only thing it is proof against. the justification it gives is the right
@@ -5224,7 +5263,7 @@ question is not reopened.
 | 25-query-rewriting | 2026-10-03 |
 | 24-extraction-metrics | 2026-10-02 |
 | 23-multi-hop-retrieval | 2026-10-02 |
-| 19-eval-regression | 2026-10-01 |
+| 19-eval-regression | 2026-10-09 |
 | 21-vector-store-persistence | 2026-10-02 |
 | 20-guardrails | 2026-10-01 |
 | 18-semantic-caching | 2026-10-09 |
