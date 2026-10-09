@@ -136,20 +136,27 @@ is the price of twelve points of false alarms. whether thats a good trade
 depends on what a red run costs your team; the point of measuring it is
 that its now a number and not a footnote.
 
-that trade is the one comparison here the intervals cannot carry —
-68.0% [54.2%, 79.2%] against 50.0% [36.6%, 63.4%] overlap heavily, and
-read as two independent proportions the difference would be nothing. it
-holds because the gates are nested: a slice clearing the bonferroni cut
+that trade is not a comparison of two marginals — 68.0% [54.2%, 79.2%]
+against 50.0% [36.6%, 63.4%] overlap heavily, and read as two
+independent proportions the difference would be nothing. it holds
+because the gates are nested: a slice clearing the bonferroni cut
 clears the uncorrected level too, so the corrected gate only ever fires
-where the plain one did. the entry point prints the paired count instead,
-and that is what the claim rests on — on the masked scenario slice-bonf
-spares 9 of the 34 pairs slice flagged and adds 0, and the same 9-and-0
-for slice-bh. nine flips all one direction out of fifty is a sign test at
-p = 2^-9, so the cost is real even though the marginals dont show it. the
-noise column is the same shape, 6 of 8 spared and 0 added, and the drift
-column 5 of 12 and 0. this is the paired-vs-unpaired lesson from the
-bootstrap itself, one level up: pairing is what makes a small difference
-visible, and here the thing being paired is the gate verdicts.
+where the plain one did. the entry point prints the paired count
+instead — on the masked scenario slice-bonf spares 9 of the 34 pairs
+slice flagged and adds 0, and the same 9-and-0 for slice-bh.
+
+nesting is what makes that count the whole story. every pair the
+corrected gate drops is a pair the plain gate flagged, so 68.0% minus
+50.0% is exactly those 9 pairs out of 50 and nothing else — one
+binomial, not a difference of two, and it carries one interval like
+every other rate here: 18.0% [9.8%, 30.8%]. the direction needs no
+test, the construction fixes it; only the size is sampled, and its
+interval clears zero with room. the noise column is the same shape,
+6 of 8 spared and 0 added, 12.0% [5.6%, 23.8%], and the drift column
+5 of 12 and 0, 10.0% [4.3%, 21.4%]. this is the paired-vs-unpaired
+lesson from the bootstrap itself, one level up: pairing is what makes a
+small difference visible, and here the thing being paired is the gate
+verdicts.
 
 two things the table says that i didnt expect when writing it down:
 
@@ -234,6 +241,13 @@ prevent.
 
 ## fixes
 
+- 2026-10-09 — the correction cost rested on a sign test at p = 2^-9, nine
+  spared pairs all falling one way out of fifty — but the gates are nested,
+  so the other way is impossible and all-one-direction was certain whatever
+  the truth. the p-value measured nothing. nesting makes the cost one
+  binomial instead: 68.0% minus 50.0% is exactly those 9 of 50 pairs, and
+  the entry point now prints that rate with its interval, 18.0% [9.8%,
+  30.8%]. no measured gate rate moved.
 - 2026-10-01 — the improvement row was summarized as "everything passes
   the improvement" and the table printed right above it disagrees — the
   slice gate blocks a true 4-point improvement on 6.0% [2.1%, 16.2%] of

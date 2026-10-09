@@ -19,6 +19,12 @@ clears the Bonferroni cut also clears the uncorrected level), so what
 correction costs is a paired count, not a difference of two marginal
 proportions. `discordance` records it directly: the pairs the plain
 gate flagged and the corrected gate let through, and the reverse.
+
+Nesting makes the reverse count zero whatever the truth, so the
+direction of the trade needs no test — only its size is sampled. That
+size is one binomial: the spared count over n_pairs is exactly the
+plain gate's rate minus the corrected gate's, so it carries a single
+Wilson interval like every other rate here.
 """
 
 import math
@@ -85,6 +91,11 @@ class GateRates:
     # corrected gate -> (pairs the plain gate flagged and it did not,
     # pairs it flagged and the plain gate did not)
     discordance: dict[str, tuple[int, int]]
+    # corrected gate -> spared pairs as a fraction of n_pairs. Under
+    # nesting this is the whole marginal difference between the two
+    # gates, so it is the rate the correction's cost lives in.
+    discordance_rate: dict[str, float]
+    discordance_interval: dict[str, tuple[float, float]]  # 95% on each
     improve_count: int  # pairs whose aggregate ci sits above zero
     improve_rate: float
     improve_interval: tuple[float, float]
@@ -163,6 +174,13 @@ def measure_gate_rates(
         },
         discordance={
             name: (spared, added) for name, (spared, added) in discordance.items()
+        },
+        discordance_rate={
+            name: spared / n_pairs for name, (spared, _) in discordance.items()
+        },
+        discordance_interval={
+            name: wilson_interval(spared, n_pairs)
+            for name, (spared, _) in discordance.items()
         },
         improve_count=improvements,
         improve_rate=improvements / n_pairs,

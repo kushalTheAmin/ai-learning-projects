@@ -208,3 +208,79 @@ class TestGatesReallyDoBlockTheImprovement:
         assert not gate_naive(comparison, 0.01).passed
         # the honest gate reads the same draw as noise, which it is
         assert gate_ci(comparison).passed
+
+
+class TestCorrectionCostIsOneBinomial:
+    """The sign test the readme quoted cannot be the basis of the trade.
+
+    A sign test asks how surprising it is that every discordant pair fell
+    the same way, under a null where either direction was equally likely.
+    Nesting makes the other direction impossible: a slice clearing the
+    bonferroni cut has already cleared the uncorrected level, so a pair the
+    corrected gate flags is always a pair the plain gate flagged. All one
+    direction is therefore certain given the count, whatever the truth, and
+    p = 2^-9 measured nothing.
+
+    What is sampled is the count itself. Nesting also makes that count the
+    entire marginal difference, so the 68 -> 50 trade is one binomial
+    proportion and carries one Wilson interval like every other rate here.
+    """
+
+    def test_bonferroni_firing_forces_the_plain_interval_below_zero(self):
+        # Structural, not empirical: if at most alpha/m of the resampled
+        # slice deltas land at or above zero, the 97.5th percentile the
+        # plain gate reads cannot be one of them, at any resample count.
+        from eval_harness.correction import ALPHA_ONE_SIDED
+        from eval_harness.reuse import ConfidenceInterval  # noqa: F401
+        from retrieval_eval.bootstrap import percentile
+
+        cut = ALPHA_ONE_SIDED / 6
+        for n in (200, 300, 400, 500, 2000, 10_000):
+            for k in range(0, int(cut * n) + 1):
+                # worst case for the plain gate: every resample that is not
+                # below zero sits at the very top of the sorted stats
+                stats = [-1.0] * (n - k) + [0.0] * k
+                p_ge_zero = k / n
+                assert p_ge_zero <= cut
+                assert percentile(stats, 0.975) < 0.0, (
+                    f"n={n} k={k}: bonferroni would fire where the plain "
+                    "slice gate does not, so the gates are not nested"
+                )
+
+    def test_discordance_rate_is_the_whole_marginal_difference(self):
+        # nesting, read off the published sweep: every scenario's spared
+        # count over 50 pairs equals plain minus corrected, exactly
+        from eval_harness.data import load_golden
+        from eval_harness.experiments import CORRECTED_GATES, measure_gate_rates
+        from eval_harness.model import BASELINE, MASKED_REGRESSION
+
+        items = load_golden(ROOT / "data" / "golden.jsonl")
+        rates = measure_gate_rates(
+            items, BASELINE, MASKED_REGRESSION, 50, SWEEP_RESAMPLES, "masked"
+        )
+        for corrected, plain in CORRECTED_GATES:
+            spared, added = rates.discordance[corrected]
+            assert added == 0
+            assert rates.discordance_rate[corrected] == spared / rates.n_pairs
+            # exact in counts, which is where the identity actually lives
+            assert spared == (
+                rates.fail_counts[plain] - rates.fail_counts[corrected]
+            )
+            assert rates.discordance_rate[corrected] == pytest.approx(
+                rates.fail_rates[plain] - rates.fail_rates[corrected]
+            )
+            lo, hi = rates.discordance_interval[corrected]
+            assert (lo, hi) == wilson_interval(spared, rates.n_pairs)
+            assert lo <= rates.discordance_rate[corrected] <= hi
+            # the cost survives its own interval, which is the real claim
+            assert lo > 0.0
+
+    def test_readme_no_longer_quotes_the_sign_test(self):
+        flat = re.sub(r"\s+", " ", README.split("## fixes")[0])
+        assert "sign test" not in flat
+        assert "2^-9" not in flat
+
+    def test_readme_brackets_the_correction_cost(self):
+        flat = re.sub(r"\s+", " ", README)
+        # the 68.0 -> 50.0 trade, as the one binomial it actually is
+        assert "18.0% [9.8%, 30.8%]" in flat

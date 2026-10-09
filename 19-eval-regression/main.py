@@ -116,9 +116,12 @@ def print_rates(title: str, truth: str, rates: GateRates) -> None:
     )
     for corrected, plain in CORRECTED_GATES:
         spared, added = rates.discordance[corrected]
+        lo, hi = rates.discordance_interval[corrected]
         print(
             f"  paired: {corrected} spares {spared} of the "
-            f"{rates.fail_counts[plain]} pairs {plain} flagged, adds {added}"
+            f"{rates.fail_counts[plain]} pairs {plain} flagged, adds {added} "
+            f"-> costs {rates.discordance_rate[corrected]:.1%} of pairs "
+            f"({spared}/{rates.n_pairs}, 95% ci [{lo:.1%}, {hi:.1%}])"
         )
     print()
 
