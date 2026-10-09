@@ -361,6 +361,11 @@ both-order dominates anyway.
 
 ## fixes
 
+- 2026-10-09 — the repo ledger's row for 16 still credited order randomization
+  with 0.485, the both-order column, 38 days after the 2026-08-31 fix caught
+  exactly that error here in the readme. the row now reads 0.440 and a
+  `ledger_row` fixture recomputes every figure in it off `runExperiment`, so it
+  cannot be typed stale again. no measured number moved
 - 2026-10-08 — randomizing was sold as taking back "most" of a position bias on
   two numbers: the champion one is exactly half (0.060 of 0.120, and
   both-order's extra 0.045 is three quarters of it again) and the core one is
