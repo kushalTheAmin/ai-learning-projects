@@ -154,6 +154,14 @@ export interface SeedSpread {
   wrongMean: number;
   /** How many seeds served no wrong answer at all. */
   zeroWrongSeeds: number;
+  /**
+   * Seeds serving fewer, and more, wrong answers than the published draw
+   * (the first seed). The min/median/max span says how wide the
+   * distribution is; these say where the one number the readme quotes sits
+   * inside it, which is the reading a single draw actually supports.
+   */
+  seedsBelowDefault: number;
+  seedsAboveDefault: number;
   savedMin: number;
   savedMax: number;
 }
@@ -207,6 +215,8 @@ export function seedSpread(
     wrongMax: 0,
     wrongMean: 0,
     zeroWrongSeeds: 0,
+    seedsBelowDefault: 0,
+    seedsAboveDefault: 0,
     savedMin: 0,
     savedMax: 0,
   }));
@@ -236,6 +246,9 @@ export function seedSpread(
     spread.wrongMedian = median(wrongs);
     spread.wrongMean = wrongs.reduce((sum, value) => sum + value, 0) / wrongs.length;
     spread.zeroWrongSeeds = wrongs.filter((value) => value === 0).length;
+    const published = wrongs[0] ?? 0;
+    spread.seedsBelowDefault = wrongs.filter((value) => value < published).length;
+    spread.seedsAboveDefault = wrongs.filter((value) => value > published).length;
     spread.savedMin = Math.min(...saved);
     spread.savedMax = Math.max(...saved);
   }

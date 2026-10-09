@@ -79,3 +79,52 @@ describe("readme claims about the zero at 0.80", () => {
     expect(README).toMatch(/0 to 25/);
   });
 });
+
+/**
+ * The readme minus its `## fixes` section, which quotes the sentences it
+ * retired and so must be exempt from the retired-claim checks.
+ */
+const README_CLAIMS = README.replace(/\n## fixes\n[\s\S]*?(?=\n## )/, "\n");
+
+describe("where the published draw sits inside each spread", () => {
+  it("counts the seeds on either side of the published draw", () => {
+    for (const spread of SPREAD) {
+      const published = spread.perSeedWrong[0] ?? 0;
+      const below = spread.perSeedWrong.filter((wrong) => wrong < published).length;
+      const above = spread.perSeedWrong.filter((wrong) => wrong > published).length;
+      expect(spread.seedsBelowDefault).toBe(below);
+      expect(spread.seedsAboveDefault).toBe(above);
+      // the rest of the seeds tie the published draw
+      expect(below + above).toBeLessThanOrEqual(SPREAD_SEEDS.length);
+    }
+  });
+
+  it("word at 0.75's published draw is the median, with 8 seeds above it", () => {
+    const wordLoose = row("word", 0.75);
+    expect(wordLoose.perSeedWrong[0]).toBe(2);
+    expect(wordLoose.wrongMedian).toBe(2);
+    expect(wordLoose.seedsAboveDefault).toBe(8);
+    // 4 seeds serve fewer, 8 serve the same 2, 8 serve more: the published
+    // draw is the middle of the distribution, not the low end of the span
+    expect(wordLoose.seedsBelowDefault).toBe(4);
+  });
+
+  it("keeps the readings the other two rows already had", () => {
+    // the 0.80 zero is the median too: nothing below it, 8 seeds above
+    expect(row("word", 0.8).seedsBelowDefault).toBe(0);
+    expect(row("word", 0.8).seedsAboveDefault).toBe(8);
+    // char's default 34 really does sit high: 17 seeds below, only 2 above
+    expect(row("char", 0.75).seedsBelowDefault).toBe(17);
+    expect(row("char", 0.75).seedsAboveDefault).toBe(2);
+  });
+});
+
+describe("readme claims about the 0.75 draw", () => {
+  it("no longer calls the median draw near the bottom of the span", () => {
+    expect(README_CLAIMS).not.toMatch(/near the bottom of that/);
+  });
+
+  it("names the median and the seeds above it, the way the 0.80 bullet does", () => {
+    expect(README).toMatch(/8 of the 20 seeds serve more/);
+  });
+});

@@ -110,7 +110,9 @@ function main(): void {
     `\n== the same operating points across ${SPREAD_SEEDS.length} seeds ` +
       `(${SPREAD_SEEDS[0]}..${SPREAD_SEEDS[SPREAD_SEEDS.length - 1]}) ==`,
   );
-  console.log("config       wrong-min  wrong-med  wrong-max  wrong-mean  zero-seeds       saved%");
+  console.log(
+    "config       wrong-min  wrong-med  wrong-max  wrong-mean  draw(fewer/more)  zero-seeds       saved%",
+  );
   const bareSpreads = seedSpread(DEFAULT_TRAFFIC, SPREAD_SEEDS, SPREAD_CONFIGS);
   for (const spread of bareSpreads) {
     console.log(
@@ -120,6 +122,10 @@ function main(): void {
         pad(spread.wrongMedian.toFixed(1), 10),
         pad(String(spread.wrongMax), 10),
         pad(spread.wrongMean.toFixed(2), 11),
+        pad(
+          `${spread.perSeedWrong[0]}(${spread.seedsBelowDefault}/${spread.seedsAboveDefault})`,
+          16,
+        ),
         pad(`${spread.zeroWrongSeeds}/${SPREAD_SEEDS.length}`, 11),
         pad(`${pct(spread.savedMin)}-${pct(spread.savedMax)}`, 12),
       ].join("  "),
@@ -229,7 +235,9 @@ function main(): void {
   console.log(
     `\n== margin operating points across ${SPREAD_SEEDS.length} seeds (differing-answer scope) ==`,
   );
-  console.log("config          wrong-min  wrong-med  wrong-max  wrong-mean  zero-seeds       saved%");
+  console.log(
+    "config          wrong-min  wrong-med  wrong-max  wrong-mean  draw(fewer/more)  zero-seeds       saved%",
+  );
   const marginSpreads = seedSpread(DEFAULT_TRAFFIC, SPREAD_SEEDS, marginSpreadConfigs);
   for (const spread of marginSpreads) {
     console.log(
@@ -239,6 +247,10 @@ function main(): void {
         pad(spread.wrongMedian.toFixed(1), 10),
         pad(String(spread.wrongMax), 10),
         pad(spread.wrongMean.toFixed(2), 11),
+        pad(
+          `${spread.perSeedWrong[0]}(${spread.seedsBelowDefault}/${spread.seedsAboveDefault})`,
+          16,
+        ),
         pad(`${spread.zeroWrongSeeds}/${SPREAD_SEEDS.length}`, 11),
         pad(`${pct(spread.savedMin)}-${pct(spread.savedMax)}`, 12),
       ].join("  "),
