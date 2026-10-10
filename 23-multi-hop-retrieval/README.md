@@ -45,7 +45,7 @@ three things i didnt author on purpose but the harness surfaced:
 - **oracle equals extracted almost everywhere, and the +0.011 it does gain is not about finding the bridge.** gold bridge coverage is 0.958 (23 of 24) and the one miss is t01, where hop 1's top doc was the postgres tuning guide and the extractor faithfully pulled autovacuum, bloating, buffers. but t01 costs nothing — oracle and extracted both put the answer at rank 3 there, because append mode keeps the question and the hop-2 ranking comes out identical whether the added terms are ledgerd or autovacuum. the whole gap, +0.011 [+0.000, +0.028], is t16 and t22, two queries where extraction did cover the bridge. `max_terms` is 3 and these bridges are one token, so chirpline went into hop 2 alongside alerts and delivery (t16) and sms and alerts (t22), and that padding lifted distract-incident over infra-chirpline — answer at merged rank 5 instead of 3, rr 0.200 against the oracle's 0.333. so what scripted extraction costs on this corpus is the two filler terms it bolts on next to a bridge it already found, not the bridges it misses, and nothing here sweeps `max_terms`. the gap is still too small to publish as an ordering, but it is not the focus gap's shape: every resample comes out >= 0 (p(diff >= 0) = 1.0) because no query moves against the oracle — bounded below by zero, not straddling it.
 - **the drift trap fired once and cost nothing.** conditioned on hop 1's top doc: gold on 21 queries (mrr 0.350), the answer doc itself on 2 (leak, mrr 1.000, questions whose attribute words were distinctive enough that no hop was needed), and a genuinely wrong doc once (mrr 0.333). that one poisoned hop 2 was an echo: autovacuum and friends have document frequency 1, they point straight back at the tuning guide hop 1 already ranked, and the interleave dedups it. drift damages you when the wrong doc's distinctive vocabulary is shared by yet more wrong docs, a topic cluster, not a vocabulary island. my corpus has islands, so the failure i designed for mostly refused to happen.
 
-the 8 single-hop control queries run through the same blind pipeline (nothing routes "this needs one hop"): mrr stays 1.000 under both iterative modes, so on this corpus the second hop never hurt an easy query, it just doubled its cost. 2.00 searches for zero gain is the router argument in one line.
+the 8 single-hop control queries run through the same blind pipeline (nothing routes "this needs one hop"): mrr stays 1.000 under both iterative modes, and that is the merge, not the corpus. single-shot already answers all 8 at rank 1, and `interleave` emits hop 1's top doc before anything else, so merged[0] is hop1[0] for every query of every system here — any query single-shot gets at rank 1 comes out at rr 1.000 under both iterative modes, on any corpus, by arithmetic. the row cannot show damage because this control set has none to show: a control the baseline puts at rank 2 could sink to merged rank 3, and there are 0 of those, so the second hop is untested on easy queries here, not shown harmless. the 12 two-hop queries whose rr moves are all ones the baseline ranked below 1. what the row does measure is cost — 2.00 searches against 1.00, and the extractor found terms to hop on for all 8, so the loop never declined one — and 2x for a query that needed one search is the router argument in one line.
 
 ## tradeoffs and where it breaks
 
@@ -58,6 +58,14 @@ the 8 single-hop control queries run through the same blind pipeline (nothing ro
 python was the right language: the entire bm25/metrics/bootstrap stack this builds on lives in 02-retrieval-eval, and reimporting it keeps two-hop scoring semantics identical to the single-hop baseline by construction instead of by promise.
 
 ## fixes
+
+- 2026-10-10 — the control row was read as a result: "mrr stays 1.000 under
+  both iterative modes, so on this corpus the second hop never hurt an easy
+  query". all 8 controls are at rank 1 under single-shot and the interleave
+  emits hop 1's top doc first, so merged[0] is hop1[0] always — a control at
+  rank 1 is pinned at rr 1.000 on any corpus. the readme now says the row is
+  arithmetic and closes on the 2.00 searches, which is the measurable half.
+  no measured number moved.
 
 - 2026-10-10 — the headline paragraph read pair@5 as a stricter metric agreeing
   with recall@5, 0.667 to 0.958. it cannot disagree here: the capability doc

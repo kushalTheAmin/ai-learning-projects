@@ -27,10 +27,11 @@ from multihop.evaluate import (
     aggregate,
     compare_rr,
     run_all,
+    single_hop,
     two_hop,
     two_hop_rr,
 )
-from multihop.pipeline import iterative
+from multihop.pipeline import interleave, iterative
 from multihop.reuse import BM25Index
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -421,3 +422,131 @@ class TestReadmePairMetric:
         n = len(two_hop(results["single"]))
         body = readme.split("## fixes", 1)[0]
         assert f"rank 1 or {worst} on all {n} queries" in body
+
+
+class TestControlRowIsPinnedByTheMerge:
+    """The single-hop control row cannot come out any other way.
+
+    All 8 controls sit at rank 1 under single-shot, and `interleave` emits
+    `first[0]` before anything else, so merged[0] == hop1[0] for every query
+    of every system here. Any query single-shot already answers at rank 1 is
+    pinned at rr 1.000 under both iterative modes, on any corpus, by the
+    merge. The readme read the 1.000 as something it learned about this
+    corpus — "the second hop never hurt an easy query" — when a control set
+    already at rank 1 has nothing left to lose. The measurable content of the
+    row is the search count.
+    """
+
+    BLIND = ("single", "iter-append", "iter-focus")
+
+    def _controls(self, results, name):
+        return single_hop(results[name])
+
+    def test_every_control_is_already_rank_one_under_single_shot(self, results):
+        controls = self._controls(results, "single")
+        assert len(controls) == 8
+        assert all(r.hit1 for r in controls)
+        assert all(r.rr == 1.0 for r in controls)
+
+    def test_the_merge_always_leads_with_hop_ones_top_doc(self, results):
+        """The mechanism, checked over all four systems and all 32 queries."""
+        checked = 0
+        for name in ("single", "iter-append", "iter-focus", "oracle"):
+            for r in results[name]:
+                assert r.retrieval.ranking[0] == r.retrieval.hop1_ranking[0], (
+                    name,
+                    r.query.id,
+                )
+                checked += 1
+        assert checked == 32 * 3 + 24
+
+    def test_interleave_pins_rank_one_and_demotes_rank_two(self):
+        """Rank 1 is the only rank the merge protects.
+
+        A doc hop 1 ranked second lands at merged rank 3 whenever hop 2
+        leads with something new, so "iterative never hurts" is not what the
+        merge guarantees — only "iterative never moves hop 1's top doc".
+        """
+        merged = interleave(["a", "b", "c"], ["x", "y", "z"])
+        assert merged == ["a", "x", "b", "y", "c", "z"]
+        assert merged.index("a") == 0
+        assert merged.index("b") == 2
+
+    def test_every_control_prints_rr_one_under_both_iterative_modes(self, results):
+        for name in self.BLIND:
+            assert [r.rr for r in self._controls(results, name)] == [1.0] * 8, name
+
+    def test_no_control_could_have_sunk_in_the_first_place(self, results):
+        """What a row that could show damage would need, and does not have."""
+        sinkable = [
+            r.query.id
+            for r in self._controls(results, "single")
+            if r.retrieval.ranking.index(r.query.answer_id) > 0
+        ]
+        assert sinkable == []
+
+    def test_a_two_hop_query_below_rank_one_is_not_pinned(self, results):
+        """Same merge, same systems: off rank 1 the rr does move.
+
+        t08's answer sits at single-shot rank 10 and comes out of the merge
+        at rank 3, so the pinning is a property of starting at rank 1, not of
+        the pipeline being gentle.
+        """
+        single = {r.query.id: r for r in two_hop(results["single"])}
+        append = {r.query.id: r for r in two_hop(results["iter-append"])}
+        assert single["t08"].retrieval.ranking.index(single["t08"].query.answer_id) == 9
+        assert single["t08"].rr == pytest.approx(0.1)
+        assert append["t08"].rr == pytest.approx(1 / 3)
+        moved = [
+            qid
+            for qid in single
+            if abs(append[qid].rr - single[qid].rr) > 1e-12
+        ]
+        assert len(moved) == 12
+        assert not any(qid for qid in moved if single[qid].hit1)
+
+    def test_the_measurable_half_of_the_row_is_the_search_count(self, results):
+        """2.00 against 1.00, and the loop never declined to take a second hop."""
+        assert aggregate(self._controls(results, "single")).search_calls == 1.0
+        for name in ("iter-append", "iter-focus"):
+            controls = self._controls(results, name)
+            assert aggregate(controls).search_calls == 2.0, name
+            assert all(r.retrieval.bridge_terms for r in controls), name
+
+
+class TestReadmeControlRow:
+    def test_does_not_read_the_row_as_a_fact_about_the_corpus(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        assert "so on this corpus the second hop never hurt an easy query" not in body
+        assert "2.00 searches for zero gain" not in body
+
+    def test_says_the_row_is_the_merge(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        assert "merged[0] is hop1[0]" in body
+        assert "not shown harmless" in body
+
+    def test_names_the_rank_one_start_the_row_rests_on(self, results, readme):
+        """Read off the run, so the prose cannot drift from the row."""
+        controls = single_hop(results["single"])
+        body = readme.split("## fixes", 1)[0]
+        assert f"all {len(controls)} at rank 1" in body
+
+    def test_names_what_a_control_that_could_sink_would_look_like(self, results, readme):
+        sinkable = [
+            r.query.id
+            for r in single_hop(results["single"])
+            if r.retrieval.ranking.index(r.query.answer_id) > 0
+        ]
+        body = readme.split("## fixes", 1)[0]
+        assert "rank 2 could sink to merged rank 3" in body
+        assert f"there are {len(sinkable)} of those" in body
+
+
+class TestLedgerControlRow:
+    def test_row_does_not_call_the_controls_undamaged(self, ledger_row):
+        assert "controls undamaged" not in ledger_row
+
+    def test_row_says_the_controls_are_pinned_by_the_merge(self, results, ledger_row):
+        controls = single_hop(results["single"])
+        assert "pinned at rr 1.000 by the same hop1-first merge" in ledger_row
+        assert f"all {len(controls)} already rank 1 single-shot" in ledger_row
