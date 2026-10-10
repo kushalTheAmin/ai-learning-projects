@@ -190,6 +190,66 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-10] 21 — the repair extension's cost section priced every
+  patch against a rebuild of a store the run never had. `experiment_cost`
+  re-tore the graph with one `unlink_many` of 600 highest-degree nodes, while
+  the four rows it prices tore it in the four cumulative batches
+  `repair_attack_rows` runs — and `highest_degree_live` picks each batch off
+  the graph as it stands, so the schedule decides which nodes the later
+  batches take. the one-batch baseline's live set shared only 236 of its 600
+  removals with the patched runs (bare-cumulative shares 239), so 570472
+  dists and recall 0.952 described a different 1400-vector store from the one
+  every percentage was charged against. each policy now rebuilds from the
+  store its own attack leaves (`policy_rebuild`, over a shared `attack_batches`
+  generator that `repair_attack_rows` runs too, so one schedule serves both):
+  625591 dists and recall 0.938 for all four, which is a measured coincidence
+  — the four patch policies happen to remove the identical 600 nodes while the
+  bare run overlaps them by 239. moved: heuristic fill 129.8% -> 118.4%,
+  heuristic reselect 572.4% -> 522.0%, naive fill 50.8% -> 46.4%, naive
+  reselect 77.6% -> 70.7%, the rebuild it loses to 0.952 -> 0.938. no recall
+  or reachability row of the attack itself moved and main.py is untouched,
+  output identical token for token. two new tests capture section 4's print on
+  the 300-node fixture with UNLINK_STEPS monkeypatched to (20, 40) and hold it
+  to each policy's own compact() cost while refusing the one-batch replay's.
+  gate ran from a fresh clone: 94 pass, both entry points reproduce every
+  number in the readme's measured sections except the two wall-clock
+  milliseconds already logged below. revert check: with only repair_main.py
+  reverted, both new tests fail.
+
+- [medium] 21 — "live reachability" is measured from a node no query starts
+  from. `reachable_live_from_entry` walks layer 0 out of `self._entry`, the
+  top-layer entry point, and its docstring reads the result as what search can
+  see ("short of live_count means search cannot see part of the live set") —
+  but 13 ships `layer0_entry(query)` precisely because a query descends the
+  upper layers first and begins its layer-0 walk somewhere else, and says so
+  in `reachable_on_layer0`'s docstring: a structural stat about the graph, not
+  a ceiling on what a query sees. measured on the naive build at 600 removed,
+  tie seed 0, where section 5 and the repair extension both publish 0.633: the
+  150 queries start their layer-0 walk at 40 distinct nodes, live reachability
+  from those starts spans 0.116 to 0.764, and 17 of the 150 start outside the
+  entry's component altogether. so 0.633 is neither a bound nor the typical
+  figure for what a query reaches — the spread brackets it on both sides. the
+  conclusions it carries are not in doubt (recall falls alongside it in every
+  column), and the readme's own prose says "reachable from the entry point",
+  but the metric is read as query-visible reachability in the docstring, in
+  main.py's section 5 and in the repair extension's whole argument, and 13
+  already made this exact distinction one project down. the honest version is
+  either renaming it to what it measures or publishing the per-query start
+  spread beside it. found 2026-10-10
+
+- [low] 21 — repair_main's section 3 prints a control the readme drops.
+  `experiment_earliest` runs the earliest-inserts attack on both builds and
+  prints six rows; the readme's "the patch is one hop, and the sharper attack
+  walks through it" paragraph reports only the three naive ones. the dropped
+  rows are the control that paragraph's claim wants: on the heuristic build
+  the same attack takes reachability nowhere (1.000 bare, 1.000 patched) and
+  fill nudges recall 0.996 -> 0.999, so "the sharper attack" is sharper
+  against a naive graph specifically, which is 13's build ablation showing up
+  where the paragraph currently reads as a fact about one-hop patches in
+  general. also 845276 repair dists for heuristic reselect against fill's
+  229041 on the same batch, a 3.7x that nothing published mentions. same shape
+  as the dropped tombstone row logged below. found 2026-10-10
+
 - [medium] 20 — "4 PII spans scrubbed from output" is an unvalidated count that
   happens to equal gold. `loadPrompts` parses ⟦TYPE⟧ markers on benign prompts
   and dataset.ts says they are there "so output redaction can be checked
@@ -5319,7 +5379,7 @@ question is not reopened.
 | 24-extraction-metrics | 2026-10-02 |
 | 23-multi-hop-retrieval | 2026-10-02 |
 | 19-eval-regression | 2026-10-09 |
-| 21-vector-store-persistence | 2026-10-02 |
+| 21-vector-store-persistence | 2026-10-10 |
 | 20-guardrails | 2026-10-10 |
 | 18-semantic-caching | 2026-10-09 |
 | 17-confidence-calibration | 2026-10-09 |
