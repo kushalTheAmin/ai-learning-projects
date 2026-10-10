@@ -22,7 +22,14 @@ from pathlib import Path
 import pytest
 
 from multihop.data import load_corpus, load_queries
-from multihop.evaluate import aggregate, compare_rr, run_all, two_hop, two_hop_rr
+from multihop.evaluate import (
+    PAIR_K,
+    aggregate,
+    compare_rr,
+    run_all,
+    two_hop,
+    two_hop_rr,
+)
 from multihop.pipeline import iterative
 from multihop.reuse import BM25Index
 
@@ -352,3 +359,65 @@ class TestLedgerRow:
         focus = self._recall5(results, "iter-focus")
         assert (single, append, focus) == ("0.667", "0.958", "1.000")
         assert f"{single} single vs {append} append and {focus} focus" in ledger_row
+
+
+class TestPairMetricIsNotASecondSignal:
+    """pair@5 cannot disagree with recall@5 on this corpus.
+
+    `pair5` wants both gold docs inside the consumed top 5. The capability
+    doc — hop 1's gold doc — lands at rank 1 or 2 for every query under
+    every system, so the pair criterion can only ever fail on the answer
+    doc, and the column comes out equal to recall@5 in all four rows. The
+    readme read the two as a metric and a stricter metric agreeing.
+    """
+
+    SYSTEMS = ("single", "iter-append", "iter-focus", "oracle")
+
+    def _rows(self, results, name):
+        return results[name] if name == "oracle" else two_hop(results[name])
+
+    def _worst_hop1_rank(self, results) -> int:
+        worst = 0
+        for name in self.SYSTEMS:
+            for r in self._rows(results, name):
+                ranking = r.retrieval.ranking
+                assert r.query.hop1_id in ranking, (name, r.query.id)
+                worst = max(worst, ranking.index(r.query.hop1_id) + 1)
+        return worst
+
+    def test_pair5_equals_recall5_in_every_published_row(self, results):
+        for name in self.SYSTEMS:
+            agg = aggregate(self._rows(results, name))
+            assert agg.pair5 is not None
+            assert agg.pair5 == pytest.approx(agg.recall5, abs=1e-12), name
+
+    def test_pair5_agrees_with_hit5_query_by_query(self, results):
+        for name in self.SYSTEMS:
+            disagreeing = [
+                r.query.id for r in self._rows(results, name) if r.pair5 != r.hit5
+            ]
+            assert disagreeing == [], name
+
+    def test_the_hop1_doc_never_leaves_the_consumed_top_two(self, results):
+        """The mechanism: nothing here can push the capability doc past 5."""
+        worst = self._worst_hop1_rank(results)
+        assert worst == 2
+        assert worst < PAIR_K
+
+
+class TestReadmePairMetric:
+    def test_does_not_read_pair5_as_a_second_metric_agreeing(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        assert "moves the same way" not in body
+        assert "which is what a reader needs to actually justify the answer" not in body
+
+    def test_says_the_column_duplicates_recall5(self, readme):
+        body = readme.split("## fixes", 1)[0]
+        assert "the column is recall@5 copied" in body
+
+    def test_names_the_rank_that_makes_it_degenerate(self, results, readme):
+        """Read off the run, so the prose cannot drift from the table."""
+        worst = TestPairMetricIsNotASecondSignal()._worst_hop1_rank(results)
+        n = len(two_hop(results["single"]))
+        body = readme.split("## fixes", 1)[0]
+        assert f"rank 1 or {worst} on all {n} queries" in body

@@ -33,7 +33,7 @@ paired bootstrap on answer mrr, 95% ci over 24 two-hop queries
   oracle vs iter-append      diff +0.011 [+0.000, +0.028]  p(diff <= 0) = 0.1275  clears zero: no
 ```
 
-single-shot leaves the answer doc out of the top 5 on a third of the two-hop queries; both iterative modes close that to 0.958 and 1.000, and pair@5 (both gold docs in the top 5, which is what a reader needs to actually justify the answer) moves the same way, 0.667 to 0.958. the paired bootstrap on per-query answer mrr says that gap is real on this set: +0.080 [+0.043, +0.119], p(diff <= 0) = 0.0000. the price is exactly 2.00 searches per query instead of 1.00, serial, so double retrieval latency.
+single-shot leaves the answer doc out of the top 5 on a third of the two-hop queries; both iterative modes close that to 0.958 and 1.000. pair@5 (both gold docs in the top 5) reads 0.667 and 0.958 beside those, and that is not a stricter metric agreeing — it is the same metric twice. the capability doc lands at consumed rank 1 or 2 on all 24 queries under every system here, so the pair criterion can only ever fail on the answer doc and the column is recall@5 copied, equal in all four rows. it would carry something on a corpus where hop 1's own doc can get pushed past rank 5 — on this one it cannot, so nothing in the table is corroborated by it. what does say the gap is real on this set is the paired bootstrap on per-query answer mrr: +0.080 [+0.043, +0.119], p(diff <= 0) = 0.0000. the price is exactly 2.00 searches per query instead of 1.00, serial, so double retrieval latency.
 
 that is the one comparison here that clears zero. every system-vs-system gap now prints with its interval, because 24 queries is not many and the two gaps between the iterative modes both straddle zero — read the ordering of the middle rows and you are reading noise.
 
@@ -58,6 +58,13 @@ the 8 single-hop control queries run through the same blind pipeline (nothing ro
 python was the right language: the entire bm25/metrics/bootstrap stack this builds on lives in 02-retrieval-eval, and reimporting it keeps two-hop scoring semantics identical to the single-hop baseline by construction instead of by promise.
 
 ## fixes
+
+- 2026-10-10 — the headline paragraph read pair@5 as a stricter metric agreeing
+  with recall@5, 0.667 to 0.958. it cannot disagree here: the capability doc
+  lands at consumed rank 1 or 2 on all 24 queries under every system, so the
+  pair criterion only ever fails on the answer doc and the column is recall@5
+  copied in all four rows. the paragraph now says so and hands the gap back to
+  the bootstrap. no measured number moved.
 
 - 2026-10-02 — progress.md's row for 23 still published "focus beats append
   because question terms re-admit distractors" — the readme retired that
