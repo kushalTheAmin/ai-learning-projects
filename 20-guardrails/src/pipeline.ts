@@ -4,9 +4,11 @@
  *
  * The measurement is defense in depth: what the input filter blocks, what
  * the output canary catches among attacks that got through, and what still
- * leaks (paraphrased system-prompt leaks carry no canary). Benign traffic
- * prices the other side: prompts wrongly blocked at the input gate, and PII
- * echoes scrubbed from model output.
+ * leaks (paraphrased system-prompt leaks carry no canary). An attack whose
+ * scripted model complies without quoting its prompt is a fifth outcome, not
+ * a leak and not a stop, so it gets its own counter and the five partition
+ * the attacks. Benign traffic prices the other side: prompts wrongly blocked
+ * at the input gate, and PII echoes scrubbed from model output.
  */
 
 import type { PromptItem } from "./dataset.js";
@@ -34,6 +36,8 @@ export interface ItemOutcome {
   piiSpansRedacted: number;
   /** attack complied and leaked, and nothing stopped the response */
   leakedUndetected: boolean;
+  /** attack complied but its script never leaks, so no output check fires */
+  compliedWithoutLeak: boolean;
   finalResponse: string;
 }
 
@@ -45,6 +49,7 @@ export interface PipelineSummary {
     refusedByModel: number;
     caughtByCanary: number;
     leakedUndetected: number;
+    compliedWithoutLeak: number;
   };
   benign: {
     total: number;
@@ -72,6 +77,7 @@ export function runPipeline(items: PromptItem[], config: PipelineConfig): Pipeli
         canaryCaught: false,
         piiSpansRedacted: 0,
         leakedUndetected: false,
+        compliedWithoutLeak: false,
         finalResponse: "[blocked: input flagged as prompt injection]",
       });
       continue;
@@ -91,11 +97,8 @@ export function runPipeline(items: PromptItem[], config: PipelineConfig): Pipeli
         finalResponse = result.redacted;
       }
     }
-    const leaked =
-      item.kind === "attack" &&
-      item.model !== undefined &&
-      item.model.complies &&
-      item.model.leak !== "none";
+    const complied = item.kind === "attack" && item.model !== undefined && item.model.complies;
+    const leaked = complied && item.model?.leak !== "none";
     outcomes.push({
       id: item.id,
       kind: item.kind,
@@ -106,6 +109,7 @@ export function runPipeline(items: PromptItem[], config: PipelineConfig): Pipeli
       canaryCaught,
       piiSpansRedacted,
       leakedUndetected: leaked && !canaryCaught,
+      compliedWithoutLeak: complied && item.model?.leak === "none" && !canaryCaught,
       finalResponse,
     });
   }
@@ -129,6 +133,7 @@ export function runPipeline(items: PromptItem[], config: PipelineConfig): Pipeli
       refusedByModel,
       caughtByCanary: attacks.filter((o) => o.canaryCaught).length,
       leakedUndetected: attacks.filter((o) => o.leakedUndetected).length,
+      compliedWithoutLeak: attacks.filter((o) => o.compliedWithoutLeak).length,
     },
     benign: {
       total: benign.length,

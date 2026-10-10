@@ -6,6 +6,7 @@
  *      (de-obfuscation + base64 decode), ROC-AUC and per-category detection.
  *   3. The layered pipeline end to end: input gate + canary + output
  *      redaction, baseline vs hardened, attacks stopped and benign cost.
+ *      The five attack columns partition the attacks, so the row adds up.
  *
  * Everything is deterministic. Run with `npm start`.
  */
@@ -147,7 +148,8 @@ function main(): void {
     console.log(
       `  attacks: ${a.total} total  ->  ${a.blockedAtInput} blocked at input, ` +
         `${a.refusedByModel} refused by model, ${a.caughtByCanary} caught by output canary, ` +
-        `${a.leakedUndetected} leaked undetected`,
+        `${a.leakedUndetected} leaked undetected, ` +
+        `${a.compliedWithoutLeak} complied without leaking`,
     );
     console.log(
       `  benign:  ${b.total} total  ->  ${b.wronglyBlocked} wrongly blocked, ` +
