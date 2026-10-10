@@ -190,6 +190,76 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-10] 23 — pair@5 was read in the headline paragraph as a
+  stricter metric agreeing with recall@5, and it cannot disagree. `pair5`
+  wants both gold docs inside the consumed top 5, and the capability doc —
+  hop 1's gold doc — lands at rank 1 or 2 on all 24 two-hop queries under all
+  four systems, so the pair criterion only ever fails on the answer doc and
+  the column comes out equal to recall@5 in every published row: 0.667,
+  0.958, 1.000, 0.958, the same four figures twice. the paragraph read them as
+  a metric and a stricter one moving together — "pair@5 (both gold docs in the
+  top 5, which is what a reader needs to actually justify the answer) moves
+  the same way, 0.667 to 0.958" — so the same 16-of-24 and 23-of-24 got
+  counted as corroboration, with the second count framed as the one a reader
+  actually needs. the readme now says the column is recall@5 copied, names the
+  rank 1 or 2 that makes it so, says it would carry something only on a corpus
+  where hop 1's own doc can get pushed past rank 5, and hands the gap back to
+  the paired bootstrap. no measured number moved, main.py is untouched and the
+  pair@5 column still prints — entry point output identical token for token.
+  six new tests in tests/test_claims.py, 86 -> 92: three compute the
+  degeneracy off the run (pair5 equals recall5 in all four rows, pair5 agrees
+  with hit5 query by query, the hop-1 doc's worst consumed rank is 2 and 2 <
+  PAIR_K) and three hold the readme to saying it, with the rank and the query
+  count read off the run so the prose cannot drift from the table. gate ran
+  from a fresh clone: 92 pass, and the entry point reproduces every measured
+  number in the readme except the derived 0.133 (t10's focus-vs-append delta,
+  already bound by test_four_queries_move_and_one_moves_the_other_way) and the
+  3.11 python floor. revert check: with only README.md reverted, all three
+  readme tests fail. found and fixed 2026-10-10
+
+- [high] 23 — the single-hop control row cannot come out any other way. the
+  readme reads it as a result — "mrr stays 1.000 under both iterative modes,
+  so on this corpus the second hop never hurt an easy query" — but all 8
+  controls sit at rank 1 under single-shot, and `interleave` emits `first[0]`
+  before anything else, so merged[0] == hop1[0] for every query of every
+  system here (checked across all four systems and all 32 queries). any query
+  single-shot already answers at rank 1 is pinned at rr 1.000 under both
+  iterative modes, on any corpus, by the merge: the row is arithmetic, not a
+  measurement. the readme states that very mechanism two paragraphs earlier
+  for recall@1 — "the interleave trades rank-1 sharpness for never dropping
+  what hop 1 already found" — and then presents the controls as something it
+  learned about this corpus. a control set already at rank 1 cannot show
+  damage; a control whose answer single-shot puts at rank 2 or worse could,
+  and the set has none. the measurable content of the row is the 2.00
+  searches, which is what it closes on. found 2026-10-10
+
+- [low] 23 — `aggregate` returns a pair@5 averaged over a sub-population
+  while `n` counts the whole list. `pair_flags` drops the single-hop rows
+  (pair5 is None there), so aggregating a mixed list gives n=32 with
+  pair5=0.958 over 24 — the same population shape as the `bridge_accuracy`
+  finding below. unreachable from main.py, which aggregates `two_hop(...)` and
+  `single_hop(...)` separately, and Aggregate carries no second count that
+  would show the mismatch if it ever were. found 2026-10-10
+
+- [low] 23 — the loaders raise raw json and key errors on a malformed record
+  while every other failure in the module comes back as a ValueError with a
+  message. a blank line anywhere in corpus.jsonl surfaces as `JSONDecodeError:
+  Expecting value: line 2 column 1`, a query record missing `answer_id` as
+  `KeyError: 'answer_id'`, both before any of `validate`'s checks run — so the
+  one breakage a hand-edited jsonl actually produces is the one that does not
+  get the loader's own error. the committed files are well formed and the
+  entry point never sees it. found 2026-10-10
+
+- [low] 23 — the readme's opening says the corpus is written "so that each
+  fact needs a hop" and two of the 24 two-hop queries need none. t07 and t09
+  put the answer doc at rank 1 on a single search — the readme's own drift
+  bullet counts them as the leak bucket, n=2, mrr 1.000 — so the premise in
+  the first paragraph is contradicted by the third bullet of the same file.
+  the leaks are disclosed where they are measured, which is why no number is
+  wrong here: it is the intro overstating the dataset. they also make the
+  headline gap conservative, since both systems tie at 1.000 on those two.
+  found 2026-10-10
+
 - [fixed 2026-10-10] 21 — the repair extension's cost section priced every
   patch against a rebuild of a store the run never had. `experiment_cost`
   re-tore the graph with one `unlink_many` of 600 highest-degree nodes, while
@@ -5377,7 +5447,7 @@ question is not reopened.
 | 26-reranking | 2026-10-04 |
 | 25-query-rewriting | 2026-10-03 |
 | 24-extraction-metrics | 2026-10-02 |
-| 23-multi-hop-retrieval | 2026-10-02 |
+| 23-multi-hop-retrieval | 2026-10-10 |
 | 19-eval-regression | 2026-10-09 |
 | 21-vector-store-persistence | 2026-10-10 |
 | 20-guardrails | 2026-10-10 |
