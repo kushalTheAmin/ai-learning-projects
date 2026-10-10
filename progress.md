@@ -217,21 +217,57 @@ question is not reopened.
   3.11 python floor. revert check: with only README.md reverted, all three
   readme tests fail. found and fixed 2026-10-10
 
-- [high] 23 — the single-hop control row cannot come out any other way. the
-  readme reads it as a result — "mrr stays 1.000 under both iterative modes,
-  so on this corpus the second hop never hurt an easy query" — but all 8
-  controls sit at rank 1 under single-shot, and `interleave` emits `first[0]`
-  before anything else, so merged[0] == hop1[0] for every query of every
-  system here (checked across all four systems and all 32 queries). any query
-  single-shot already answers at rank 1 is pinned at rr 1.000 under both
-  iterative modes, on any corpus, by the merge: the row is arithmetic, not a
-  measurement. the readme states that very mechanism two paragraphs earlier
-  for recall@1 — "the interleave trades rank-1 sharpness for never dropping
-  what hop 1 already found" — and then presents the controls as something it
-  learned about this corpus. a control set already at rank 1 cannot show
-  damage; a control whose answer single-shot puts at rank 2 or worse could,
-  and the set has none. the measurable content of the row is the 2.00
-  searches, which is what it closes on. found 2026-10-10
+- [fixed 2026-10-10] 23 — the single-hop control row could not have come out
+  any other way and the readme read it as a result: "mrr stays 1.000 under
+  both iterative modes, so on this corpus the second hop never hurt an easy
+  query". all 8 controls sit at rank 1 under single-shot, and `interleave`
+  emits `first[0]` before anything else, so merged[0] == hop1[0] for every
+  query of every system here (checked across all four systems and all 32
+  queries). any query single-shot already answers at rank 1 is pinned at rr
+  1.000 under both iterative modes, on any corpus, by the merge: the row is
+  arithmetic, not a measurement. the readme stated that very mechanism two
+  paragraphs earlier for recall@1 — "the interleave trades rank-1 sharpness
+  for never dropping what hop 1 already found" — and then presented the
+  controls as something it learned about this corpus. the readme now says the
+  row is the merge, names the rank-1 start it rests on, says a control the
+  baseline put at rank 2 could sink to merged rank 3 and that there are 0 of
+  those, so the second hop is untested on easy queries rather than shown
+  harmless, and closes on the measurable half: 2.00 searches against 1.00,
+  with the extractor finding terms to hop on for all 8 so the loop never
+  declined one. the COMPLETED row retracted alongside it — "controls
+  undamaged at 2x cost" now says pinned by the same hop1-first merge. no
+  measured number moved, nothing under multihop/ was touched and the entry
+  point output is identical token for token. thirteen new tests in
+  tests/test_claims.py, 92 -> 105: five compute the pinning off the run (all
+  8 controls rank 1 under single-shot, merged[0] == hop1[0] on all 120
+  system-query pairs, controls at rr 1.000 under both modes, 0 controls
+  sinkable, controls at 2.00 searches with nonempty bridge terms) plus a unit
+  on `interleave` showing rank 1 is the only rank the merge protects (a
+  rank-2 doc lands at merged rank 3), a counter-case off the run (t08's
+  answer moves single-shot rank 10 -> merged rank 3, and all 12 two-hop
+  queries whose rr moves started below rank 1), and six hold the readme and
+  the ledger row to saying it, with the counts read off the run so the prose
+  cannot drift. gate ran from a fresh clone: 105 pass, and the entry point
+  reproduces every measured number in the readme except the derived 0.133
+  (t10's focus-vs-append delta, bound by
+  test_four_queries_move_and_one_moves_the_other_way) and the 3.11 python
+  floor. revert check: with README.md and the COMPLETED row reverted, all six
+  prose tests fail. found and fixed 2026-10-10
+
+- [medium] 23 — the drift split's leak bucket publishes a mean that its own
+  conditioning fixes. `drift_split` files a query under "hop1 top-1 answer
+  (leak)" exactly when `hop1_ranking[0] == answer_id`, and merged[0] ==
+  hop1[0] always, so every query in that bucket has rr 1.000 before anything
+  is averaged — the same arithmetic as the control row just fixed. the readme
+  prints it as one of three conditional means — "the answer doc itself on 2
+  (leak, mrr 1.000, questions whose attribute words were distinctive enough
+  that no hop was needed)" — in a bullet whose other two buckets (0.350 gold,
+  0.333 drift) do carry information. it is milder than the control row
+  because no conclusion is hung on the 1.000: the clause after it explains
+  the leak, not the score. still, a reader comparing 1.000 against 0.350
+  reads a bucket where retrieval did well against one where it did less well,
+  and the 1.000 is the bucket definition. the honest shapes are n=2 with no
+  mean, or the answer's rank under single-shot per bucket. found 2026-10-10
 
 - [low] 23 — `aggregate` returns a pair@5 averaged over a sub-population
   while `n` counts the whole list. `pair_flags` drops the single-hop rows
