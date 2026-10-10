@@ -193,18 +193,21 @@ many edges the patch adds elsewhere. test_the_patch_is_one_hop_only pins
 the mechanism on a four-node line.
 
 **what it costs.** heuristic fill spends 1234 distance computations per
-removed node, 740641 over the whole 600-removal attack, which is 129.8% of
-the 570472 one compact() rebuild costs at that point, and the rebuild comes
-back better anyway (recall 0.952 vs 0.774, both at reachability 1.000). so
-at 2000 vectors, batch repair loses to rebuild outright. what repair
-actually sells is incrementality: 1234 dists after each delete keeps the
-graph whole continuously, where the rebuild is 570472 in one lump every
-time you need a clean graph right now. naive fill is 483 per removal and
-buys less; reselect with heuristic selection is 5442 per removal, 572.4%
-of the rebuild bill, and ends at reachability 0.769 — above bare's 0.633 but
-under the fill patch that costs a quarter as much, and nowhere near the
-rebuild's 1.000. reselect with naive selection is 737 per removal to end at
-0.135, below what spending nothing leaves.
+removed node, 740641 over the whole 600-removal attack, which is 118.4% of
+the 625591 one compact() rebuild costs on the store that attack left, and
+the rebuild comes back better anyway (recall 0.938 vs 0.774, both at
+reachability 1.000). so at 2000 vectors, batch repair loses to rebuild
+outright. what repair actually sells is incrementality: 1234 dists after
+each delete keeps the graph whole continuously, where the rebuild is 625591
+in one lump every time you need a clean graph right now. naive fill is 483
+per removal and buys less; reselect with heuristic selection is 5442 per
+removal, 522.0% of the rebuild bill, and ends at reachability 0.769 — above
+bare's 0.633 but under the fill patch that costs a quarter as much, and
+nowhere near the rebuild's 1.000. reselect with naive selection is 737 per
+removal to end at 0.135, below what spending nothing leaves. every one of
+those rebuild bills is compact() of the store that policy itself left: the
+attack picks each batch off the damaged graph, so a bare run and a patched
+one diverge after the first batch and no single rebuild prices both.
 
 ## tradeoffs and where it breaks down
 
@@ -237,6 +240,15 @@ rebuilt the index first, and one implementation per language per mechanism
 is a repo rule.
 
 ## fixes
+
+- 2026-10-10 — the repair cost section priced every patch against a rebuild
+  of a store the run never had. it re-tore the graph in one 600-node batch
+  where the four rows it prices tore it in four cumulative batches, and the
+  attack picks each batch off the damaged graph — so the baseline's live set
+  shared only 236 of 600 removals with the rows. each policy is rebuilt from
+  its own live set now. heuristic fill 129.8% -> 118.4% of one rebuild, the
+  rebuild it loses to 0.952 -> 0.938 recall, heuristic reselect 572.4% ->
+  522.0%, naive fill 50.8% -> 46.4%, naive reselect 77.6% -> 70.7%
 
 - 2026-10-02 — the ledger row in progress.md still published the collapse
   shape section 5 retired on 2026-10-01, word for word: "shrugs off 10% and
@@ -283,10 +295,10 @@ is a repo rule.
   turns up) should crack it, at a cost that grows with how interlinked the
   batch is, unmeasured.
 - fill-heuristic holds reachability at 1.000 while recall sits at 0.774
-  against the rebuild's 0.952, so the patched graph is connected but worse
+  against the rebuild's 0.938, so the patched graph is connected but worse
   shaped; comparing its edge-length distribution against a fresh build
   would say which edges it is missing.
-- heuristic fill costs 129.8% of one rebuild at 2000 vectors, but repair
+- heuristic fill costs 118.4% of one rebuild at 2000 vectors, but repair
   cost is local (degree times candidates) while rebuild cost scales with
   the whole store; somewhere in n the per-delete repair bill drops under
   the amortized rebuild and that crossover is the number a store actually

@@ -21,7 +21,7 @@ Four questions, one per section:
 3. the sharper attack: removing the 100 earliest inserts cut naive
    reachability to 0.639 with no repair. what does each patch do there?
 4. what does repair cost in distance computations, against compact()'s
-   full rebuild at the same point?
+   full rebuild of the store that same policy left behind?
 
 Everything is deterministic; distance computations are the portable cost
 unit, as in 13 and main.py.
@@ -62,6 +62,37 @@ VARIANTS: tuple[tuple[str, bool | None, bool], ...] = (
 )
 
 
+def attack_batches(
+    index: MutableHnswIndex,
+    tie_seed: int,
+    repair: bool,
+    selection: bool | None = None,
+    reselect: bool = False,
+    steps: tuple[int, ...] = UNLINK_STEPS,
+):
+    """Run the attack's cumulative batches on index in place, yielding each
+    batch's repair stats (None without repair) and what it spent.
+
+    Every batch is picked off the graph as it stands, so the removal policy
+    decides which nodes the next batch takes: a patched run and a bare run
+    diverge after the first batch and end on different live sets. Anything
+    compared against a run has to come from that run's own index, not from a
+    replay of the attack under some other policy.
+    """
+    rng = np.random.default_rng(tie_seed)
+    done = 0
+    for count in steps:
+        batch = index.highest_degree_live(count - done, rng)
+        done = count
+        marker = index.distance_count
+        if repair:
+            stats = index.unlink_with_repair(batch, heuristic=selection, reselect=reselect)
+        else:
+            stats = None
+            index.unlink_many(batch)
+        yield stats, index.distance_count - marker
+
+
 def repair_attack_rows(
     source: MutableHnswIndex,
     queries: np.ndarray,
@@ -77,7 +108,6 @@ def repair_attack_rows(
     (recall, live reachability) plus repair totals; repair_dists is
     captured per batch because live_recall zeroes the distance counter."""
     index = source.clone()
-    rng = np.random.default_rng(tie_seed)
     rows: Rows = []
     totals = {
         "edges_lost": 0,
@@ -86,21 +116,40 @@ def repair_attack_rows(
         "reselections": 0,
         "repair_dists": 0,
     }
-    done = 0
-    for count in steps:
-        batch = index.highest_degree_live(count - done, rng)
-        done = count
-        if repair:
-            marker = index.distance_count
-            stats = index.unlink_with_repair(batch, heuristic=selection, reselect=reselect)
-            totals["repair_dists"] += index.distance_count - marker
+    for stats, spent in attack_batches(
+        index, tie_seed, repair, selection, reselect, steps
+    ):
+        if stats is not None:
+            totals["repair_dists"] += spent
             for key in ("edges_lost", "edges_added", "edges_dropped", "reselections"):
                 totals[key] += stats[key]
-        else:
-            index.unlink_many(batch)
         recall, _, _ = live_recall(index, queries)
         rows.append((recall, index.reachable_live_from_entry() / index.live_count))
     return rows, totals
+
+
+def policy_rebuild(
+    source: MutableHnswIndex,
+    queries: np.ndarray,
+    tie_seed: int,
+    selection: bool | None,
+    reselect: bool,
+    steps: tuple[int, ...],
+) -> tuple[int, float, float]:
+    """compact() of the store this policy's own attack leaves behind:
+    (build distance computations, recall, live reachability). The build cost
+    is read before live_recall, which zeroes the distance counter."""
+    torn = source.clone()
+    for _ in attack_batches(torn, tie_seed, True, selection, reselect, steps):
+        pass
+    compacted, _ = torn.compact(SEED)
+    build_cost = compacted.distance_count
+    recall, _, _ = live_recall(compacted, queries)
+    return (
+        build_cost,
+        recall,
+        compacted.reachable_live_from_entry() / compacted.live_count,
+    )
 
 
 def cell(row: tuple[float, float]) -> str:
@@ -218,25 +267,24 @@ def experiment_cost(
 ) -> None:
     print("== 4. what repair costs, against the full rebuild ==")
     removed = UNLINK_STEPS[-1]
-    torn = naive.clone()
-    rng = np.random.default_rng(HUB_TIE_SEEDS[0])
-    torn.unlink_many(torn.highest_degree_live(removed, rng))
-    compacted, _ = torn.compact(SEED)
-    rebuild_cost = compacted.distance_count
-    c_recall, _, _ = live_recall(compacted, queries)
-    c_reach = compacted.reachable_live_from_entry() / compacted.live_count
     print(
-        f"compact() after the {removed}-node hub attack: {rebuild_cost} build "
-        f"distance computations, recall {c_recall:.3f}, reachability {c_reach:.3f}"
+        f"each policy is priced against compact() of the store its own "
+        f"{removed}-node attack left behind: the attack picks every batch off "
+        f"the damaged graph, so what the earlier removals left decides which "
+        f"nodes the next batch takes"
     )
-    for label, _, _ in VARIANTS:
+    for label, selection, reselect in VARIANTS:
         rows, totals = runs[label]
+        rebuild_cost, c_recall, c_reach = policy_rebuild(
+            naive, queries, HUB_TIE_SEEDS[0], selection, reselect, UNLINK_STEPS
+        )
         share = totals["repair_dists"] / rebuild_cost
         print(
             f"{label}: {totals['repair_dists']} repair dists over {removed} "
             f"removals = {totals['repair_dists'] / removed:.0f} per removed node "
-            f"({share:.1%} of the rebuild), ends at recall {rows[-1][0]:.3f} / "
-            f"reachability {rows[-1][1]:.3f}"
+            f"({share:.1%} of its own {rebuild_cost}-dist rebuild), ends at recall "
+            f"{rows[-1][0]:.3f} / reachability {rows[-1][1]:.3f} against that "
+            f"rebuild's {c_recall:.3f} / {c_reach:.3f}"
         )
     print()
 

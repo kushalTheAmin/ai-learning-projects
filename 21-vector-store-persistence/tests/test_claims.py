@@ -185,7 +185,7 @@ class TestReselectVerdict:
     def test_the_cost_line_stops_calling_heuristic_reselect_worse_than_bare(
         self, repair_section
     ):
-        paragraph = _paragraph_with(repair_section, "572.4%")
+        paragraph = _paragraph_with(repair_section, "522.0%")
         assert "worse than bare unlinking" not in paragraph, (
             "heuristic reselect ends above bare on both axes at 600 removed"
         )

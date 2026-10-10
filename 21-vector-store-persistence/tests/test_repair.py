@@ -7,6 +7,8 @@ the shape under test is exactly the shape written down.
 """
 
 import importlib.util
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import numpy as np
@@ -283,3 +285,87 @@ class TestStudyRunner:
         assert totals["edges_dropped"] == 0
         assert totals["edges_added"] > 0
         assert totals["repair_dists"] > 0
+
+BASELINE_STEPS = (20, 40)
+
+
+def _torn_by(index: MutableHnswIndex, tie_seed: int, selection, reselect, steps):
+    """The index a policy's own attack leaves behind: cumulative batches of
+    highest layer-0 degree, picked off the graph as it is damaged."""
+    torn = index.clone()
+    rng = np.random.default_rng(tie_seed)
+    done = 0
+    for count in steps:
+        batch = torn.highest_degree_live(count - done, rng)
+        done = count
+        torn.unlink_with_repair(batch, heuristic=selection, reselect=reselect)
+    return torn
+
+
+@pytest.fixture
+def cost_section(study, naive_index, monkeypatch) -> str:
+    """What the cost section prints on the small fixture, run on the same
+    cumulative batch schedule the rows it prices were measured on."""
+    monkeypatch.setattr(study, "UNLINK_STEPS", BASELINE_STEPS)
+    queries = np.random.default_rng(5).uniform(0.0, 1.0, size=(4, 8))
+    runs = {
+        label: study.repair_attack_rows(
+            naive_index,
+            queries,
+            study.HUB_TIE_SEEDS[0],
+            repair=True,
+            selection=selection,
+            reselect=reselect,
+            steps=BASELINE_STEPS,
+        )
+        for label, selection, reselect in study.VARIANTS
+    }
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        study.experiment_cost(naive_index, queries, runs)
+    return buffer.getvalue()
+
+
+class TestRebuildBaseline:
+    """The rebuild a repair policy is priced against has to be the rebuild of
+    the store that policy actually left behind.
+
+    Every batch of the attack is picked off the damaged graph, so a replay
+    under a different policy — or in one batch where the run used four —
+    diverges after the first batch and ends on a different live set. A
+    rebuild of that store is a different bill over different vectors, so
+    pricing a patch against it compares the patch to rebuilding a store the
+    run never had.
+    """
+
+    def test_each_policy_is_priced_against_its_own_rebuild(
+        self, cost_section, study, naive_index
+    ):
+        for label, selection, reselect in study.VARIANTS:
+            torn = _torn_by(
+                naive_index, study.HUB_TIE_SEEDS[0], selection, reselect, BASELINE_STEPS
+            )
+            own = torn.compact(study.SEED)[0].distance_count
+            assert str(own) in cost_section, (
+                f"{label} is not priced against the rebuild of its own live set"
+            )
+
+    def test_the_replayed_attack_is_a_different_store(
+        self, cost_section, study, naive_index
+    ):
+        """A single batch of steps[-1] removals is not the attack the rows ran."""
+        replay = naive_index.clone()
+        replay.unlink_many(
+            replay.highest_degree_live(
+                BASELINE_STEPS[-1], np.random.default_rng(study.HUB_TIE_SEEDS[0])
+            )
+        )
+        torn = _torn_by(
+            naive_index, study.HUB_TIE_SEEDS[0], True, False, BASELINE_STEPS
+        )
+        assert replay.live_ids() != torn.live_ids(), "fixture shows no divergence"
+        stale = replay.compact(study.SEED)[0].distance_count
+        assert stale != torn.compact(study.SEED)[0].distance_count
+        assert str(stale) not in cost_section, (
+            "the cost section prices repair against a replay of the attack"
+        )
