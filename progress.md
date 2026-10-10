@@ -190,6 +190,34 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [medium] 20 — "4 PII spans scrubbed from output" is an unvalidated count that
+  happens to equal gold. `loadPrompts` parses ⟦TYPE⟧ markers on benign prompts
+  and dataset.ts says they are there "so output redaction can be checked
+  against gold values", and no code ever does that check: `piiSpansRedacted` is
+  `redact`'s `spansReplaced`, a count of whatever `detectPii` found in the
+  model's echo, never compared against `item.piiSpans`. the benign prompts
+  carry exactly 4 gold spans (ben-04 EMAIL, ben-06 CARD+EMAIL, ben-08 SSN), the
+  one benign prompt the gate blocks (ben-10) carries 0, and the 4 scrubbed
+  really are those 4 — i checked the redacted strings. so no published number
+  is wrong. but the row would still read 4 if the detector found four wrong
+  spans, and the gold values the loader goes to the trouble of recording are
+  the thing that could say so. a per-type comparison of redacted spans against
+  benign gold is one function and section 3 would then be measuring redaction
+  rather than counting it. found 2026-10-10
+
+- [low] 20 — "every hex shaped credential is invisible to this detector" is
+  false for exactly one string and the line above it says so. the gate keeps a
+  token at >= 4.000 and a perfectly balanced hex string scores exactly 4.000,
+  so `detectPii("key 0123456789abcdef0123456789abcdef here")` returns a SECRET
+  span — i ran it. the printed block is careful ("a perfectly balanced one
+  lands exactly on the gate") and the readme sentence two lines later drops the
+  exception, as does the 2026-10-01 entry in this file ("every hex-shaped
+  credential is invisible to the detector at any length") which contradicts its
+  own earlier "only a perfectly balanced hex string ever clears it". a sha, an
+  md5 and any real hex key are all still rejects, so the claim is right about
+  every credential anyone would actually hold and wrong as written. one word.
+  found 2026-10-10
+
 - [medium] 18 — the typo comparison is a cross-featurizer raw count and does not
   isolate typos. "char trigrams see through typos word features cant (233 of 287
   typoed requests served semantically vs 157 at 0.75)" compares two featurizers
@@ -595,7 +623,7 @@ question is not reopened.
   0/2 at the tuned threshold, the J <= 0 over the whole sweep, and the 2/4
   tracing to c02-5 and c07-5; five prose tests pin the readme to them
 
-- [medium] 20, and 22 — `rocAuc` in `20-guardrails/src/metrics.ts` is the same
+- [medium] 22 — `rocAuc` in `20-guardrails/src/metrics.ts` is the same
   mann-whitney form as 12's `auc`, cites it in its own comment, and counts
   ties the same way, by `p === n` on summed floats. 12's fix was needed
   because a mathematically-tied pair was being scored as a 1e-16 win; whether
@@ -603,8 +631,19 @@ question is not reopened.
   node release has done to `Array.prototype.reduce` what cpython 3.12 did to
   `sum()`, so the cross-version exposure is smaller — but a tie miscounted as
   a win is wrong on one interpreter too. check whether any supported x
-  unsupported pair in 20 or 22 sits within 1e-9 without comparing equal, and
-  if so quantize there the way 12 now does
+  unsupported pair in 22 sits within 1e-9 without comparing equal, and
+  if so quantize there the way 12 now does. 22 imports 20's function rather
+  than restating it, so there is no second implementation to drift — only 22's
+  own inputs are still unchecked, and they are overlap scores, so floats.
+  the 20 half is cleared below
+
+- [cleared 2026-10-10] 20 — the `rocAuc` tie question does not arise in 20. every
+  rule weight in `RULES` is an integer (2, 3 or 4) and the base64-payload hit
+  adds 2, so `scoreInjection` returns a sum of integers, exact in float at
+  these magnitudes. all 26 prompt scores in both published configs are
+  integers, and sweeping the 14x12 attack-benign grid finds zero pairs that sit
+  within 1e-9 without comparing equal — in either config. `p === n` is counting
+  real ties here, not missing them, so there is nothing to quantize
 
 - [low] 12 — `extract_numbers` drops a leading minus sign, so a claim asserting
   "-5" and a context asserting "5" check out against each other, and
@@ -4369,18 +4408,34 @@ question is not reopened.
   here, only the sentence about it. no
   measured number moved: the row was 1/4 and is 1/4, auc 0.729/0.890
   unchanged, section 3 unchanged. found and fixed 2026-08-31
-- [medium] 20 — section 3's attack row does not sum to its own total in the
-  baseline config. the readme prints "attacks: 14 -> 7 blocked at input, 4
-  caught by output canary, 2 leaked undetected", which is 13, and it drops
+- [fixed 2026-10-10] 20 — section 3's attack row did not sum to its own total in
+  the baseline config. the readme printed "attacks: 14 -> 7 blocked at input, 4
+  caught by output canary, 2 leaked undetected", which is 13, and it dropped
   the "0 refused by model" column `main.ts` actually prints between the
   first two. the missing attack is atk-09, the spacing attack: baseline lets
   it past the input gate, the scripted model complies, and its authored leak
-  style is "none", so it lands in no bucket — through the gate, answered,
-  nothing leaked, nothing counted. the hardened row happens to close
+  style is "none", so it landed in no bucket — through the gate, answered,
+  nothing leaked, nothing counted. the hardened row happened to close
   (11+0+2+1=14) only because hardening blocks atk-09 at the input. the row
-  is presented as an exhaustive breakdown of what happened to 14 attacks and
-  it is not one; a complied-but-did-not-leak outcome is a real category and
-  it has no column. found 2026-08-31
+  was presented as an exhaustive breakdown of what happened to 14 attacks and
+  was not one; a complied-but-did-not-leak outcome is a real category and
+  it had no column. found 2026-08-31, fixed 2026-10-10
+
+  the fix is one counter and one printed column, no measured number moved.
+  `ItemOutcome` and `PipelineSummary.attacks` gain `compliedWithoutLeak`,
+  defined as complied && leak === "none" && !canaryCaught so it cannot
+  double-count with the canary bucket, and `main.ts` prints it last. both rows
+  now close: baseline 7+0+4+2+1 and hardened 11+0+2+1+0. the four published
+  figures are byte-identical to what they were. the readme pastes the new rows
+  verbatim and names atk-09, and says the thing the old row hid — baseline
+  really gets 3 complied responses out past both layers, two leaks and one
+  mode switch, not 2. tests/attack-ledger.test.ts pins the invariant rather
+  than the fixture: the five buckets must sum to total in both published
+  configs and with either gate switched off, they must be mutually exclusive
+  per attack, the baseline one must be atk-09 at input score 0, and the
+  readme's baseline row must sum to 14. reverting src/ and README.md in a
+  fresh clone and keeping the test fails 6 of its 7 cases. the dead-column
+  finding below is untouched — `refusedByModel` is still structurally 0.
 - [medium] 20 — `refusedByModel` is a dead column: it is 0 in both configs
   and can only ever be 0 on this dataset. exactly one prompt scripts
   `complies: false` (atk-02) and it scores 3 in both configs, so it is always
@@ -5265,7 +5320,7 @@ question is not reopened.
 | 23-multi-hop-retrieval | 2026-10-02 |
 | 19-eval-regression | 2026-10-09 |
 | 21-vector-store-persistence | 2026-10-02 |
-| 20-guardrails | 2026-10-01 |
+| 20-guardrails | 2026-10-10 |
 | 18-semantic-caching | 2026-10-09 |
 | 17-confidence-calibration | 2026-10-09 |
 | 16-llm-as-judge | 2026-10-08 |
@@ -5282,6 +5337,52 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+20 was last reviewed on 2026-10-01 and the catch this time was already written
+down — the attack-row-does-not-sum finding has sat open as medium since
+2026-08-31, and reading section 3 cold i landed on the same thing before i got
+to the file, which says the row really does read as a partition. so it got
+fixed rather than re-logged. all 96 committed tests passed before the fix, 103
+after, and the run is deterministic by construction: no clock, no rng, no
+`Math.random` anywhere in src/ or tests/, the model is a pure function of the
+authored labels, and two local runs plus a third from a fresh clone print
+byte-identical. the arithmetic checks out term by term — luhn is the standard
+right-to-left double-every-second with the >9 subtract-9, `entropyBitsPerChar`
+is -sum(p log2 p) over the string's own frequencies so the log base is right and
+the log2(distinct) ceiling the readme leans on really is the bound, the
+`floorToken` rows reproduce 4.322/4.222/4.122/4.022/3.922 from log2(20) exactly,
+`rocAuc` is the mann-whitney form with half-credit ties used in the direction
+its signature means (attack scores as the positive side), and the exact-span
+scorer matches one-for-one on a type+start+end key with multiplicity, so a
+repeated value cannot be double-credited. `resolveOverlaps` only compares
+against the last kept span, which is sound because keeps are start-sorted and
+each keep starts at or after the previous end, so the last keep always holds the
+maximum end. no leakage — the gold spans come from ⟦TYPE⟧ markers the loader
+strips while recording offsets into the clean text, so offsets cannot drift from
+what they annotate, and nothing from the gold set reaches a detector or a rule
+weight. the rule weights are hand-picked and the readme says so in the atk-04
+paragraph rather than selling a tuned threshold as found. robustness is better
+than the tests show: empty string, a lone space, a NUL, astral emoji and a
+5000-char run all come back clean through `detectPii`, `redact` and
+`scoreInjection`, and `rocAuc` returns 0.5 on an empty side rather than
+dividing by zero. every figure in the readme body was checked against a fresh
+clone's output — all of it reproduces, with two lines differing only in prose
+and one block printing 100.0% where the readme writes 100%. the shared-mechanism
+check came back clean too: 22 imports 20's `rocAuc` and `sweepThresholds`
+rather than restating them, so there is no second implementation to drift, and
+that closes the 20 half of the cross-project tie question.
+
+what was wrong is that section 3 printed a five-way outcome as four columns.
+baseline read "7 blocked at input, 0 refused by model, 4 caught by output
+canary, 2 leaked undetected" and that is 13 of 14; the readme dropped the
+refused column on top of it and printed 7/4/2. the fourteenth is atk-09, the
+spacing attack: the raw gate scores it 0, it reaches the model, the script
+complies with the hijack, and its authored leak style is "none" — so there is no
+canary token to catch and no leak to count, and it fell out of the ledger
+entirely. the hardened row closed at 11+0+2+1 only because hardening scores
+atk-09 a 3 and blocks it, which made both rows look like complete partitions
+when one was not. a complied-but-did-not-leak attack is a real outcome and the
+honest reading of baseline is 3 complied responses out past both layers, not 2.
 
 18 was last reviewed on 2026-09-30 and the catch this time is the same
 span-versus-distribution conflation the reviewed section exists to correct,
