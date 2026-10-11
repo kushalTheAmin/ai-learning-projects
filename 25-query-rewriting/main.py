@@ -19,6 +19,11 @@ SWEEP_RATES = (0.0, 0.1, 0.25, 0.5, 1.0)
 PRF_DEPTHS = (1, 3, 5, 10)
 CROSSING_SEEDS = tuple(range(10))
 BAND_RATE = 0.25
+PRF_GROUPS = (
+    ("expansion doc relevant", True),
+    ("expansion doc wrong", False),
+    ("no expansion doc", None),
+)
 
 
 def first_rate_under_raw(
@@ -105,11 +110,25 @@ def main() -> None:
 
     print("\nprf-5 delta rr vs raw, split by whether the expansion doc was a gold doc")
     raw_rr = {outcome.query_id: outcome.rr for outcome in systems["raw"]}
-    for label, wanted in (("expansion doc relevant", True), ("expansion doc wrong", False)):
+    for label, wanted in PRF_GROUPS:
         group = [o for o in systems["prf-5"] if o.prf_source_relevant is wanted]
         deltas = [o.rr - raw_rr[o.query_id] for o in group]
         shown = f"{mean(deltas):+.3f}" if deltas else "   --"
-        print(f"  {label:<24} n={len(group):<3} mean delta rr {shown}")
+        moved = sum(1 for delta in deltas if delta != 0.0)
+        print(
+            f"  {label:<24} n={len(group):<3} moved {moved:<3} mean delta rr {shown}"
+        )
+    movers = [o for o in systems["prf-5"] if o.rr != raw_rr[o.query_id]]
+    print(
+        f"  every nonzero delta ({len(movers)} of {len(systems['prf-5'])} queries), "
+        "so a group mean above is these spread over its n:"
+    )
+    for outcome in movers:
+        delta = outcome.rr - raw_rr[outcome.query_id]
+        print(
+            f"    {outcome.query_id} rr {raw_rr[outcome.query_id]:.3f} -> "
+            f"{outcome.rr:.3f} ({delta:+.3f})"
+        )
 
     raw_mrr = aggregate(systems["raw"]).mrr
     print(
