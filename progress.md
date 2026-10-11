@@ -190,6 +190,111 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-11] 24 — exact match read an inherited key as present, so a
+  prediction that dropped one field and invented another came back a perfect
+  record. `deepEqual` decided a key was present with `k in b` and `in` walks
+  the prototype chain, which is the comparator's 2026-09-01 bug sitting in the
+  other half of the same project: that fix moved both membership tests in
+  compare.ts to `Object.hasOwn` and added a six-test describe block for keys
+  that collide with `Object.prototype` members, and `deepEqual` in json.ts —
+  the only thing `exactMatchRate` is computed from, the "metric you get for
+  free" the whole readme argues against — was left on `in`. the key-count
+  guard catches a prediction that adds such a key, so the hole is gold-side:
+  `deepEqual(JSON.parse('{"__proto__":{}}'), JSON.parse('{"x":1}'))` returned
+  true, and so does any pair where gold carries `__proto__: {}` and agrees with
+  the prediction on its remaining keys. `__proto__` is the only name that flips
+  the answer — every other `Object.prototype` member is a function or an
+  accessor, `isPrimitive` treats a function as a primitive, and a json value is
+  never `===` a function, so toString/constructor/valueOf already came back
+  false — and it flips it only when the gold value is `{}`, because
+  `Object.keys(Object.prototype)` is empty and the length guard then passes.
+  the two metrics disagreed about which records are flawless: `compare` on the
+  same pair charges 1 missing and 1 spurious while exact match called it 1.000.
+  one line, `Object.hasOwn(b, k)`, with the comment compare.ts already carries.
+  no number moved — none of the 12 authored invoices has a key that collides
+  with an `Object.prototype` member, entry point output identical token for
+  token, 66 -> 69 tests. three new tests in tests/json.test.ts: one holds the
+  four shapes (flat, same-key-count, nested under vendor, inside an array
+  element) to false, one keeps the real pairs matching so the fix is not a blunt
+  reject, and one binds `deepEqual` to `compare`'s own verdict across four pairs
+  so the two can never again disagree about a perfect record. gate ran from a
+  fresh clone: 69 pass, typecheck clean, and all three readme tables plus every
+  measured inline figure reproduce verbatim. revert check: with only src/json.ts
+  reverted, two of the three fail and the real-pair test still passes. found and
+  fixed 2026-10-11
+
+- [medium] 24 — the corruptor's flat ladder row is sold as a safety check and
+  34 of its 62 damaged leaves cannot move under any layer. the readme prints
+  format-drift and corruptor as the ladder excerpt and reads the flat line as
+  evidence: "that flat line is the safety check: a normalization layer that
+  ever moves the corruptor is a layer that forgives real errors." the
+  conditional is true; the row is weaker evidence than it reads. of the 62
+  leaves the corruptor damages at seed 42, 34 are numbers scaled by 1.1 to 1.5
+  and L2's tolerance is 1e-9, so the numeric layer is arithmetically barred
+  from forgiving a single one — the check it is credited with passing cannot
+  fail. the 28 string leaves are the only real test surface: 2 of them are the
+  date field, where a transposition would have to parse to the same ISO day,
+  and the other 26 are where casefold, NFKC and whitespace collapse could
+  genuinely forgive an adjacent swap (a swap of two letters differing only in
+  case is forgiven at L1 — no gold string has such a pair, which is luck, not
+  design). so the row is a 26-leaf check reported as a 62-leaf one. also 6 of
+  the 8 ladder rows the entry point prints are flat and the readme shows one of
+  them: perfect and shuffler have no surface drift to forgive, tax-bungler's
+  damage is number-vs-number, and lazy/dropper/hallucinator damage structure,
+  which no value layer can reach — so corruptor is the right row to publish and
+  the readme does not say the other five flat rows are flat for free. the
+  honest shapes are the string-leaf count beside the row, or a leaf whose
+  authored damage IS case-only as a negative control. found 2026-10-11
+
+- [low] 24 — "a macro-only dashboard would rank the hallucinator second best in
+  the roster" and it ranks fourth of eight. the macro column reads perfect
+  1.000, format-drift 1.000, shuffler 1.000, hallucinator 0.947, lazy 0.943,
+  tax-bungler 0.923, dropper 0.854, corruptor 0.734 — three extractors sit
+  above the hallucinator, so 0.947 is the second-best distinct score and not
+  second place. the point survives and is sharper than the sentence: macro puts
+  the fact-inventor above every extractor that lost or broke a fact, the
+  one-wrong-field tax-bungler included. the root readme's index row already
+  states it the right way ("ranking the field-inventor above its own micro
+  score"). one clause. found 2026-10-11
+
+- [low] 24 — the macro-blindness paragraph names two of the three pred-only
+  paths and reads as if all 113 invented leaves were invisible. the readme says
+  macro is high "because `po_number` and `line_items[].sku` never exist in
+  gold, so they have no gold path to average over" and leaves out
+  `vendor.vat_id`, which the extractor's own flaw string lists ("vat id") and
+  which contributes 12 of the invisible leaves. the counts: of the 113 spurious
+  leaves, 65 land on the three pred-only paths and are excluded from macro (12
+  po_number, 12 vendor.vat_id, 41 line_items[].sku), and the other 48 — the
+  handling-fee element's four leaves per record — land on gold paths and do
+  cost macro, dragging four rows to f1 0.829 and macro to 0.947 rather than
+  1.000. so macro is blind to 57% of the hallucination, not all of it, and the
+  0.947 is partly the dilution of 48 counted leaves across 13 equally weighted
+  paths. the entry point never prints the hallucinator's per-path table, so
+  "they show up as spurious rows" is true of the perPath map and not of
+  anything published. found 2026-10-11
+
+- [low] 24 — `DAYS_IN_MONTH` gives February 29 days unconditionally, so the L3
+  layer accepts a day that does not exist. `parseDate("2023-02-29")` returns
+  "2023-02-29" and `valuesMatch("2023-02-29", "Feb 29, 2023", FULL)` is true,
+  on a date no calendar has. the surrounding validation is otherwise careful —
+  month bounds, day bounds, slash dates refused on purpose — which is why the
+  leap-year hole reads as an oversight rather than a choice, and
+  normalize.test.ts's "rejects ambiguous, invalid, and non-date input" does not
+  cover it. no gold date is in February 29 of any year, so nothing published
+  moves. a leap-year predicate is three lines. found 2026-10-11
+
+- [low] 24 — the repo computes precision on an empty predicted side three
+  different ways and 24 is the odd one out of its own neighbours. 24's
+  `microMetrics` scores 0 when the predicted side is empty (1.0 only when both
+  sides are), 20's `finalize` scores 1 when tp+fp is 0, and 07's `score_pairs`
+  scores 0.0 for precision but raises on an empty truth set. each is documented
+  where it sits and each is defensible — a vacuous precision is a convention,
+  not a fact — but "precision" means different things in three folders and 22
+  already imports 20's version rather than restating it. the f1 formula itself
+  is identical in all three, and no published number depends on the convention
+  because no run hits an empty side. logging it as the cross-project half of
+  the tie question rather than as a defect in 24. found 2026-10-11
+
 - [fixed 2026-10-10] 23 — pair@5 was read in the headline paragraph as a
   stricter metric agreeing with recall@5, and it cannot disagree. `pair5`
   wants both gold docs inside the consumed top 5, and the capability doc —
@@ -5482,7 +5587,7 @@ question is not reopened.
 | 22-rag-vertical-slice | 2026-10-04 |
 | 26-reranking | 2026-10-04 |
 | 25-query-rewriting | 2026-10-03 |
-| 24-extraction-metrics | 2026-10-02 |
+| 24-extraction-metrics | 2026-10-11 |
 | 23-multi-hop-retrieval | 2026-10-10 |
 | 19-eval-regression | 2026-10-09 |
 | 21-vector-store-persistence | 2026-10-10 |
@@ -5503,6 +5608,65 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+24 was last reviewed on 2026-10-02 and the catch this time is the september fix
+that only landed on half the project. all 66 committed tests passed before the
+fix, 69 after, and the run is deterministic by construction: no clock, no
+`Math.random`, one rng per (extractor, record) seeded at 42 + ei*1000 + ri so
+no two cells collide and reordering the roster cannot change a number, and four
+of the eight extractors never draw at all. two local runs and a third from a
+fresh clone print byte-identical. the arithmetic checks out term by term and
+reconciles from both ends — 224 gold leaves is 9 scalars x 12 records plus 4 x
+29 line items; format-drift's L0 correct count of 49 is the 4 leaves per record
+the drift never touches (invoice_number, currency, notes, vendor.address) plus
+record 4's vendor name, whose CJK is unchanged by `toUpperCase`; L1's 0.397 is
+those 49 plus 29 padded descriptions and 11 shouted names, which is 89 of 224
+and why the row is 0.397 and not the 0.402 that twelve names would give; L2
+adds 123 money and qty strings to 212 and L3 the 12 dates to 224. micro P and
+R are over predicted and gold leaves respectively, f1 is the harmonic mean, and
+macro is the unweighted mean over the 13 gold paths, so tax-bungler's 12-of-13
+gives exactly 0.923. the four-way tally invariant holds everywhere: correct +
+wrong + missing equals the gold leaf count and correct + wrong + spurious the
+predicted leaf count in all 64 (extractor x ladder level x array policy)
+configurations, which is the contract compare.ts's docstring claims and nothing
+else tests. no leakage — the extractors damage a `structuredClone` of the gold
+record and are tested not to mutate it, nothing from the metric configuration
+reaches an extractor, and the damage rates are authored constants rather than
+anything tuned against the scores. the authored damage is really the damage
+being measured, which is what the 2026-10-02 fix was about: all 62 leaves the
+corruptor selects differ at L0 and 0 of them are forgiven by any later layer,
+and no number small enough to round back to itself under a 1.1x scale exists in
+the dataset (the smallest nonzero is 0.08, and a zero draws a fresh 1-9).
+robustness is better than the tests show: empty containers flatten to no leaves
+and count 0, an empty gold against an empty prediction scores 1.000 by
+documented convention rather than NaN, a structural type mismatch charges the
+gold subtree missing and the predicted one spurious without double counting,
+and the dataset deliberately carries the shapes that break naive scoring — an
+empty line-item list, a single item, two identical items, a null optional, zero
+amounts, CJK and latin-1 vendor names. every figure in the readme was checked
+against a fresh clone: all three fenced tables reproduce verbatim line for line
+and every measured inline figure appears in the output, the only unmatched
+3-decimal string in the prose being "4.800,00", the european decimal example in
+the tradeoffs list. the cross-project check found no second implementation of
+this comparator to drift against — 24 is the only project with a `deepEqual`,
+and the only f1 anywhere else is the standard harmonic mean — so what it turned
+up instead is the empty-denominator convention logged as a low finding.
+
+what was wrong is that `compare` and `deepEqual` disagreed about which records
+are perfect. the 2026-09-01 fix moved both of the comparator's membership tests
+to `Object.hasOwn` and added a describe block of six tests for document keys
+that collide with `Object.prototype` members, with a comment saying JSON.parse
+builds ordinary objects so every one of those names is a name a real document
+can carry. `deepEqual` sits two files over, is what `exactMatchRate` is
+computed from, and still asked `k in b`. so a gold record carrying
+`__proto__: {}` deep-equaled any prediction with the same key count that agreed
+on the rest: the length guard means a prediction that invents such a key is
+caught, and the gold side is the hole. `__proto__` is the only name that gets
+through, because every other inherited member is a function and a json value is
+never `===` a function, and it gets through only against `{}`, because
+`Object.keys(Object.prototype)` is empty. on the same pair `compare` charges 1
+missing and 1 spurious — a dropped field and an invented one — while exact match
+reported 1.000, from the metric the readme's whole argument is built against.
 
 20 was last reviewed on 2026-10-01 and the catch this time was already written
 down — the attack-row-does-not-sum finding has sat open as medium since
