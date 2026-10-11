@@ -190,6 +190,63 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-11] 01 — the 47% call overhead was published as "the real
+  price of reliability and exactly the number youd bring to a cost
+  conversation", and it is the authored failure mix. 44 calls against 30
+  tickets is a 46.7% overhead, and every one of the 14 extra calls traces to a
+  hand-written plan entry: 12 of the 30 tickets carry a plan that breaks the
+  schema or truncates, and 10 of those 12 carry `clean` on attempt 1 so they
+  comply the moment the loop fires — the attempt histogram is 18 ones, 10 twos,
+  2 threes. so the overhead sits near its floor for this failure count, and
+  nothing about the pipeline holds it there: give those same 12 one more bad
+  attempt before they comply and the identical loop over the identical tickets
+  bills 54 calls, an 80% overhead, with the `max_retries=2` ceiling at 90. the
+  sentence also contradicted the readme's own closing tradeoff bullet — "the
+  scripted failure distribution is hand-built, not sampled from a real model —
+  the rates are illustrative of the mechanism, not a benchmark" — which is the
+  same shape as the 2026-10-03 fix: a disclaimer in one section and a sentence
+  promoting the number past it in another. the readme now publishes the 47% and
+  then names the mix it rests on, the 54-call counterfactual, the 90-call
+  ceiling, and hands the cost question back to the reader. no measured number
+  moved, nothing under `extractor/` or `run.py` was touched, entry point output
+  identical line for line, 93 -> 103 tests. new file tests/test_claims.py: five
+  compute the mix off the real pipeline (the 44 and the 46.7%, the 12-and-10
+  split, that the extra calls and the loop tickets reconcile, the 54-call
+  variant built by rewriting those 12 plans, and the 90-call ceiling) and five
+  hold the readme to reporting them, so the paragraph cannot drift back into
+  quoting 47% as a transferable figure. gate ran from a fresh clone: 103 pass
+  and the entry point reproduces every number in the readme. revert check: with
+  only README.md reverted, 4 of the 10 fail and the 93 pre-existing tests still
+  pass. found and fixed 2026-10-11
+
+- [low] 01 — `remove_trailing_commas` tracks only `"` as a string delimiter
+  while `extract_balanced_object`, which feeds it, tracks both quote styles, so
+  on a single-quoted candidate the comma repair edits string contents. it reads
+  the whole python-dict candidate as string-external, and its `while out[-1]
+  .isspace(): out.pop()` before every `}` and `]` then reaches inside values:
+  `remove_trailing_commas("{'s': 'missing } brace', 'a': ['x']}")` returns
+  `"{'s': 'missing} brace', 'a': ['x']}"`, a space gone from a string value, and
+  a value ending in `, }` would lose the comma too. harmless today only by
+  layer ordering — single-quoted text can never satisfy `parse_strict`, so the
+  repaired string is always discarded, and `parse_python_literal` re-reads the
+  original candidate rather than the repaired one — so no published number and
+  no layer attribution moves. the 2026-08-25 fix taught the brace walker both
+  quote styles and left the comma repair on one; the two functions in the same
+  file now disagree about what a string is. found 2026-10-11
+
+- [cleared 2026-10-11] 01 — the 20.0% and 60.0% rows are authored mode shares
+  rather than measurements, and the readme already says so. strict can only
+  ever pass the 6 `clean` tickets: every other corruption is authored either to
+  defeat `json.loads` or to violate the schema, and test_llm_sim.py pins
+  exactly that for all ten. 60.0% is those 6 plus the 12 tickets whose first
+  mode is one of the four a parse layer handles, so the row is the authored
+  repairable share. checked against the readme before logging it as a finding —
+  the closing tradeoff bullet states the rates are illustrative of the
+  mechanism and not a benchmark of any model, which is the honest reading of
+  both rows, and the "what they mean" sentence describes the mechanism rather
+  than generalizing the rate. the cost sentence two clauses later was the one
+  that broke that disclaimer and is today's fix. not a finding
+
 - [fixed 2026-10-11] 24 — exact match read an inherited key as present, so a
   prediction that dropped one field and invented another came back a perfect
   record. `deepEqual` decided a key was present with `k in b` and `in` walks
@@ -5583,7 +5640,7 @@ question is not reopened.
 | project | last review |
 |---|---|
 | 06-rate-limiting | 2026-10-05 |
-| 01-structured-output | 2026-10-03 |
+| 01-structured-output | 2026-10-11 |
 | 22-rag-vertical-slice | 2026-10-04 |
 | 26-reranking | 2026-10-04 |
 | 25-query-rewriting | 2026-10-03 |
@@ -5608,6 +5665,56 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+01 was last reviewed on 2026-10-03 and the catch this time is a cost sentence,
+not code. all 93 committed tests passed before the fix and 103 after, and the
+run is deterministic with nothing to seed: `ScriptedLLM` has no clock and no
+rng, it replays a per-ticket plan indexed by attempt count, and two local runs
+plus a third from a fresh clone print byte-identical. every published figure
+reproduces — 6/30, 18/30, 29/30 twice, 30, 30, 44, 44 — and each reconciles
+from the dataset: 20.0% is the 6 `clean` plans, 60.0% adds the 12 tickets whose
+first mode one of the four parse layers handles (3 fences, 3 prose, 3 trailing
+commas, 3 python dicts), 96.7% is 29 of 30 with t27 the only plan that never
+emits anything parseable, and 44 is 30 plus the 14 retry calls the attempt
+histogram accounts for exactly (18 ones, 10 twos, 2 threes). no leakage: the
+corruptors derive their output from each ticket's own `expected` block, nothing
+from the scoring reaches a plan, and the plans are authored constants rather
+than anything tuned against the rates. the parsing layers were read line by
+line against the shapes they claim to handle and they hold up better than the
+tests show — both quote styles delimit strings in the brace walker since
+2026-08-25, escapes are tracked, an apostrophe inside a double-quoted value is
+correctly not a delimiter, a python repr carrying both quote styles still walks,
+`remove_trailing_commas` cannot turn one valid json document into a different
+valid one because it only ever deletes string-external whitespace and a comma
+that directly precedes a closer, and the repair layer's output is discarded on
+failure so `parse_python_literal` always re-reads the original candidate.
+robustness probes found the three known holes still live and nothing new that
+returns a wrong answer: an uppercase ```` ```JSON ```` fence is rescued by the
+extract layer and credited to it (logged 2026-08-25), a reasoning fence ahead
+of the real json parses to nothing because the extract layer runs on the
+unfenced text (logged 2026-09-02), and prose with a stray brace before the
+object is rejected outright (logged 2026-08-25) — each costs a retry on output
+no call was needed for, none of them moves a published number, and all three
+are still the right next fixes here. the cross-project check found no second
+json-repair implementation to drift against: 01 is the only project with a
+fence stripper, a brace walker or a comma repair, so there is no sibling to
+disagree with, and the duplicate it did turn up is inside 01 itself — the comma
+repair and the brace walker no longer agree about what a string is, logged low.
+
+what was wrong is that the readme promoted a dataset artifact to a cost figure.
+the table publishes 44 llm calls for 30 tickets and the paragraph under it read
+"a 47% call overhead, which is the real price of reliability and exactly the
+number youd bring to a cost conversation". the 47% is arithmetic off the
+authored plans and nothing more: 12 tickets are scripted to need the loop, 10
+of them comply on the first retry, and rewriting just those 12 plans to need a
+second retry bills 54 calls on the same code and the same tickets. the readme's
+own last tradeoff bullet already said the rates are illustrative of the
+mechanism and not a benchmark, so the sentence was arguing with its own page —
+the 2026-10-03 shape again, a disclaimer in one section and a sentence stepping
+past it in another. the fix leaves the 47% published, names the 12-and-10 mix
+under it, gives the 54-call counterfactual and the 90-call ceiling, and ends on
+"bring your own failure distribution to the cost conversation". tests/test_claims.py
+computes all of it off the pipeline so the prose cannot drift from the run.
 
 24 was last reviewed on 2026-10-02 and the catch this time is the september fix
 that only landed on half the project. all 66 committed tests passed before the
