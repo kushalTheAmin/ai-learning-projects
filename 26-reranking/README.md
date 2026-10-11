@@ -56,7 +56,7 @@ oracle@20 vs pooled-lsa@20             diff +0.089   95% ci [+0.025, +0.160]   p
 
 four results worth stating plainly.
 
-**reranking 20 candidates reproduced the full dense scan exactly.** bm25+pooled-lsa@20 lands on the same reciprocal rank as scanning all 100 docs with the bi-encoder, on every single query, and ties rrf fusion, at 20 latent dots per query instead of 100 and with zero demotions. a test pins the per-query identity. thats the whole economic argument for two-stage retrieval in one row: the cheap lexical stage does the recall work, the dense scorer only pays for precision where it matters. but note the honest caveat one line down: the +0.011 over plain bm25 has p_le_zero 0.1287, so on 40 queries the gain itself is not established, only the cost saving is.
+**reranking 20 candidates reproduced the full dense scan's rr@10 — and 39 of 40 gold ranks.** bm25+pooled-lsa@20 lands on the same reciprocal rank as scanning all 100 docs with the bi-encoder, on every single query, and ties rrf fusion, at 20 latent dots per query instead of 100 and with zero demotions. what rr@10 cannot see is p09 — the full scan finds its gold at rank 12, the two-stage pipeline leaves it at rank 24, because p09's gold sits at bm25 rank 24 and a depth-20 shortlist stops short of it. both score 0 there, so the metric reads a tie across a 12-rank gap, and the gold-in-shortlist 0.950 column is that same query turning up as a recall miss. gold-rank identity is 38 of 40 at depth 5 and 10, 39 at 20, and 40 of 40 only at depth 50 — 50 dots, not 20. the entry point prints that count by depth rather than leaving the identity asserted. so the economic argument holds for the metric this project reports, not for the ranking: the cheap lexical stage does the recall work, the dense scorer only pays for precision where it matters, and the shortlist still owns one query the dense scan would have placed. but note the honest caveat one line down: the +0.011 over plain bm25 has p_le_zero 0.1287, so on 40 queries the gain itself is not established, only the cost saving is.
 
 **finer interaction, ~95x the cost, nothing you can measure.** MaxSim over per-term vectors from the very same LSA fit is the top real row in the table at depth 20, 0.867 against pooled-lsa's 0.861 and bm25's 0.851 — and that is not a result. the paired bootstrap on the gap it looks best on, +0.016 over bm25, gives ci [-0.042, +0.075] and p_le_zero 0.3157, so on 40 queries all three real scorers are one blur. what the numbers do carry is the price: 1909.5 latent dots per query against the pooled scorer's 20.0, about 95x, for a difference the data cant separate from zero. it still demotes 3 paraphrase queries (p11, p17, p18) while promoting 4, and it goes the wrong way with depth — 0.867 at 20, 0.854 at 50 and past — because every extra candidate is another chance for one noisy term-to-term max to outrank the pooled document context. untrained single-term LSA vectors are the reason: real late-interaction models train the term vectors for exactly this interaction, and granularity without training buys variance, not rank.
 
@@ -78,6 +78,12 @@ this project is glue over 02's metrics and 03's retrievers, which are numpy and 
 - one gold doc per query makes mrr and the ceiling crisp, but graded relevance would blur the oracle: with multiple partially-relevant docs "gold in shortlist" stops being binary.
 
 ## fixes
+
+- 2026-10-11 — the headline read per-query rr@10 equality as reproducing the
+  full dense scan exactly, and rr@10 is blind past rank 10 — p09's gold sits
+  at 12 in the dense scan and 24 here, both scoring 0. now counted: 39 of 40
+  gold ranks at depth 20, 40 of 40 only at depth 50, printed by the entry
+  point. no measured number moved.
 
 - 2026-10-04 — the keyword column was credited to docs tying at maxsim's
   ceiling with the stable sort breaking the tie, and that tie never fires —

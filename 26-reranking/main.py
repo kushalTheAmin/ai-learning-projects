@@ -74,6 +74,23 @@ def main() -> None:
         f"{', '.join(str(d) for d in DEPTHS)})"
     )
 
+    identity = evaluator.dense_identity_audit(HEADLINE_DEPTH)
+    gaps = ", ".join(
+        f"{gap.query_id} (dense rank {gap.dense_rank}, reranked rank "
+        f"{gap.reranked_rank})"
+        for gap in identity.gaps
+    )
+    by_depth = ", ".join(
+        f"{d}: {evaluator.dense_identity_audit(d).gold_rank_identical}" for d in DEPTHS
+    )
+    print(
+        f"\nhow far pooled-lsa@{HEADLINE_DEPTH} reproduces the full dense scan: "
+        f"same rr@{MRR_K} {identity.rr_identical}/{identity.queries}, gold at the "
+        f"same rank {identity.gold_rank_identical}/{identity.queries}, "
+        f"disagreeing past the rr@{MRR_K} cutoff: {gaps or 'none'}"
+    )
+    print(f"gold-rank identity by depth (of {identity.queries}): {by_depth}")
+
     print("\n== direction check: weak scorer on strong candidates ==")
     for scorer_name in ("bm25", "maxsim"):
         result = evaluator.run_reranked("lsa", scorer_name, HEADLINE_DEPTH)

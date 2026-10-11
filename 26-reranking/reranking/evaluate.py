@@ -55,6 +55,32 @@ class RerankedEval:
 
 
 @dataclass(frozen=True)
+class GoldRankGap:
+    """One query where the two-stage ranking and the full dense scan disagree."""
+
+    query_id: str
+    dense_rank: int  # the gold's rank under the full pooled scan
+    reranked_rank: int  # its rank under the pooled rerank of bm25's shortlist
+
+
+@dataclass(frozen=True)
+class DenseIdentityAudit:
+    """How exactly a pooled rerank of bm25's shortlist reproduces a full scan.
+
+    Read off per-query rr@MRR_K the two look identical, but rr is blind past
+    rank MRR_K: two rankings that both leave the gold outside the top MRR_K
+    agree at 0.0 however far apart they put it. Counting the gold's actual
+    rank separates a real reproduction from the metric's cutoff.
+    """
+
+    depth: int
+    queries: int
+    rr_identical: int  # queries with the same rr@MRR_K under both
+    gold_rank_identical: int  # queries with the gold at the same rank under both
+    gaps: tuple[GoldRankGap, ...]  # the rest, with both ranks
+
+
+@dataclass(frozen=True)
 class CeilingAudit:
     """Why MaxSim leaves the keyword column alone, counted rather than asserted.
 
@@ -70,6 +96,18 @@ class CeilingAudit:
     gold_at_ceiling: int  # of those, the gold reaches |query terms|
     ceiling_ties: int  # of those, a second shortlist doc reaches it too
     gold_strict_top: int  # of those, the gold is the strict unique maximum
+
+
+def first_relevant_rank(ranking: list[str], relevant_ids: set[str]) -> int:
+    """1-indexed rank of the best-ranked relevant doc in `ranking`.
+
+    Unlike reciprocal_rank this has no cutoff, so it still reports a rank
+    the mrr@MRR_K window cannot see.
+    """
+    for rank, doc_id in enumerate(ranking, start=1):
+        if doc_id in relevant_ids:
+            return rank
+    raise ValueError("ranking contains no relevant doc")
 
 
 def ceiling_hits(
@@ -181,6 +219,48 @@ class Evaluator:
             gold_in_shortlist=mean(shortlist_hits),
             promoted=promoted,
             demoted=demoted,
+        )
+
+    def dense_identity_audit(self, depth: int) -> DenseIdentityAudit:
+        """Count how far the pooled rerank really reproduces the full scan.
+
+        The headline reading is per-query rr@MRR_K equality, which cannot
+        distinguish a ranking that puts the gold at the same place from one
+        that leaves it anywhere past MRR_K. This counts both.
+        """
+        if depth < 1:
+            raise ValueError(f"depth must be >= 1, got {depth}")
+        scorer = self.scorers["pooled-lsa"]
+        rr_identical = gold_rank_identical = 0
+        gaps: list[GoldRankGap] = []
+        for query in self.queries:
+            relevant = set(query.relevant)
+            stage_ranking = self._stage_rankings["bm25"][query.query_id]
+            result = rerank(scorer, query, stage_ranking[:depth])
+            reranked = result.ranked_ids + stage_ranking[depth:]
+            dense = self._stage_rankings["lsa"][query.query_id]
+            if reciprocal_rank(reranked, list(query.relevant), MRR_K) == (
+                reciprocal_rank(dense, list(query.relevant), MRR_K)
+            ):
+                rr_identical += 1
+            dense_rank = first_relevant_rank(dense, relevant)
+            reranked_rank = first_relevant_rank(reranked, relevant)
+            if dense_rank == reranked_rank:
+                gold_rank_identical += 1
+            else:
+                gaps.append(
+                    GoldRankGap(
+                        query_id=query.query_id,
+                        dense_rank=dense_rank,
+                        reranked_rank=reranked_rank,
+                    )
+                )
+        return DenseIdentityAudit(
+            depth=depth,
+            queries=len(self.queries),
+            rr_identical=rr_identical,
+            gold_rank_identical=gold_rank_identical,
+            gaps=tuple(gaps),
         )
 
     def keyword_ceiling_audit(self, depth: int) -> CeilingAudit:
