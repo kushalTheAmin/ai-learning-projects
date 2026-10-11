@@ -64,10 +64,15 @@ python3 -m venv .venv
 what they mean — naive `json.loads` glue code survives only perfectly clean
 output. free string-level repairs triple that without a single extra call.
 retrying gets you to 29/30 at the cost of 44 calls for 30 tickets — a 47%
-call overhead, which is the real price of reliability and exactly the number
-youd bring to a cost conversation. the one permanent failure is a ticket whose
-model truncates output on every attempt, which is the hard-failure policy doing
-its job: report it, dont hide it
+call overhead. that 47% is the authored mix, not a law: 12 of the 30 tickets
+carry a plan that breaks the schema or truncates, and 10 of those comply on the
+first retry, so nearly every retry here is a single extra call. give those same
+12 one more bad attempt before they comply and the same loop over the same
+tickets bills 54 calls — 80% — and the ceiling at `max_retries=2` is 90. so
+bring your own failure distribution to the cost conversation, the 47% is this
+datasets. the one permanent failure is a ticket whose model truncates output on
+every attempt, which is the hard-failure policy doing its job: report it, dont
+hide it
 
 and the blind row is the control and it ties — 29/30 at 44 calls, identical
 ticket for ticket, same layers, same attempt counts. thats a fact about the
@@ -106,6 +111,11 @@ always do
 
 ## fixes
 
+- 2026-10-11 — the 47% call overhead read as a property of the pipeline and a
+  figure you could quote in a cost conversation, when all 14 extra calls are
+  authored — 12 of 30 tickets scripted to need the loop, 10 of them complying
+  on the first retry. now names the mix and what moves it: one more bad attempt
+  each bills 54 calls, 80%, against a 90-call ceiling. no measured number moved
 - 2026-10-03 — the 2026-09-02 control landed on this readme, run.py and the
   tests but not on `extractor/pipeline.py`, whose docstring still called feedback
   "the part that actually moves the success rate" — a flat contradiction of
