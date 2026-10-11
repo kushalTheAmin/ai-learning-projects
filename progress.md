@@ -190,6 +190,54 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-11] 25 — the prf gain was published as a tendency of a
+  7-query group when the whole thing is two queries. the paragraph read "on the
+  7 queries where the top doc was wrong it gained +0.044, because the wrong doc
+  was usually topic-adjacent (a git doc for a git question) and its distinctive
+  terms still vote for the right neighborhood" — `usually` is a claim about most
+  of those 7 and 5 of them moved by exactly 0.000. the entire +0.008 headline is
+  p02 (gold doc absent from raw's top 10, pulled in at rank 7, +1/7) and p03
+  (rank 3 to rank 2, +1/6); the other 38 of 40 queries score exactly what raw
+  scored, and no query anywhere lost ground. the same paragraph called k14 "the
+  one query prf could have rescued" when raw leaves three queries at rr 0 — k14,
+  p02 and p09 — and prf rescues p02, the larger of the two movers and the one
+  the sentence never mentions, leaves p09 where it was, and structurally cannot
+  reach k14. the uncertainty is those same two queries and nothing else:
+  p(diff <= 0) = 0.1289 is 0.95 ** 40 = 0.1285 to four places, the chance a
+  resample of 40 draws neither mover, and the ci lower bound reads +0.000
+  because no delta is negative rather than because the effect nearly vanishes —
+  the readme had been reading that bound as a near-miss. the entry point was
+  complicit: it printed the two group means with no count of what moved inside
+  them, and its split covered 39 of 40 queries because the no-expansion-doc
+  group had no row. main.py now prints a moved count beside each mean, a third
+  row for that group so the split accounts for 40, and every nonzero delta by
+  name; the readme quotes those. this is the shape 23 fixed on 2026-10-02 ("only
+  4 of 24 queries move at all", "the whole gap is t16 and t22") sitting
+  unfixed in the sibling project that reuses 23's extractor — the cross-project
+  check found 23 already correct and 25 the one left on it, so no second project
+  needed the change. no measured number moved and no table changed: the systems
+  table, all four bootstrap rows, the depth sweep and both hallucination tables
+  are byte-identical. 97 -> 115 tests. new file tests/test_prf_concentration.py:
+  10 compute the concentration off the real pipeline (the 2 movers by id, p02's
+  rescue from nothing to rank 7, p03's one-rank nudge, the five untouched
+  wrong-doc queries by id, the 32 gold-source queries all exactly 0.0, the
+  +0.044 as (1/7 + 1/6)/7, the three raw-zero queries, p_le_zero against
+  0.95 ** 40, and the ci bound against the absence of a negative delta) and 8
+  hold the entry point and the readme to reporting them. gate ran from a fresh
+  clone: 115 pass, the entry point reproduces every fenced block and prose
+  number in the readme, and the revert check with only main.py and README.md
+  reverted fails 8 of the 10 binding tests while the 97 pre-existing ones still
+  pass. found and fixed 2026-10-11
+
+- [low] 25 — `first_rate_under_raw` is documented and tested to return None
+  when no rate crosses, and main.py formats its result with `{:>17.1%}`, which
+  raises TypeError on None rather than printing anything. unreachable with the
+  committed data — all 10 seeds cross for both modes, and the one test that
+  exercises the None path calls the function directly rather than through the
+  print — so no published number is at risk; it is a crash waiting on a corpus
+  where a mode never falls under raw, which is exactly the "rewriting always
+  pays" case someone would try next. one guard on the format. found 2026-10-11
+
 - [fixed 2026-10-11] 01 — the 47% call overhead was published as "the real
   price of reliability and exactly the number youd bring to a cost
   conversation", and it is the authored failure mix. 44 calls against 30
@@ -5643,7 +5691,7 @@ question is not reopened.
 | 01-structured-output | 2026-10-11 |
 | 22-rag-vertical-slice | 2026-10-04 |
 | 26-reranking | 2026-10-04 |
-| 25-query-rewriting | 2026-10-03 |
+| 25-query-rewriting | 2026-10-11 |
 | 24-extraction-metrics | 2026-10-11 |
 | 23-multi-hop-retrieval | 2026-10-10 |
 | 19-eval-regression | 2026-10-09 |
@@ -5665,6 +5713,57 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-05 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-04 |
+
+25 was last reviewed on 2026-10-03 and the catch this time is a claim, not
+code. all 97 committed tests passed before the fix and 115 after, and the run
+is deterministic with nothing to seed by hand: `ScriptedHyde` draws from
+sha256("{seed}:{query_id}") with no clock and no rng, 02's paired bootstrap
+takes `random.Random(seed)` with seed 0, and two local runs plus a third from a
+fresh clone print byte-identical. the arithmetic reconciles end to end. the
+imported stack is right where it matters: 02's bm25 dedupes query terms with
+`dict.fromkeys(tokenize(query))` so the readme's "bm25 counts each distinct
+search term once" — the premise under both the append-anchor story and
+generic-append's 32.1-term dilution — is the code's actual behavior, idf is the
+non-negative lucene variant, `reciprocal_rank` is 1-indexed and `recall_at_k`
+slices k not k+1, and 23's `extract_bridge_terms` excludes question terms so
+every prf term is genuinely novel. the +terms means reconcile from the one
+query prf cannot expand: 39 x 5 / 40 is 4.875 printing 4.9, 39 x 10 / 40 is
+9.75 printing 9.8, which is also what makes "depth barely matters" true rather
+than a plateau from running out of vocabulary. k14 checks out as published —
+`gil` is in no corpus doc at all, raw search returns the empty list, and the
+spelled-out hypothetical takes it to rank 1. no leakage: the index is built
+once from 03's corpus and never sees a golden label, `validate` holds the
+authored answers off copying a corpus doc verbatim, and the hallucination swap
+is a fixed cyclic shift of sorted ids rather than anything tuned against the
+scores. the hallucination sweep holds up better than the readme claims for it:
+the rate column is exact at every point, the fired sets nest at single-query
+granularity, round-half-up is pinned against banker's, and the ten-seed band is
+honest about the crossing being a draw.
+
+what was wrong is one paragraph reading two group means as group tendencies.
+the prf section had +0.044 over 7 queries and "the wrong doc was usually
+topic-adjacent", when 5 of those 7 moved by exactly 0.000 and the +0.008
+headline is p02 and p03 — and it called k14 "the one query prf could have
+rescued" while prf's one actual rescue, p02, went unmentioned. the entry point
+printed the same two means with nothing beside them to contradict the reading
+and covered only 39 of 40 queries. the fix adds a moved count per group, a row
+for the no-expansion-doc query, and every nonzero delta by name, then rewrites
+the paragraph around them, including that 0.1289 is 0.95 ** 40 rather than a
+near-miss. notably this is 23's 2026-10-02 fix shape in the project that reuses
+23's extractor: 23's readme already says "only 4 of 24 queries move at all" and
+names t16 and t22, so the cross-project check found the sibling correct and 25
+the straggler. tests/test_prf_concentration.py computes the concentration off
+the pipeline so the prose cannot drift from the run again.
+
+one new finding, and it is not a wrong number: `first_rate_under_raw` can
+return None by design while main.py formats it as a percentage, a TypeError on
+the first corpus where a mode never falls under raw, logged low. the +terms
+column reading 23.3 for replace as well as append came up again on this pass
+and is already open from 2026-09-02, so it stays one finding rather than two.
+six open on 25 now and not one of them a wrong number: the retired append
+bracket still live in two dated history entries and the +terms column at
+medium, and the recall@1 ceiling of 0.9875, the biggest-moves lower tail padded
+with ties, the double `generate` call per query and today's None format at low.
 
 01 was last reviewed on 2026-10-03 and the catch this time is a cost sentence,
 not code. all 93 committed tests passed before the fix and 103 after, and the
