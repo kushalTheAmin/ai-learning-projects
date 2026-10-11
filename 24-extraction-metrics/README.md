@@ -137,6 +137,15 @@ sounds like the fix and isnt, recall is undefined on a path gold never has.
 
 ## fixes
 
+- 2026-10-11 — exact match decided a key was present with `key in pred`, and `in`
+  walks the prototype chain — so a gold record carrying `__proto__: {}` deep-equaled
+  any prediction with the same key count that agreed on the rest, and a dropped
+  field plus an invented one came back as a perfect extraction. this is the
+  comparator's september bug in the one metric the whole readme argues against,
+  and the two disagreed about which records are flawless. own-property check now.
+  no number here moved — none of the 12 invoices has a key that collides with an
+  `Object.prototype` member, so every table is what it was.
+
 - 2026-10-02 — the corruptor swapped two adjacent characters to damage a string,
   and a swap that landed on a pair of the same character returned the string
   intact — so a leaf the extractor had picked for damage scored correct and the

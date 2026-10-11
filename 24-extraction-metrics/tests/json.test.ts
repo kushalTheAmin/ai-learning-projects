@@ -7,6 +7,8 @@ import {
   pathToString,
   type JsonValue,
 } from "../src/json.js";
+import { compare } from "../src/compare.js";
+import { STRICT } from "../src/normalize.js";
 
 describe("flatten", () => {
   it("flattens nested objects and arrays in document order", () => {
@@ -69,5 +71,39 @@ describe("deepEqual", () => {
     expect(deepEqual([1, 2], [2, 1])).toBe(false);
     expect(deepEqual({ a: 1 }, { a: 1, b: 2 })).toBe(false);
     expect(deepEqual({ a: 1, b: [2, { c: null }] }, { a: 1, b: [2, { c: null }] })).toBe(true);
+  });
+
+  // Same prototype-chain hazard the comparator was fixed for: JSON.parse builds
+  // ordinary objects, so a document key can be a name the object also inherits.
+  // `key in b` answers yes for the inherited member, and deepEqual then scores
+  // the gold value against Object.prototype instead of calling the key absent.
+  describe("keys that collide with Object.prototype members", () => {
+    const parse = (s: string): JsonValue => JSON.parse(s) as JsonValue;
+
+    it("does not call a record an exact match on an inherited key", () => {
+      expect(deepEqual(parse('{"__proto__":{}}'), parse('{"x":1}'))).toBe(false);
+      expect(deepEqual(parse('{"a":1,"__proto__":{}}'), parse('{"a":1,"b":2}'))).toBe(false);
+      expect(deepEqual(parse('{"vendor":{"__proto__":{}}}'), parse('{"vendor":{"name":"Acme"}}'))).toBe(false);
+      expect(deepEqual(parse('{"items":[{"__proto__":{}}]}'), parse('{"items":[{"qty":1}]}'))).toBe(false);
+    });
+
+    it("still matches a real pair on such a name", () => {
+      expect(deepEqual(parse('{"constructor":"C"}'), parse('{"constructor":"C"}'))).toBe(true);
+      expect(deepEqual(parse('{"__proto__":{"a":1}}'), parse('{"__proto__":{"a":1}}'))).toBe(true);
+    });
+
+    it("agrees with the field-level comparator about which records are perfect", () => {
+      const pairs: [JsonValue, JsonValue][] = [
+        [parse('{"__proto__":{}}'), parse('{"x":1}')],
+        [parse('{"a":1,"__proto__":{}}'), parse('{"a":1,"b":2}')],
+        [parse('{"toString":"x"}'), parse('{"y":1}')],
+        [parse('{"constructor":"C"}'), parse('{"constructor":"C"}')],
+      ];
+      for (const [gold, pred] of pairs) {
+        const t = compare(gold, pred, STRICT, "index").total;
+        const flawless = t.wrong === 0 && t.missing === 0 && t.spurious === 0;
+        expect(deepEqual(gold, pred), JSON.stringify(gold)).toBe(flawless);
+      }
+    });
   });
 });

@@ -89,5 +89,9 @@ export function deepEqual(a: JsonValue, b: JsonValue): boolean {
   const ak = Object.keys(a);
   const bk = Object.keys(b);
   if (ak.length !== bk.length) return false;
-  return ak.every((k) => k in b && deepEqual(a[k] as JsonValue, b[k] as JsonValue));
+  // Own properties only, same as the comparator: `in` walks the prototype
+  // chain, so a document key named `__proto__` or `toString` would read as
+  // present on an object that never had it and be matched against
+  // Object.prototype's own member.
+  return ak.every((k) => Object.hasOwn(b, k) && deepEqual(a[k] as JsonValue, b[k] as JsonValue));
 }
