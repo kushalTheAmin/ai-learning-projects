@@ -33,16 +33,24 @@ worse answers.
 starting from bytes instead of characters buys the property that makes this
 the industry default: nothing is ever out of vocabulary. worst case, an
 unseen character falls back to its raw bytes. the baselines show what youre
-buying — my word-level tokenizer hits 20.3% unknown tokens on held-out prose
-and each one decodes to `<unk>`, information gone. even the char-level
-tokenizer meets 277 characters it has no id for. bpe round-trips every file
-exactly, including scripts it never trained on.
+buying — my word-level tokenizer hits 40.5% unknown words on held-out prose
+and each one decodes to `<unk>`, information gone. on the multilingual sheet
+its 90.8% — essentially every word in the file, destroyed. even the
+char-level tokenizer meets 277 characters it has no id for. bpe round-trips
+every file exactly, including scripts it never trained on.
 
 that word-level number isnt a handicap i imposed. it got the mixed bpes 1659
 slots and could only fill 1402 — the training text has 1401 word types and
 thats all there is to buy, so 257 slots go unspent. hand it ten times the
-budget and it builds the same vocabulary. 20.3% is the ceiling for a closed
+budget and it builds the same vocabulary. 40.5% is the ceiling for a closed
 word vocab on this corpus, not a small one being unfair.
+
+that rate is over words, not over the token stream. the `\S+|\s+` split emits
+a whitespace run between every pair of words, so whitespace is half of what
+the word tokenizer emits — and not one of those runs is ever unknown, since a
+handful of them are the most frequent types in any training text. counting
+them in the denominator divides the rate by two and measures the splitter
+instead of the vocabulary.
 
 and the reason this lives in an ai repo: apis price per token, so the
 tokenizer is a silent multiplier on every bill. same text, different
@@ -175,6 +183,10 @@ granularity flattens whats inside the line.
 
 ## fixes
 
+- 2026-10-12 — the word baselines oov rate counted whitespace runs in the
+  denominator and none of them is ever unknown — words and whitespace
+  alternate under `\S+|\s+`, so it halved every row. now over word runs only:
+  held-out prose 20.3% → 40.5%, code 24.4% → 48.9%, unicode 45.4% → 90.8%
 - 2026-10-05 — the script section credited the 9.0x cjk-vs-english per-char
   gap "purely" to what the tokenizer saw in training, and training moves those
   rows by zero tokens. the run now prints an untrained vocab-256 control

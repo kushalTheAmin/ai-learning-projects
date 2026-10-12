@@ -85,11 +85,12 @@ class TestBaselinesSectionReportsTheRealVocab:
         assert str(word.vocab_size) in section
         assert "unspent" in section
 
-    def test_oov_rows_are_unchanged(self, output):
-        # Nothing measured moves — the budget was never binding.
-        for name, oov, total in [("prose", 209, 1032), ("code", 111, 454),
-                                 ("unicode", 226, 498)]:
-            assert f"heldout {name}: {oov}/{total} tokens are OOV" in output
+    def test_oov_numerators_are_unchanged(self, output):
+        # Nothing the budget touches moves — it was never binding. The
+        # denominators are word runs since 2026-10-12, not the whole stream.
+        for name, oov, words in [("prose", 209, 516), ("code", 111, 227),
+                                 ("unicode", 226, 249)]:
+            assert f"heldout {name}: {oov}/{words} word runs are OOV" in output
 
 
 class TestReadmeStatesTheComparisonHonestly:
@@ -101,4 +102,4 @@ class TestReadmeStatesTheComparisonHonestly:
         assert str(word.vocab_size) in readme
 
     def test_readme_keeps_the_oov_figure(self, readme):
-        assert "20.3% unknown" in readme
+        assert "40.5% unknown" in readme

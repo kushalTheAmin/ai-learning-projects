@@ -150,10 +150,16 @@ def main():
           f"{word_vocab - word.vocab_size} went unspent — the training text "
           f"has only {word.vocab_size - 1} word types, so the oov rates below "
           f"are the best a closed word vocab does here, not a smaller budget")
+    # The rate is over word runs. Whitespace runs are half the stream under
+    # the `\S+|\s+` split and never unknown — a few of them are the most
+    # frequent types in any training text — so counting them in the
+    # denominator halves the rate without measuring the vocabulary.
+    print("rates are over word runs; whitespace runs are excluded — they are "
+          "never unknown, so including them only dilutes the rate")
     for name, text in heldout.items():
         oov, total = word.oov_stats(text)
-        print(f"word tokenizer, heldout {name}: {oov}/{total} tokens are OOV "
-              f"({oov / total * 100:.1f}%) — each one decodes to <unk>")
+        print(f"word tokenizer, heldout {name}: {oov}/{total} word runs are "
+              f"OOV ({oov / total * 100:.1f}%) — each one decodes to <unk>")
     print(f"char tokenizer: vocab {char.vocab_size}, "
           f"{len(char.unseen_chars(heldout['unicode']))} distinct heldout-unicode "
           f"chars unseen in training")

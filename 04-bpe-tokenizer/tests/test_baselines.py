@@ -33,14 +33,15 @@ class TestWordTokenizer:
 
     def test_oov_stats(self):
         tok = WordTokenizer.train("a a a b b c", 4)
-        # "a z b q" splits into 7 runs; z and q are OOV.
-        assert tok.oov_stats("a z b q") == (2, 7)
+        # "a z b q" has four words; z and q are OOV. The three spaces are
+        # runs the rate is not about, so they are in neither term.
+        assert tok.oov_stats("a z b q") == (2, 4)
         assert tok.oov_stats("") == (0, 0)
 
     def test_vocab_one_is_all_unk(self):
         tok = WordTokenizer.train("a b c", 1)
         assert tok.vocab == [UNK]
-        assert tok.oov_stats("a b") == (3, 3)
+        assert tok.oov_stats("a b") == (2, 2)
 
     def test_empty_text(self):
         tok = WordTokenizer.train("a b", 10)

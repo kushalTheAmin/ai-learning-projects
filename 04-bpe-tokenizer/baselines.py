@@ -51,11 +51,14 @@ class WordTokenizer:
         return "".join(self.vocab[i] for i in ids)
 
     def oov_stats(self, text):
-        """(oov_tokens, total_tokens) over the word runs of text —
-        whitespace runs count like any other token."""
-        tokens = word_split(text)
-        oov = sum(1 for tok in tokens if tok not in self._ids)
-        return oov, len(tokens)
+        """(oov_words, total_words) over the word runs of text. Whitespace
+        runs are left out of both terms: a few whitespace runs are the most
+        frequent types in any training text, so they are never unknown, and
+        counting them would divide the rate by the ratio of runs to words
+        rather than measure the vocabulary."""
+        words = [tok for tok in word_split(text) if not tok.isspace()]
+        oov = sum(1 for tok in words if tok not in self._ids)
+        return oov, len(words)
 
 
 class CharTokenizer:
