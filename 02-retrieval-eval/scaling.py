@@ -6,6 +6,7 @@ each one actually does — documents scanned vs postings touched, wall clock
 per query — across corpus sizes and query cost strata.
 """
 
+import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -188,6 +189,50 @@ def print_equivalence(sampler: ZipfSampler) -> None:
     )
 
 
+def growth_exponent(sizes: list[int], values: list[float]) -> float:
+    """Least-squares slope of log(value) on log(size): the measured p in n^p.
+
+    1.0 is linear growth. The flat scan comes out above it because it
+    sorts all n scores per query on top of scanning them, so asserting
+    linearity and scaling the last row up overstates how well it holds.
+    """
+    if len(sizes) != len(values):
+        raise ValueError(f"need one value per size, got {len(sizes)} and {len(values)}")
+    if len(sizes) < 2:
+        raise ValueError("need at least two sizes to measure growth")
+    if any(s <= 0 for s in sizes) or any(v <= 0 for v in values):
+        raise ValueError("sizes and values must be positive to take logs")
+    log_sizes = [math.log(s) for s in sizes]
+    log_values = [math.log(v) for v in values]
+    mean_size = sum(log_sizes) / len(log_sizes)
+    mean_value = sum(log_values) / len(log_values)
+    spread = sum((x - mean_size) ** 2 for x in log_sizes)
+    if spread == 0:
+        raise ValueError("every size is the same, there is no slope to measure")
+    covariance = sum(
+        (x - mean_size) * (y - mean_value) for x, y in zip(log_sizes, log_values)
+    )
+    return covariance / spread
+
+
+def project_at(sizes: list[int], values: list[float], n_docs: int) -> float:
+    """The last measured row carried to n_docs at the measured exponent."""
+    scale = n_docs / sizes[-1]
+    return values[-1] * scale ** growth_exponent(sizes, values)
+
+
+def sweep_summary(sizes: list[int], flat: list[float], inv: list[float]) -> str:
+    """What the sweep measured about its own shape, instead of assuming it."""
+    return (
+        f"flat ms/q is not linear in corpus size — it grows as "
+        f"n^{growth_exponent(sizes, flat):.2f} against n^{growth_exponent(sizes, inv):.2f} "
+        f"for the inverted column, so projecting each at its own measured exponent, "
+        f"{PROJECTION_DOCS:,} docs costs "
+        f"~{project_at(sizes, flat, PROJECTION_DOCS) / 1000:.1f}s/query flat vs "
+        f"~{project_at(sizes, inv, PROJECTION_DOCS) / 1000:.2f}s/query inverted"
+    )
+
+
 def print_sweep(rows: list[SweepRow]) -> None:
     print("\n== corpus-size sweep, 200 typical queries per size ==")
     header = (
@@ -206,13 +251,14 @@ def print_sweep(rows: list[SweepRow]) -> None:
             f"{row.docs_scanned_mean:>10.0f} {row.postings_mean:>11.0f} "
             f"{row.docs_scanned_mean / row.postings_mean:>11.1f}x"
         )
-    last = rows[-1]
-    scale = PROJECTION_DOCS / last.n_docs
+    sizes = [row.n_docs for row in rows]
     print(
-        f"\nboth columns grow linearly in corpus size, so at "
-        f"{PROJECTION_DOCS:,} docs the measured slope projects to "
-        f"~{last.flat_ms_mean * scale / 1000:.1f}s/query flat vs "
-        f"~{last.inv_ms_mean * scale / 1000:.2f}s/query inverted"
+        "\n"
+        + sweep_summary(
+            sizes,
+            [row.flat_ms_mean for row in rows],
+            [row.inv_ms_mean for row in rows],
+        )
     )
 
 

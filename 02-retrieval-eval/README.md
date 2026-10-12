@@ -122,7 +122,7 @@ then the sweep, the same 200 zipf-drawn queries replayed against growing corpora
   16000       0.53s      0.56s     26.352  32.300     5.845   9.065     4.5x      63840       22457         2.8x
   32000       1.49s      0.98s     65.229  82.640    11.487  17.522     5.7x     128000       44926         2.8x
 
-both columns grow linearly in corpus size, so at 1,000,000 docs the measured slope projects to ~2.0s/query flat vs ~0.36s/query inverted
+flat ms/q is not linear in corpus size — it grows as n^1.21 against n^1.04 for the inverted column, so projecting each at its own measured exponent, 1,000,000 docs costs ~4.2s/query flat vs ~0.42s/query inverted
 
 == what zipf traffic looks like at 32,000 docs ==
 realized vocabulary 19,985 terms, 1,350,045 postings total
@@ -142,7 +142,7 @@ on typical queries the single most common term owns 64.9% of all postings touche
 
 what the numbers say
 
-- **the flat scan falls over on schedule, and smoothly.** per-query latency is linear in corpus size, 0.910ms at 1k docs to 65.229ms at 32k, so theres no cliff to point at, just a line that crosses whatever latency budget you have somewhere in the tens of thousands of docs and keeps going. by 1M docs its ~2.0s per query
+- **the flat scan falls over on schedule, and faster than linearly.** 0.910ms at 1k docs to 65.229ms at 32k — 71.7x the time for 32x the corpus, n^1.21, every doubling in the sweep costing 2.2-2.6x and not one of them 2x. it scans n docs per query term and then sorts all n scores, and the sort is the extra bend. theres no cliff to point at, just a line that crosses whatever latency budget you have somewhere in the tens of thousands of docs and keeps steepening. by 1M docs ~4.2s per query — reading the last row as a straight line says ~2.0s and understates it by better than two
 - **the inverted index is not a complexity-class win on zipf traffic.** postings touched grow linearly with corpus size too (1398 per query at 1k docs, 44926 at 32k), because document frequency grows with the corpus. the touch ratio sits flat at 2.8x across the sweep and the wall-clock speedup hovers in the 3-6x band instead of widening with size (it runs a bit above the touch ratio because the flat scan also sorts all n scores per query where the inverted index heap-selects from the candidates). the class win people imagine is real only for rare terms
 - **why the ceiling: zipf.** a typical 4-term query almost always carries at least one common term, and that terms posting list is most of the corpus. at 32k docs a typical query still scores 26963 candidate docs of 32000, and the single most common term in a query owns 64.9% of the postings it touches. the inverted index does exactly what it promises, it skips docs holding none of the query terms; zipf makes sure there are few of those
 - **rare terms live in the other world.** rare-only queries touch 77 postings where the flat scan still reads the full 32000-doc corpus once per matched term, 0.086ms against 32.924ms, 382.6x, and that cost is essentially flat in corpus size. the cost of an inverted-index query is the sum of its terms document frequencies, not the size of the corpus, which is why specific queries feel instant in real engines
@@ -315,6 +315,14 @@ the wall clock is the same honest asterisk as the pruning study, sharper. block-
 - adding one doc to the inverted index is an append per term, but it moves df and avg doc length, which silently re-prices every idf. at what update rate does rebuild-vs-patch flip, and is that why real engines ship immutable segments with background merges?
 
 ## fixes
+
+- 2026-10-12 — the sweep summary asserted "both columns grow linearly in
+  corpus size" and then scaled the last row straight up to a million docs. the
+  flat column isnt linear — 32x the corpus costs 71.7x the time, n^1.21, every
+  doubling in the sweep above 2x — because it sorts all n scores per query on
+  top of scanning them. scaling.py now fits each exponent and projects at it.
+  flat at 1M docs moved ~2.0s → ~4.2s/query, inverted ~0.36s → ~0.42s; no
+  measured row moved, the summary line is recomputed from them
 
 - 2026-10-04 — the `+probes` bill double-charged. a probe that found the
   posting it then scored was billed as both, and maxscore re-bisects the same
