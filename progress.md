@@ -60,7 +60,7 @@ OPEN THREADS for the questions worth answering next.
 | 07-near-duplicates | 2026-08-27 | python | word n-gram shingling (nfkc/casefold normalization) + exact jaccard ground truth over all pairs + minhash signatures (seeded affine hash family mod 2^61-1, prefix-truncatable so one k=128 pass serves the whole accuracy sweep) + banded lsh with the 1-(1-s^r)^b s-curve + 64-bit simhash with hamming sweep + seeded mutation corpus (typo/drop/shuffle/truncate/noise, provenance ground truth); measured — dup-pair estimator mae 0.114 at k=8 to 0.031 at k=128 (~1/sqrt k), tuned banding b=64 r=2 recovers all 360 dup pairs exactly at 3.5% of brute-force comparisons, mistuned b=32 r=4 silently loses 31 pairs concentrated in mutant-mutant (0.812) and typo (0.917) recall, of which only 9 sit below its 0.383 50% collision point (20 of the 360 true pairs do, capping recall at 0.975) and 22 are tail losses above it — the s-curve is a probability, so threshold placement explains under a third of the loss, simhash best f1 0.942 vs pipeline 1.000 because the dup/non-dup hamming tails overlap (max dup distance past min non-dup 19) |
 | 06-rate-limiting | 2026-08-27 | typescript | virtual-time clock (deterministic timer ordering by (time, seq), deadlock detection, run-until-settled driver) + continuous-refill token bucket shared by server admission and client pacing + backoff policies (fixed, capped exponential, full/equal/decorrelated jitter per the aws formulations) + bounded retry loop with optional retry-after compliance + simulated api with seeded latency and transient 503s; measured on a 40-client x 5-request herd against 20 req/s — no-jitter retries collide 20-wide at the same instant vs 1 jittered, but full jitter's peak-window load is higher (104 vs 61 per 100ms, mean delay is half), fixed-100ms burns 15.32 attempts/success and still fails 56.5%, retry-after makespan 9.47s vs 9.0s ideal, client pacing 1.11 att/ok with every leftover 429 downstream of 503 retries that bypass the pacing bucket |
 | 05-token-streaming | 2026-08-26 | typescript | incremental sse parser over raw bytes (whatwg subset: lf/crlf/bare-cr incl. cr on a chunk boundary, streaming utf-8 decode, multi-line data, last-event-id, dispatch only on non-empty data) + partial-json prefix parser (single left-to-right scan: container stack, in-progress token, safe-index truncation; unambiguous completion — close string, tru->true, trim 12. to 12 — else drop the dangling piece) + bounded async queue whose await-push blocks when full, with high-water/stall instrumentation; measured — first text at 2.5% of a buffering client's wait, tool-arg fields first parsed at 44-89% of stream bytes vs 100% waiting for the closing brace and first carrying a value at 44-89% too except the one object-valued field, which parses empty at 60.5% and holds a filter at 63.8%, bounded(8) queue holds high-water at 8 chunks vs 419 unbounded at identical wall time, 300/300 seeded byte-level chunkings parse identically |
-| 04-bpe-tokenizer | 2026-08-25 | python | byte-level bpe from scratch: pair counting weighted by pretoken piece frequency, deterministic lexicographic tie-break, rank-ordered merge application, byte fallback, replacement-char-safe decode; merge-prefix truncation lets one training serve a whole vocab sweep; measured — vocab 256→1246 cuts heldout prose 3106→1058 tokens (2.9x cost), domain transfer with a vocab-matched control (prose-trained 1.49 vs mixed-trained 2.56 bytes/token on code at equal vocab — the domain, not the slots), script cost (cjk 9.0x english tokens/char, zero merges learned), baselines at matched vocab (word tokenizer 20.3% oov on heldout prose, char tokenizer misses 277 chars, byte-level oov is structurally 0%) |
+| 04-bpe-tokenizer | 2026-08-25 | python | byte-level bpe from scratch: pair counting weighted by pretoken piece frequency, deterministic lexicographic tie-break, rank-ordered merge application, byte fallback, replacement-char-safe decode; merge-prefix truncation lets one training serve a whole vocab sweep; measured — vocab 256→1246 cuts heldout prose 3106→1058 tokens (2.9x cost), domain transfer with a vocab-matched control (prose-trained 1.49 vs mixed-trained 2.56 bytes/token on code at equal vocab — the domain, not the slots), script cost (cjk 9.0x english tokens/char, zero merges learned), baselines at matched vocab (word tokenizer 40.5% oov on heldout prose words, char tokenizer misses 277 chars, byte-level oov is structurally 0%) |
 | 02-retrieval-eval, bootstrap extension | 2026-08-25 | python | paired bootstrap over per-query reciprocal ranks (10000 resamples, seeded, stdlib only): 95% percentile confidence intervals on each system's mrr and on paired per-query mrr differences, plus a direction-stability fraction (share of resamples where the gap is <= 0); measured verdict — bm25 vs tf-idf +0.018 [+0.000, +0.048] includes zero, the gap rests on 2 of 38 queries even though bm25 never loses one, while bm25 vs b=0 +0.041 [+0.001, +0.091] excludes zero |
 | 03-hybrid-search | 2026-08-25 | python | okapi bm25 from scratch + lsa dense retrieval (tf-idf → seeded truncated svd) over one shared stemmer/compound-splitting tokenizer; rrf and weighted score fusion with alpha sweep; recall@1/5 + mrr on 100 docs / 40 golden queries split keyword vs paraphrase (paraphrase mrr@10: bm25 0.765, dense 0.793, hybrid rrf 0.799; overall rrf best at 0.899; keyword saturated for both — corpus-fit lsa has no oov failure mode) |
 | 02-retrieval-eval | 2026-08-25 | python | from-scratch okapi bm25 (lucene idf, k1 tf saturation, b length norm) vs sklearn-style tf-idf cosine (raw tf, smooth idf, l2 norm); evaluated with recall@1/recall@5/mrr@10 over a committed 40-doc / 38-query golden dataset, per-query head-to-head by reciprocal rank, plus a b=0 ablation isolating length normalization (mrr 0.917 tf-idf / 0.934 bm25 / 0.893 b=0); dataset includes engineered kitchen-sink distractor docs and deliberate vocabulary-mismatch queries to show where lexical retrieval fails |
@@ -189,6 +189,119 @@ claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
+
+- [fixed 2026-10-12] 04 — the word baseline's oov rate was published over a
+  denominator padded with tokens that cannot be unknown, which halved every
+  row. the readme said "my word-level tokenizer hits 20.3% unknown tokens on
+  held-out prose" and called "20.3% the ceiling for a closed word vocab on
+  this corpus"; the root index row said "a word baseline loses 20.3% of
+  held-out tokens to `<unk>`"; main printed "heldout prose: 209/1032 tokens
+  are OOV (20.3%)". the mechanism is `word_split` being `\S+|\s+`, which
+  emits a whitespace run between every pair of words, and `oov_stats` putting
+  those runs in `len(tokens)`. not one whitespace run is ever oov on any file
+  measured — a handful of them are the most frequent types in any training
+  text, so the top-n buys them first and they can never miss — so they are
+  pure denominator. and because words and whitespace runs alternate, the two
+  counts are equal to the token on all three files (516/516, 227/227,
+  249/249), making the dilution exactly a factor of two rather than roughly
+  one: 209/1032 is 209/516 divided by 2 to the last bit. so the published
+  figure was half the rate it was read as, and it moved with the splitter
+  rather than with the vocabulary — had `word_split` dropped whitespace, as
+  closed-vocabulary baselines usually do, the same tokenizer would have
+  reported 40.5% unchanged. the row that changes character is unicode: 45.4%
+  reads as "about half the stream" where the real figure is 90.8%, meaning
+  essentially every word in the multilingual sheet is destroyed, which is the
+  project's own argument for byte-level fallback landing far harder than it
+  was written. `oov_stats` now filters `tok.isspace()` out of both terms and
+  its docstring says why; main prints "word runs are OOV" and one line stating
+  the exclusion. the numerators are untouched, so the 2026-09-03 finding still
+  holds exactly — the vocab budget was never binding, only the denominator
+  moved. measured: prose 20.3% -> 40.5% (209/516), code 24.4% -> 48.9%
+  (111/227), unicode 45.4% -> 90.8% (226/249). cross-project check: no other
+  project computes an oov rate — 04 is the only one with a closed-vocabulary
+  word baseline, and nothing else in the repo divides by a `word_split`-style
+  run count, so there is nothing to port.
+  133 -> 146 tests. new file tests/test_oov_denominator.py: three pinning the
+  premise (no whitespace run is oov on any of the three files, words and
+  whitespace runs are equal in number, and the retired rate is exactly half
+  the word rate to within 1e-12), four on `oov_stats` (the three committed
+  rows, whitespace left out of both terms on a small example, every-word-
+  unknown reading as 2/2 not 3/3, and whitespace-only and empty text having no
+  words), three binding the run (the word denominators and rates print, the
+  six retired tokens are gone, the section states the exclusion) and three
+  binding the readme (the new figure, the retired figures absent from the body
+  above the fixes log, and the ceiling sentence carrying the new rate). two
+  existing tests that pinned the padded figures were updated with it:
+  test_baselines' `test_oov_stats` and `test_vocab_one_is_all_unk`, and
+  test_baseline_vocab_budget's row test, renamed
+  `test_oov_numerators_are_unchanged` since that is what it now holds.
+  gate ran from a fresh clone with its own pip install: 146 pass, the entry
+  point reproduces every published figure, and all four fenced blocks in the
+  readme appear in the run character for character — the only readme numbers
+  not in the output are 2048 (MAX_VOCAB, named as the budget the corpus cannot
+  justify), 264 and 280 (the prefix-property bullet's test vocabs), 413 and 734
+  (1659-1246 and 1246-512) and "150 lines" for bpe.py's 145. the revert check
+  ran twice with the new test kept — reverting `oov_stats` alone fails 6 and
+  passes 7, reverting the whole fix fails 10 and passes only the 3 premise
+  tests, which is the right shape: the premise is a property of the corpus and
+  holds either way.
+  found and fixed 2026-10-12
+
+- [medium] 04 — the pretokenizer's leading-space rule silently stops applying
+  after any whitespace run longer than one space or containing a newline, so
+  the same word gets two different token sequences depending on what precedes
+  it. the readme's details bullet says "a words leading space merges with it,
+  so ` the` becomes a single token", and `test_leading_space_attaches_to_word`
+  pins `pretokenize("the cat") == ["the", " cat"]`. but `_PRETOKEN_RE` is
+  `" ?\S+|\s+"` and the alternation is ordered: at a position holding
+  whitespace, `" ?\S+"` can only match if exactly one space is followed by a
+  non-space, so after a newline or a run of two or more spaces the greedy
+  `\s+` branch wins and swallows the space the word would have taken.
+  measured: `pretokenize("the\n cache")` is `["the", "\n ", "cache"]`, not
+  `["the", "\n", " cache"]`, and on the committed corpus 194 of 698 word
+  pieces in train/code.txt (27.8%) lose their leading space to an indentation
+  run against 21 of 2215 in train/prose.txt. gpt-2's pattern avoids this with
+  a `\s+(?!\S)` branch that hands the final space of a run to the following
+  word, so this is a real divergence from the canonical pretokenizer and it
+  lands hardest on indented code, which is the domain the transfer section
+  measures. nothing published is wrong — every number describes the tokenizer
+  as actually built — but ` self` and `self` after indentation are competing
+  for merge slots as two unrelated pieces, which is a mechanism the readme
+  does not mention and which plausibly costs the code rows. the fix is the
+  extra regex branch, and it changes every measured number in the project, so
+  it is a new measurement rather than a correction and belongs in its own run
+
+- [medium] 04 — `run_benchmark` divides by `oov_stats`' total without a zero
+  guard: `oov / total * 100` raises ZeroDivisionError on a heldout file with
+  no word runs. pre-existing and unreachable on the committed corpus — all
+  three files have words — but the surface widened slightly with today's fix,
+  since whitespace-only text now returns `(0, 0)` where it returned `(0, 1)`
+  before, and `test_oov_stats` has pinned `oov_stats("") == (0, 0)` since the
+  file was written, so the zero total was always reachable through the api.
+  the same shape sits in `bytes_per_token` and `tokens_per_char`, which both
+  return 0.0 rather than raising, so the metrics module already made this
+  choice and the benchmark is the one place that did not
+
+- [low] 04 — the COMPLETED row for 04 still opens its baselines clause with
+  "baselines at matched vocab", which is the exact claim the 2026-09-03 finding
+  retired from the readme and the run: the word tokenizer builds 1402 against
+  the mixed bpe's 1659 and the budget was never binding, so the vocabs are not
+  matched. that fix updated the readme and main but not the ledger's own
+  summary row, and today's pass corrected only the oov figure inside it since
+  that is the number this run moved. one phrase, in progress.md rather than in
+  the project, so nothing a reader of the repo sees is wrong
+
+- [low] 04 — the cost section's two "1 MB of code" rows are a linear
+  projection off a 2226-byte sample presented as token counts: `scale` is
+  `1_000_000 / utf8_bytes(heldout["code"])`, so ~669,811 and ~370,620 are the
+  measured 1491 and 825 tokens multiplied by 449.24 and rounded. the claim the
+  section actually makes is the ratio, which is scale-invariant and correct to
+  the digit, and the readme says so at the top ("the ratios are the
+  measurement, the rate is an input"). what the two rows assume unsaid is
+  constant bytes/token at 450x the measured size, which a larger code file
+  would not hold exactly. same shape as 02's retired linear-growth assertion,
+  but much weaker — the quantity projected is a rate rather than a complexity
+  class, and the published verdict does not rest on it
 
 - [fixed 2026-10-12] 03 — the alpha sweep published one member of a tied
   argmax as the tuned value. the readme said "the sweep below finds the blend
@@ -6024,7 +6137,7 @@ question is not reopened.
 | 07-near-duplicates | 2026-10-05 |
 | 05-token-streaming | 2026-10-06 |
 | 03-hybrid-search | 2026-10-12 |
-| 04-bpe-tokenizer | 2026-10-05 |
+| 04-bpe-tokenizer | 2026-10-12 |
 | 02-retrieval-eval | 2026-10-12 |
 
 25 was last reviewed on 2026-10-03 and the catch this time is a claim, not
