@@ -190,6 +190,99 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-12] 03 — the alpha sweep published one member of a tied
+  argmax as the tuned value. the readme said "the sweep below finds the blend
+  only at a=0.2, where it lands on rrfs 0.899 exactly" and main.py printed
+  "best alpha on this query set: 0.2 (mrr@10 0.899)". a=0.3 scores
+  0.8994047619047618, which is a=0.2's figure to the last bit and rrf's
+  overall mrr to the last bit as well, so "only at a=0.2" was false and the
+  printed line named one of two. the mechanism is `max(sweep, key=sweep.get)`
+  returning the first key of a tied set — nothing was rounding away, the two
+  are genuinely equal because the fused rankings at 0.2 and 0.3 differ (checked
+  per query, they are not the same permutation) while putting the first
+  relevant doc at the same position in every query inside the rank-10 cutoff,
+  so the per-query reciprocal ranks agree element for element and the means
+  agree bit for bit. this is the readme's own "reading tea leaves" caveat
+  landing harder than it was written: a sweep whose argmax is a tie has not
+  picked a knob at all. new `best_alphas(sweep, tol=1e-12)` in evaluate.py
+  returns every alpha at the max ascending, raising on an empty sweep, with a
+  tolerance so a tie this metric means mathematically cannot come apart on an
+  accumulation-order artifact; main.py keeps the old single-value line when the
+  max is unique and otherwise names every tied alpha and says the max is a tie;
+  the readme's two sweep bullets name a=0.2 and a=0.3 as tied. no measured
+  number moved — all three tables, both win lines, the attribution lines and
+  all eleven sweep values reproduce character for character from a fresh
+  clone, the only diff in the entry point's output being the one best-alpha
+  line. the endpoints also reconcile, which is what rules out a fusion bug
+  under the tie: sweep@0.0 equals pure bm25's mrr exactly and sweep@1.0 equals
+  pure dense's exactly. cross-project check: no other project publishes a best
+  hyperparameter off an argmax — the only comparable code is 12's
+  `best_operating_point`, which keeps the first of a tied set the same way but
+  has a unique maximum for all four methods on its committed data, so nothing
+  it prints is wrong today; logged low below rather than changed here, since
+  the fix is not the identical change. every other `max`/`sorted` over scores
+  in the repo already breaks ties explicitly on a doc id.
+  104 -> 116 tests. new file tests/test_alpha_plateau.py: four unit tests on
+  `best_alphas` (every tied maximum, a unique maximum returning one, a tie
+  inside float noise, an empty sweep raising), four on the committed sweep (the
+  0.1-grid max is exactly {0.2, 0.3}, the two agree to the last bit, both equal
+  rrf's mrr exactly, and the two fused rankings are not the same permutation so
+  the tie cannot be waved away), two binding the entry point's line (it names
+  both alphas and the word tie, and the retired single-alpha phrasing is gone),
+  and two binding the readme (the two retired phrasings are gone, the tie is
+  named). gate ran from a fresh clone with its own pip install: 116 pass, main
+  .py reproduces every published figure, and the 30 three-decimal figures the
+  numbers section quotes are all in the run bar 0.083, which the readme states
+  in the past tense as the pre-cutoff value the 2026-08-26 fix retired. the
+  revert check ran four ways with the new test kept — reverting the readme
+  alone fails the 2 readme tests and passes 114, reverting main.py's printed
+  line alone while leaving `best_alphas` in place fails the 2 entry-point tests
+  and passes 114 and reprints the old "best alpha on this query set: 0.2
+  (mrr@10 0.899)" exactly, and reverting the code or the whole fix kills the
+  module on the dead import.
+  found and fixed 2026-10-12
+
+- [medium] 03 — the two-way tie the fix now publishes still understates how
+  flat the sweep's maximum is, because the printed grid is too coarse to show
+  it. main.py sweeps alpha in 0.1 steps, so the max reads as two points. on a
+  0.01 grid the max is a contiguous run from a=0.19 to a=0.37 — 19 of 101
+  points, a fifth of the range — every one of them at exactly
+  0.8994047619047618. so "best alpha" on this set is not a tie between two
+  values, it is a plateau, and the honest version of the sweep bullet is that
+  the curve has a flat top rather than a peak. nothing published is wrong now
+  that the tie is named; what is missing is the width. the fix is a finer grid
+  or a printed plateau range in main.py, which is a new measurement in the
+  entry point and the readme rather than a correction, so it was left for its
+  own run instead of widening the tie fix
+
+- [low] 12 — `best_operating_point` in `12-groundedness-scoring/groundedness/
+  evaluate.py` keeps the first of a tied set the same way 03's retired argmax
+  did: it walks the candidate thresholds and replaces the incumbent only on
+  `point.youden_j > best.youden_j`, so a threshold tying the maximum is
+  dropped silently and the printed operating point reads as the only one.
+  latent, not wrong: swept over the committed data, all four methods have a
+  unique maximum — overlap and sentence_cosine at youden_j 0.194286, numeric
+  _gated at 0.228571, negation_aware at 0.268571, one tied threshold each — so
+  no number 12 publishes today is one of several. worth closing before the
+  data moves, and it wants the same treatment as 03: report the tied set
+
+- [low] 03 — `_TOKEN_RE` in tokenize.py is `[a-z0-9]+(?:[-_][a-z0-9]+)*`
+  compiled with `re.UNICODE`, and the flag does nothing for a pattern whose
+  character classes are literal ascii ranges. so the tokenizer is ascii-only
+  while advertising otherwise: "café" tokenizes to `caf`, "naïve" splits into
+  `na` and `ve`, and "日本語" produces no token at all. the committed corpus is
+  english ops documentation and the tokenizer is applied identically to
+  documents and queries, so no published number is affected and the comparison
+  it exists to protect still holds. the flag is the misleading part — either
+  drop it or widen the classes
+
+- [low] 03 — tokenize's docstring says `force-with-lease` "emits itself (so
+  the exact flag stays searchable)", and what it emits is `force-with-leas`:
+  the compound goes through the same stemmer, which strips the trailing -e at
+  length over 4. harmless for retrieval because queries are stemmed the same
+  way, so the flag is still searchable — the docstring just names the wrong
+  token
+
 - [fixed 2026-10-12] 22 — the streaming headline averaged a measurement
   against an authored constant, and the constant was the bigger of the two.
   the readme published "the first token completes at a mean 22.6% of the
@@ -5930,7 +6023,7 @@ question is not reopened.
 | 08-agent-tool-loop | 2026-10-06 |
 | 07-near-duplicates | 2026-10-05 |
 | 05-token-streaming | 2026-10-06 |
-| 03-hybrid-search | 2026-10-05 |
+| 03-hybrid-search | 2026-10-12 |
 | 04-bpe-tokenizer | 2026-10-05 |
 | 02-retrieval-eval | 2026-10-12 |
 
