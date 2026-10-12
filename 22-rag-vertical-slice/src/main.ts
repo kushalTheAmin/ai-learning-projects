@@ -21,7 +21,7 @@ import {
   type PolicyRow,
 } from "./escalate.js";
 import { ask } from "./client.js";
-import { evalGolden, extractionDrift, type EvalRow, type QueryOutcome } from "./eval.js";
+import { evalGolden, extractionDrift, firstTokenSplit, type EvalRow, type FirstTokenSplit, type QueryOutcome } from "./eval.js";
 import {
   captureScores,
   correctScores,
@@ -96,17 +96,13 @@ async function main(): Promise<void> {
     console.log("             acc      acc   sent  w/gold  no gold no gold");
     const rows: EvalRow[] = [];
     const sweepOutcomes = new Map<number, QueryOutcome[]>();
-    let firstTokenFractions: number[] = [];
+    let firstToken: FirstTokenSplit | undefined;
     for (const k of [1, 2, 3, 5]) {
       const { row, outcomes } = await evalGolden(baseUrl, queries, k);
       rows.push(row);
       sweepOutcomes.set(k, outcomes);
       console.log(evalRowLine(row));
-      if (k === 3) {
-        firstTokenFractions = outcomes
-          .filter((o) => o.bytesAtFirstToken !== undefined)
-          .map((o) => (o.bytesAtFirstToken as number) / o.wireBytes);
-      }
+      if (k === 3) firstToken = firstTokenSplit(outcomes);
     }
     console.log();
     const k1 = rows[0];
@@ -295,10 +291,13 @@ async function main(): Promise<void> {
     console.log();
 
     // --- streaming payoff in bytes ---
-    const meanFraction = firstTokenFractions.reduce((a, b) => a + b, 0) / firstTokenFractions.length;
+    if (firstToken === undefined) throw new Error("missing k=3 first-token split");
     console.log("--- streaming: bytes a client holds before it can render the first token (k=3) ---");
     console.log(
-      `first token completes at mean ${fmt(100 * meanFraction, 1)}% of the response bytes (${firstTokenFractions.length}/${queries.length} requests emitted tokens; a buffering client waits for 100% on every one)`,
+      `first token completes at mean ${fmt(100 * firstToken.answered.mean, 1)}% of the response bytes on the ${firstToken.answered.count} answered responses (${fmt(100 * firstToken.answered.min, 1)}-${fmt(100 * firstToken.answered.max, 1)}%); a buffering client waits for 100% on every one`,
+    );
+    console.log(
+      `the ${firstToken.refused.count} refusals stream a fixed string, so their first token lands at a near-constant ${fmt(100 * firstToken.refused.min, 1)}-${fmt(100 * firstToken.refused.max, 1)}% — above every answered response's mean, so pooling all ${firstToken.pooled.count} reads ${fmt(100 * firstToken.pooled.mean, 1)}% and prices the authored refusal, not the reader`,
     );
     console.log();
 

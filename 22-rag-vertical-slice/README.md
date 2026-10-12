@@ -16,7 +16,7 @@ a vertical slice is the argument that composition is where production behavior l
 
 ```
 npm ci
-npm test          # 136 tests: unit + integration over a live server
+npm test          # 150 tests: unit + integration over a live server
 npm run typecheck
 npm start
 ```
@@ -97,7 +97,7 @@ the oracle rows price what the trigger cannot see. an oracle that escalates only
 
 every policy row is a projection over two floor-0 captures (per-query score, would-be correctness, gold hit, and token counts at k=3 and at each k2), same discipline as the floor sweep, and live escalation servers at two grid points reproduce their projected rows exactly, checked field by field including the dollar totals.
 
-streaming: the first token completes at a mean 22.6% of the response bytes at k=3, computed from the wire encoding itself, so its exact and deterministic. a buffering client waits for 100% on all 40. (this number was 23.3% before the floor extension: the done event now carries the refusal score, so every response is a few bytes longer and the first tokens share of them smaller.)
+streaming: the first token completes at a mean 18.6% of the response bytes on the 28 answered responses at k=3, spread 10.2-33.2%, computed from the wire encoding itself, so its exact and deterministic. a buffering client waits for 100% on every one. the other 12 are refusals and they are not a measurement of streaming an answer — the 12 refusals stream a fixed string, so their first token lands at a near-constant 31.3-33.2%, a property of the authored refusal rather than of the reader. every one of them sits above the answered mean, so pooling all 40 reads 22.6% — which is the number this readme used to publish as the streaming payoff, 4 points worse than what a real answer actually costs a client. (the pooled figure was 23.3% before the floor extension: the done event now carries the refusal score, so every response is a few bytes longer and the first tokens share of them smaller.)
 
 backpressure against a deliberately slow client (every write blocks one macrotask), re-read now that the queue can budget bytes. the /ask queue used to cap events; 05s queue grew a maxBytes budget, and this extension wires it through as a server option (`queue: {maxBytes}`), logs the per-request byte high-water, and re-measures. the harness now streams the full wire shape of a request, meta then tokens then done, because the sizes are nothing alike: token events run 34-48 wire bytes while meta and done carry json payloads near 190. the earlier table streamed token events only, so its numbers were smaller.
 
@@ -134,6 +134,8 @@ validation is a table of exact rejections: empty or non-string question 400, k o
 this is the applied-ai shape typescript actually ships: an http endpoint, streaming wire protocols, backpressure across async boundaries, token accounting on the request path. strict mode with typed event payloads catches the protocol drift these systems are famous for, and node's microtask/macrotask scheduling made the backpressure experiment deterministic without a mock clock.
 
 ## fixes
+
+- 2026-10-12 — the streaming headline pooled 40 responses when only 28 of them stream an answer — the other 12 are the fixed refusal string, whose first token lands at a near-constant 31.3-33.2% by construction, above every answered response. the mean now reports the 28 answered responses and the refusals are named separately, with the pooled figure kept and labelled. first-token fraction moved 22.6% -> 18.6% on the claim it describes.
 
 - 2026-10-04 — the k sweep blamed the extraction-accuracy drift on the extra docs — "every extra doc is another set of distractor sentences for the best-overlap pick to lose to" — and that steal never happens here: 0 of 40 queries read correctly at one k and wrong at a wider one, which is the same fact the escalation plane already measured as atrisk 18 / hurt 0. the reading now names the real mechanism, which gold docs arrive late (5 of the 12 past k=1 answered right against 14 of the first 26, 0.417 against 0.538), and the entry point prints the attribution instead of leaving it asserted. no measured number moved — every table cell is what it was.
 

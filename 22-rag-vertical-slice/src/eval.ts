@@ -167,3 +167,50 @@ export function extractionDrift(byK: ReadonlyMap<number, readonly QueryOutcome[]
     lateCorrect: late.filter((o) => o.correct).length,
   };
 }
+
+/** Mean and range of a first-token byte fraction over one population. */
+export interface FractionStats {
+  count: number;
+  /** NaN when the population is empty: no responses, no fraction. */
+  mean: number;
+  min: number;
+  max: number;
+}
+
+/**
+ * The first-token byte fraction, split by what the response actually
+ * streamed. A refused response carries the same fixed refusal string every
+ * time, so its first token lands at a near-constant share of a
+ * near-constant response — an authored constant, not a measurement of the
+ * reader. Pooling it with the extracted sentences averages the two, and on
+ * this corpus the refusals sit above every answered mean, so the pooled
+ * figure reads worse than the streaming payoff on a real answer. Both are
+ * reported; `answered` is the one that describes streaming an answer.
+ */
+export interface FirstTokenSplit {
+  answered: FractionStats;
+  refused: FractionStats;
+  /** Both populations together: what a single mean over the set reports. */
+  pooled: FractionStats;
+}
+
+function fractionStats(fractions: readonly number[]): FractionStats {
+  if (fractions.length === 0) return { count: 0, mean: NaN, min: NaN, max: NaN };
+  return {
+    count: fractions.length,
+    mean: fractions.reduce((a, b) => a + b, 0) / fractions.length,
+    min: Math.min(...fractions),
+    max: Math.max(...fractions),
+  };
+}
+
+export function firstTokenSplit(outcomes: readonly QueryOutcome[]): FirstTokenSplit {
+  const emitted = outcomes.filter((o) => o.bytesAtFirstToken !== undefined);
+  const fractions = (served: QueryOutcome["served"]): number[] =>
+    emitted.filter((o) => o.served === served).map((o) => (o.bytesAtFirstToken as number) / o.wireBytes);
+  return {
+    answered: fractionStats(fractions("answered")),
+    refused: fractionStats(fractions("refused")),
+    pooled: fractionStats(emitted.map((o) => (o.bytesAtFirstToken as number) / o.wireBytes)),
+  };
+}
