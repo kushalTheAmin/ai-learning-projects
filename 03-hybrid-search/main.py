@@ -9,6 +9,7 @@ from hybrid_search.evaluate import (
     MRR_K,
     RECALL_KS,
     aggregate,
+    best_alphas,
     evaluate,
     fusion_attribution,
     load_json,
@@ -111,11 +112,16 @@ def main() -> None:
         f"  {f'mrr@{MRR_K}:':<{label_width}} "
         + "  ".join(f"{sweep[a]:>5.3f}" for a in alphas)
     )
-    best_alpha = max(sweep, key=sweep.get)
-    print(
-        f"  best alpha on this query set: {best_alpha} "
-        f"(mrr@{MRR_K} {sweep[best_alpha]:.3f})"
-    )
+    best = best_alphas(sweep)
+    score = f"mrr@{MRR_K} {sweep[best[0]]:.3f}"
+    if len(best) == 1:
+        print(f"  best alpha on this query set: {best[0]} ({score})")
+    else:
+        names = " and ".join(str(a) for a in best)
+        print(
+            f"  best alpha on this query set: {names} tie at {score} "
+            f"- the sweep's max is a tie, not one tuned value"
+        )
 
 
 if __name__ == "__main__":

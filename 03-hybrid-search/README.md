@@ -47,8 +47,8 @@ mrr is cut off at rank 10, same as 02 — every ranking here covers all 100 docs
 - keyword queries: both sides go 20/20 at rank 1. more on why thats interesting below
 - paraphrase queries: bm25 gets trapped by surface-word collisions — "check who is logged in without a trip to the database" lands on the connection-pooling doc (database! trip!) and doesnt reach the JWT doc until rank 12, past the cutoff, so it scores zero — dense has it at 9. dense wins the category on mrr@10 and recall@5
 - hybrid rrf has the best mrr@10 and recall@1 overall, and not by rescuing a miss — bm25 misses exactly one query past the cutoff (p14, the one above at rank 12) and rrf leaves it a miss at rank 11. what rrf does is hold both sides sole rank-1: p08 is rank 1 for bm25 alone, p01 for dense alone, and rrf puts both at 1 — that is the whole recall@1 gain, 0.812 to 0.838, one query of the 40. the mrr@10 lead over dense is that same query, p08 at +0.5, against losses on p02, p09 and p14. keyword stays 20/20 either way. main.py prints the attribution so this reads off the run
-- the weighted blend at the default a=0.5 is the row that doesnt pay — 0.887 overall and 0.774 on paraphrase, under rrf on both and under plain dense too. so "fusion helps" on this set is an rrf result, not a fusion result. the sweep below finds the blend only at a=0.2, where it lands on rrfs 0.899 exactly
-- the alpha sweep prints mrr@10 at every blend from pure-bm25 to pure-dense. best value on this set is 0.2, but with 40 queries thats reading tea leaves — the sweep is there to show the tradeoff curve exists, not to pick a production constant
+- the weighted blend at the default a=0.5 is the row that doesnt pay — 0.887 overall and 0.774 on paraphrase, under rrf on both and under plain dense too. so "fusion helps" on this set is an rrf result, not a fusion result. the sweep below reaches rrfs 0.899 at a=0.2 and a=0.3 — a tie, to the last bit, not one alpha where the blend catches up
+- the alpha sweep prints mrr@10 at every blend from pure-bm25 to pure-dense. best value on this set is a=0.2 and a=0.3 tied, and with 40 queries thats reading tea leaves twice over — a tied argmax cant even name the knob it tuned. the sweep is there to show the tradeoff curve exists, not to pick a production constant
 
 ## the honest finding about keyword queries
 
@@ -62,6 +62,11 @@ i expected dense to stumble on exact identifiers — thats the standard story fo
 
 ## fixes
 
+- 2026-10-12 — the alpha sweeps best value was published as a=0.2 alone, and
+  a=0.3 scores the identical 0.899 — `max(sweep, key=sweep.get)` returns the
+  first of a tied set, so a tie read as one tuned alpha. new `best_alphas`
+  returns every alpha at the max, main.py and the readme name both. no
+  measured number moved
 - 2026-10-05 — the repo ledger row still published paraphrase dense mrr 0.794,
   the value the 2026-08-27 stemmer fix retired here — nothing bound that row to
   the run. tests/test_ledger_row.py recomputes all three paraphrase mrrs, the

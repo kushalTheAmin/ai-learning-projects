@@ -122,6 +122,22 @@ def sweep_alpha(
     return result
 
 
+def best_alphas(sweep: dict[float, float], tol: float = 1e-12) -> list[float]:
+    """Every alpha tied at the sweep's maximum, ascending.
+
+    A list rather than one value because the maximum here is a tie, and
+    reporting one member of it as "the" best alpha claims the sweep resolved
+    something it did not. The tolerance is there because two alphas whose
+    rankings put the first relevant doc at the same position in every query
+    are mathematically tied, and that must not come apart on the last bit of
+    an accumulation.
+    """
+    if not sweep:
+        raise ValueError("cannot pick a best alpha out of an empty sweep")
+    best = max(sweep.values())
+    return sorted(a for a, mrr in sweep.items() if best - mrr <= tol)
+
+
 def fusion_attribution(
     results: list[QueryResult],
     fused: str = "hybrid_rrf",
