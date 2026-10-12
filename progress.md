@@ -190,6 +190,89 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-12] 22 — the streaming headline averaged a measurement
+  against an authored constant, and the constant was the bigger of the two.
+  the readme published "the first token completes at a mean 22.6% of the
+  response bytes at k=3" and the root index row repeated it ("a streaming
+  client renders its first token at a mean 22.6% of the response bytes"), over
+  all 40 responses. but only 28 of those 40 stream an extracted sentence; the
+  other 12 are refusals, and a refusal is the same fixed 46-char string every
+  time, so its response is a near-constant 671-694 wire bytes and its first
+  token lands at a near-constant 31.3-33.2% — a property of the authored
+  refusal text, not of the reader or the wire. measured split: answered mean
+  18.6% over a 10.2-33.2% spread, refused mean 32.1% over a 1.9-point spread,
+  and every single refusal sits above the answered mean, so pooling can only
+  drag the figure up. it did, by 4 points, and in the direction that makes the
+  streaming payoff look worse than it is — the number a reader carries away as
+  "how much must a client hold before it can render anything" is 18.6% for a
+  response that has something to render. the section's own framing is about
+  streaming an answer ("bytes a client holds before it can render the first
+  token"), which is the population the fix reports. new `firstTokenSplit` in
+  eval.ts returns answered / refused / pooled as three `FractionStats`
+  (count, mean, min, max; NaN mean on an empty population rather than a zero);
+  main.ts headlines the answered mean with its count and spread and names the
+  refusal cluster on its own line with the pooled figure kept and labelled;
+  both readmes follow. no other measured number moved — all four fenced blocks
+  reproduce line for line from a fresh clone, the only diff in the entry
+  point's output being the one streaming line replaced by two. cross-project
+  check: 05's time-to-first-text is a single run's ttft, not a mean over a
+  mixed population, and no other project pools a canned-constant response into
+  a streamed-output statistic, so nothing else needed the change.
+  136 -> 150 tests. new file tests/first-token-split.test.ts: 14 that bind the
+  split — the three populations on synthetic outcomes, the measure firing when
+  refusals drag the pooled mean, a response that emitted no token skipped, an
+  empty population reporting NaN, then on the committed golden set the 28/12
+  split, the refusals' spread under 2 points against the answered spread over
+  20, every refusal above the answered mean, the published 18.6 / 22.6 / 31.3 /
+  33.2 figures pinned, and the 4-point gap the pooled reading hid; plus five
+  readme-binding tests holding both surfaces to the split claim and locking out
+  the two retired pooled-only phrasings. gate ran from a fresh clone with its
+  own npm ci: typecheck clean, 150 pass, npm start reproduces all four fenced
+  blocks line for line and every claim string. the revert check ran three ways
+  with the new test kept — reverting both readmes fails the 5 readme-binding
+  tests and passes 145, reverting eval.ts and main.ts fails the 4 measure tests
+  (and skips the 5 golden-set ones on the dead import) and passes 141, and
+  reverting the whole fix fails 9 and passes 136.
+  found and fixed 2026-10-12
+
+- [cleared 2026-10-12] 22 — the `rocAuc` tie question does not arise in 22
+  either, so the medium finding below is closed on both halves. 22's positives
+  and negatives are best-sentence overlap scores, and every one of them is a
+  single `hits / questionContent.size` division — never a sum — so a
+  mathematically tied pair is one correctly-rounded double against the same
+  correctly-rounded double and compares equal. swept over the committed k=3
+  floor-0 capture: 18 correct x 22 wrong = 396 pairs, of which 29 are exact
+  ties and zero sit within 1e-9 without comparing equal. `p === n` is counting
+  real ties at half credit here, not missing them, so there is nothing to
+  quantize and the published 0.903 is right as computed
+
+- [medium] 22 — the backpressure table's two bytes-128 rows pair two maxima
+  that never co-occur, and the row reads as one buffered state. the column is
+  "high-water N events / M bytes buffered", and 05's queue tracks
+  `highWaterMark` and `sizeHighWaterMark` as independent running maxima, each
+  updated on its own in `buffer()`. on six of the eight rows that does not
+  matter — instrumenting the real `runSlowClient` path and sampling the
+  simultaneous (items, bytes) state shows unbounded, events-8 and bytes-512 all
+  hit both peaks at the same moment on both cases. the bytes-128 rows do not:
+  published "3 events / 185 bytes" on the longest answer is really 3 events at
+  119 bytes and 185 bytes at 1 event, and published "3 events / 186 bytes" on
+  the dump is 3 events at 128 bytes and 186 bytes at 1 event. no individual
+  number is wrong and the prose right below the table names the mechanism
+  ("the queue admits it alone rather than deadlocking", "peak equal to the
+  event, not the budget"), so the peak-memory claim the section actually rests
+  on is sound; what is unstated is that the two columns are separate maxima,
+  which is exactly the reading the oversized-admission rows need. either report
+  the simultaneous state or say the columns are independent. found 2026-10-12
+
+- [low] 22 — the COMPLETED ledger rows publish the pooled first-token fraction
+  with no split: the base row says "the first token completes at a mean 23.3%
+  of response bytes" and the floor-sweep extension row says the fraction
+  "moved 23.3% -> 22.6%". both are still correct values of the pooled figure
+  and both are historical snapshots of their own extension, so nothing here is
+  stale the way 11's 1.252x was — but they are now the only surface left
+  carrying the pooled number as the headline, after the readme and the root
+  index row moved to the answered population. found 2026-10-12
+
 - [fixed 2026-10-12] 02 — the scaling sweep asserted its own growth shape
   instead of measuring it, and the 1M-doc projection built on that premise
   understated the flat scan by better than two. `print_sweep` printed "both
@@ -1147,7 +1230,8 @@ question is not reopened.
   if so quantize there the way 12 now does. 22 imports 20's function rather
   than restating it, so there is no second implementation to drift — only 22's
   own inputs are still unchecked, and they are overlap scores, so floats.
-  the 20 half is cleared below
+  the 20 half is cleared below, and the 22 half is cleared above as of
+  2026-10-12 [fixed/cleared 2026-10-12]
 
 - [cleared 2026-10-10] 20 — the `rocAuc` tie question does not arise in 20. every
   rule weight in `RULES` is an integer (2, 3 or 4) and the base64-payload hit
@@ -5825,7 +5909,7 @@ question is not reopened.
 |---|---|
 | 06-rate-limiting | 2026-10-05 |
 | 01-structured-output | 2026-10-11 |
-| 22-rag-vertical-slice | 2026-10-04 |
+| 22-rag-vertical-slice | 2026-10-12 |
 | 26-reranking | 2026-10-11 |
 | 25-query-rewriting | 2026-10-11 |
 | 24-extraction-metrics | 2026-10-11 |
