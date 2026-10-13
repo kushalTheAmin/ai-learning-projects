@@ -35,7 +35,7 @@ of the seed. Rerun it and every number below reproduces exactly.
 | strategy | success | attempts | att/ok | 429s | makespan | p50 ok | p99 ok | p50 all | peak/100ms | collide |
 |---|---|---|---|---|---|---|---|---|---|---|
 | no-retry | 10.5% | 200 | 9.52 | 179 | 0.07s | 40ms | 56ms | 0ms | 200 | 0 |
-| fixed-100ms | 43.5% | 1333 | 15.32 | 1245 | 3.50s | 229ms | 849ms | 800ms | 69 | 20 |
+| fixed-100ms | 43.5% | 1333 | 15.32 | 1245 | 3.50s | 229ms | 849ms | 800ms | 70 | 20 |
 | exp-no-jitter | 100.0% | 593 | 2.96 | 393 | 12.90s | 152ms | 6353ms | 152ms | 61 | 20 |
 | exp-full-jitter | 99.0% | 592 | 2.99 | 392 | 14.66s | 56ms | 10636ms | 56ms | 104 | 1 |
 | exp-equal-jitter | 100.0% | 569 | 2.85 | 366 | 11.35s | 108ms | 10601ms | 108ms | 86 | 1 |
@@ -186,7 +186,7 @@ detail at the 10s outage:
 | exp-full-jitter | 67.5% | 359 | 332 | 0 | 2 | 18.72s | 8.72s | 7.1s | 1 |
 | exp-equal-jitter | 100.0% | 347 | 307 | 0 | 2 | 19.67s | 9.67s | - | 1 |
 | retry-after-exact | 100.0% | 133 | 40 | 53 | 54 | 12.17s | 2.17s | - | 40 |
-| retry-after-jittered | 100.0% | 82 | 40 | 2 | 7 | 11.89s | 1.89s | - | 1 |
+| retry-after-jittered | 100.0% | 82 | 40 | 2 | 8 | 11.89s | 1.89s | - | 1 |
 
 `wasted` = attempts that landed while the service was down. `rec peak` =
 peak arrivals/100ms from the recovery instant on. `drain` = makespan minus
@@ -208,8 +208,8 @@ recovery.
 **the recovery herd is the hint's own makespan problem, and hint jitter
 fixes that too.** retry-after-exact tells all 40 clients the same recovery
 instant, so its 93 post-recovery attempts arrive as a 54-per-100ms spike
-that generates 53 429s. a 1s jittered hint spreads the same recovery into a
-7-per-100ms trickle, 2 429s, 82 total attempts against 133, and still drains
+that generates 53 429s. a 1s jittered hint spreads the same recovery into an
+8-per-100ms trickle, 2 429s, 82 total attempts against 133, and still drains
 faster (1.89s vs 2.17s). compliance also wins on waste: both retry-after
 rows spend exactly 40 attempts learning the service is down, the exponential
 guessing rows spend 280 to 332, and fixed-100ms spends 360 for nothing.
@@ -224,14 +224,14 @@ and no memory between requests.
 | strategy | attempts | att/req | makespan | peak att/s | give-up p50 | give-up p99 |
 |---|---|---|---|---|---|---|
 | no-retry | 120 | 1.0 | 0.00s | 120 | 0.00s | 0.00s |
-| fixed-100ms | 1080 | 9.0 | 2.40s | 440 | 0.80s | 0.80s |
-| exp-no-jitter | 1080 | 9.0 | 68.10s | 160 | 22.70s | 22.70s |
+| fixed-100ms | 1080 | 9.0 | 2.40s | 480 | 0.80s | 0.80s |
+| exp-no-jitter | 1080 | 9.0 | 68.10s | 200 | 22.70s | 22.70s |
 | exp-full-jitter | 1080 | 9.0 | 49.19s | 205 | 11.33s | 18.56s |
 
 **the retry budget, not the backoff policy, sets total waste.** every
 retrying strategy burns exactly 9 attempts per request, 1080 total; backoff
 never reduces the bill on a dead dependency, it only chooses the shape.
-fixed-100ms hammers 440 attempts/s for 2.40s; exp-no-jitter drips 160/s for
+fixed-100ms hammers 480 attempts/s for 2.40s; exp-no-jitter drips 200/s for
 68.10s. and the caller pays in hang time: 22.70s (no jitter) or 11.33s p50
 (full jitter) of waiting before hearing "no", after which the next request
 starts the same climb from 100ms again. request 3 wastes exactly what
@@ -788,7 +788,7 @@ The seeded PRNG is imported from `05-token-streaming` rather than duplicated.
 
 ```
 npm ci
-npm test               # 162 tests
+npm test               # 165 tests
 npm start              # the main table
 npm run start:outage   # the outage studies
 npm run start:breaker  # the breaker studies
@@ -800,6 +800,11 @@ npm run typecheck
 
 ## fixes
 
+- 2026-10-13 — the peak-arrivals columns binned from a fixed origin instead of
+  sliding, so a burst landing across a bin edge split into two smaller ones and
+  the published peak was a lower bound. now the worst window wherever it falls.
+  dead-service peak att/s moved 440 → 480 and 160 → 200, the 10s-outage rec
+  peak 7 → 8, the main table's peak/100ms 69 → 70
 - 2026-10-05 — the headroom sweep read its own control row as a single cause.
   it said the 100% oracle's 11 failures "were never about the average rate,
   it was the 20-wide t=0 burst" - but the oracle-95 row right above it holds

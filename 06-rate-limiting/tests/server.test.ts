@@ -269,4 +269,23 @@ describe("SimulatedApi", () => {
     expect(api.peakArrivalsPerWindow(100)).toBe(3);
     expect(() => api.peakArrivalsPerWindow(0)).toThrow(/windowMs/);
   });
+
+  it("finds the peak window wherever it falls, not where bin edges land", async () => {
+    const clock = new VirtualClock();
+    const api = new SimulatedApi(clock, createRng(1), makeOpts({ burst: 10 }));
+    // 50, 100 and 149 span 99ms, so one 100ms window holds all three.
+    // Bins anchored at 0 cut between 99 and 100 and would report 2.
+    const work = (async () => {
+      await api.request();
+      await clock.sleep(50 - clock.now());
+      await api.request();
+      await clock.sleep(100 - clock.now());
+      await api.request();
+      await clock.sleep(149 - clock.now());
+      await api.request();
+    })();
+    await clock.runUntil(work);
+    expect(api.arrivalsMs).toEqual([0, 50, 100, 149]);
+    expect(api.peakArrivalsPerWindow(100)).toBe(3);
+  });
 });

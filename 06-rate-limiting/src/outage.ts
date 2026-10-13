@@ -10,7 +10,7 @@
 import { VirtualClock } from "./clock.js";
 import { percentile } from "./percentile.js";
 import { requestWithRetry, type RequestOutcome, type RetryOptions } from "./retry.js";
-import { SimulatedApi } from "./server.js";
+import { peakInAnyWindow, SimulatedApi } from "./server.js";
 import { createRng } from "../../05-token-streaming/src/rng.js";
 
 export interface OutageStrategySpec {
@@ -70,25 +70,17 @@ export function countInRange(arrivalsMs: readonly number[], startMs: number, end
 
 /**
  * Largest number of arrivals inside any single window of `windowMs`, with
- * bins anchored at `fromMs` and arrivals before `fromMs` ignored, so a
- * recovery spike is measured against windows starting at the recovery
- * instant rather than wherever t=0 bins happen to fall.
+ * arrivals before `fromMs` ignored so a recovery spike is measured from the
+ * recovery instant on. The window slides (see `peakInAnyWindow`), so the
+ * figure is the real worst window rather than the worst of some fixed set
+ * of bins.
  */
 export function peakPerWindow(
   arrivalsMs: readonly number[],
   windowMs: number,
   fromMs = 0,
 ): number {
-  if (windowMs <= 0) throw new Error(`windowMs must be positive, got ${windowMs}`);
-  const counts = new Map<number, number>();
-  for (const t of arrivalsMs) {
-    if (t < fromMs) continue;
-    const bin = Math.floor((t - fromMs) / windowMs);
-    counts.set(bin, (counts.get(bin) ?? 0) + 1);
-  }
-  let peak = 0;
-  for (const c of counts.values()) peak = Math.max(peak, c);
-  return peak;
+  return peakInAnyWindow(arrivalsMs, windowMs, fromMs);
 }
 
 export async function runOutageScenario(

@@ -40,12 +40,33 @@ describe("countInRange", () => {
 });
 
 describe("peakPerWindow", () => {
-  it("anchors bins at fromMs and ignores earlier arrivals", () => {
-    // Anchored at 0, [950, 1049] splits across two 100ms bins; anchored at
-    // 950 all three land in one window.
+  it("ignores arrivals before fromMs", () => {
     const arrivals = [100, 950, 1000, 1049];
-    expect(peakPerWindow(arrivals, 100, 0)).toBe(2);
     expect(peakPerWindow(arrivals, 100, 950)).toBe(3);
+    expect(peakPerWindow(arrivals, 100, 1000)).toBe(2);
+  });
+
+  it("finds the peak wherever it falls, not where bin edges land", () => {
+    // 950, 1000 and 1049 span 99ms, so one 100ms window holds all three.
+    // Bins anchored at 0 cut between 999 and 1000 and would report 2.
+    expect(peakPerWindow([100, 950, 1000, 1049], 100)).toBe(3);
+    // The window is half-open: 1050 is 100ms after 950 and starts a new one.
+    expect(peakPerWindow([950, 1000, 1050], 100)).toBe(2);
+  });
+
+  it("counts the worst second of a fixed-delay retry train across bin edges", () => {
+    // One caller on a 100ms fixed delay, 9 attempts per request, three
+    // sequential requests: attempts land every 100ms with a doubled instant
+    // where one request gives up and the next starts. The worst 1000ms
+    // window spans such a seam and holds 12 attempts; bins anchored at 0
+    // never cover two seams and top out at 11.
+    const arrivals: number[] = [];
+    for (let req = 0; req < 3; req++) {
+      for (let attempt = 0; attempt < 9; attempt++) {
+        arrivals.push(req * 800 + attempt * 100);
+      }
+    }
+    expect(peakPerWindow(arrivals, 1000)).toBe(12);
   });
 
   it("returns 0 on empty arrivals and rejects a non-positive window", () => {

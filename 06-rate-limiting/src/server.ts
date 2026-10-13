@@ -182,15 +182,7 @@ export class SimulatedApi {
 
   /** Largest number of arrivals landing inside any single window. */
   peakArrivalsPerWindow(windowMs: number): number {
-    if (windowMs <= 0) throw new Error(`windowMs must be positive, got ${windowMs}`);
-    const counts = new Map<number, number>();
-    for (const t of this.arrivalsMs) {
-      const bin = Math.floor(t / windowMs);
-      counts.set(bin, (counts.get(bin) ?? 0) + 1);
-    }
-    let peak = 0;
-    for (const c of counts.values()) peak = Math.max(peak, c);
-    return peak;
+    return peakInAnyWindow(this.arrivalsMs, windowMs);
   }
 
   /**
@@ -208,4 +200,29 @@ export class SimulatedApi {
     for (const c of counts.values()) peak = Math.max(peak, c);
     return peak;
   }
+}
+
+/**
+ * Largest number of arrivals inside any single window of `windowMs`,
+ * ignoring arrivals before `fromMs`. The window slides: it is placed to
+ * find the real worst case rather than binned from a fixed origin, because
+ * a burst straddling a bin edge is still a burst. Any maximal window can be
+ * slid until it starts on an arrival, so testing each arrival as the window
+ * start is exact. Half-open, so an arrival exactly `windowMs` after the
+ * window's first starts the next one.
+ */
+export function peakInAnyWindow(
+  arrivalsMs: readonly number[],
+  windowMs: number,
+  fromMs = 0,
+): number {
+  if (windowMs <= 0) throw new Error(`windowMs must be positive, got ${windowMs}`);
+  const sorted = arrivalsMs.filter((t) => t >= fromMs).sort((a, b) => a - b);
+  let peak = 0;
+  let lo = 0;
+  for (let hi = 0; hi < sorted.length; hi++) {
+    while (sorted[hi]! - sorted[lo]! >= windowMs) lo++;
+    peak = Math.max(peak, hi - lo + 1);
+  }
+  return peak;
 }
