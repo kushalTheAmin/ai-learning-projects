@@ -32,6 +32,7 @@ K_SWEEP = [8, 16, 32, 64, 128]
 BAND_CONFIGS = [(64, 2), (32, 4), (16, 8), (8, 16)]
 JACCARD_SWEEP = [0.2, 0.3, 0.4, 0.5, 0.6]
 HAMMING_SWEEP = [2, 4, 6, 8, 12, 16, 20]
+VERIFY_HAMMING_SWEEP = [16, 20, 24, 28]
 TUNED_BANDS, TUNED_ROWS = 64, 2
 MISTUNED_BANDS, MISTUNED_ROWS = 32, 4
 NOISE_KIND = "noise"
@@ -241,6 +242,7 @@ def main() -> None:
     brute = {p for p in pairs if exact[p] >= best_t}
     sb = score_pairs(brute, truth)
     tuned_f1 = 0.0
+    tuned_verifications = 0
     for bands, rows in [(TUNED_BANDS, TUNED_ROWS), (MISTUNED_BANDS, MISTUNED_ROWS)]:
         cands = candidate_pairs(signatures, bands, rows)
         verified = {p for p in cands if exact[p] >= best_t}
@@ -253,6 +255,7 @@ def main() -> None:
         )
         if (bands, rows) == (TUNED_BANDS, TUNED_ROWS):
             tuned_f1 = s.f1
+            tuned_verifications = len(cands)
         else:
             missed = sorted(brute - cands)
             half = halfway_threshold(bands, rows)
@@ -299,13 +302,44 @@ def main() -> None:
         f"simhash d<={best_d}", recall_by_kind(docs_by_id, predicted, truth)
     )
 
-    print("\n== head to head at each method's best operating point ==")
+    print(
+        f"\n== simhash as a candidate generator, verified with exact "
+        f"jaccard >= {best_t:.1f} =="
+    )
+    full_d = max(dup_d)
+    full_count, full_f1 = 0, 0.0
+    for d in sorted({*VERIFY_HAMMING_SWEEP, full_d}):
+        cands = {p for p in pairs if dists[p] <= d}
+        verified = {p for p in cands if exact[p] >= best_t}
+        s = score_pairs(verified, truth)
+        print(
+            f"  d<={d:>2}: precision {s.precision:.3f}  recall {s.recall:.3f}  "
+            f"f1 {s.f1:.3f}  with {len(cands)} verifications "
+            f"({len(cands) / len(pairs):.1%} of brute force's {len(pairs)})"
+        )
+        if d == full_d:
+            full_count, full_f1 = len(cands), s.f1
+    print(
+        f"  every duplicate pair is inside d<={full_d}, so the sketch reaches "
+        f"brute force's verdicts with {full_count} verifications, "
+        f"{full_count / tuned_verifications:.1f}x the tuned banding's "
+        f"{tuned_verifications}"
+    )
+
+    print("\n== head to head: sketch for candidates, exact jaccard for verdicts ==")
     print(
         f"  minhash lsh + verify (b={TUNED_BANDS} r={TUNED_ROWS}, "
-        f"t={best_t:.1f}): f1 {tuned_f1:.3f}"
+        f"t={best_t:.1f}): f1 {tuned_f1:.3f} with {tuned_verifications} verifications"
     )
-    print(f"  simhash (d<={best_d}): f1 {best_df1:.3f}")
-    print(f"  brute-force exact jaccard (t={best_t:.1f}): f1 {sb.f1:.3f}")
+    print(
+        f"  simhash + verify (d<={full_d}, t={best_t:.1f}): f1 {full_f1:.3f} "
+        f"with {full_count} verifications"
+    )
+    print(f"  simhash alone, no verification (d<={best_d}): f1 {best_df1:.3f}")
+    print(
+        f"  brute-force exact jaccard (t={best_t:.1f}): f1 {sb.f1:.3f} "
+        f"with {len(pairs)} verifications"
+    )
 
 
 if __name__ == "__main__":

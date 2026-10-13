@@ -60,11 +60,23 @@ d<=16: precision 1.000  recall 0.717  f1 0.835  (258 predicted)
 d<=20: precision 0.952  recall 0.933  f1 0.942  (353 predicted)
 ```
 
-the means separate cleanly but the tails overlap: the widest duplicates sit past the nearest non-duplicates, so no threshold is clean. best f1 is 0.942 at d<=20, already past the closest non-duplicate at distance 19. head to head: minhash lsh + verify 1.000, simhash 0.942, on a corpus where both get the easy 90% for free. the gap is the tails.
+the means separate cleanly but the tails overlap: the widest duplicate pair sits at distance 31 and the nearest non-duplicate at 19, so no single radius is clean. best f1 is 0.942 at d<=20, already past that closest non-duplicate.
+
+but 0.942 is the fingerprint issuing the verdict, and minhash's 1.000 is a candidate set handed to exact jaccard - two different pipelines. score simhash the way the banding is scored and the ceiling goes away:
+
+```
+d<=16: precision 1.000  recall 0.717  f1 0.835  with 258 verifications (2.5% of brute force's 10296)
+d<=20: precision 1.000  recall 0.933  f1 0.966  with 353 verifications (3.4% of brute force's 10296)
+d<=24: precision 1.000  recall 0.981  f1 0.990  with 674 verifications (6.5% of brute force's 10296)
+d<=28: precision 1.000  recall 0.994  f1 0.997  with 2491 verifications (24.2% of brute force's 10296)
+d<=31: precision 1.000  recall 1.000  f1 1.000  with 5041 verifications (49.0% of brute force's 10296)
+```
+
+verification never costs precision here - every non-duplicate sits below 0.2 - so each row is just the candidate recall, and d<=31 is the radius holding the widest duplicate pair. head to head on equal terms: both sketches land on brute force's verdicts, the banding at 360 verifications and simhash at 5041, 14x more; at the banding's own budget (d<=20, 353 verifications) simhash verifies to 0.966, not 0.942. so the overlapping tails are real and they do cost - they cost candidates, not f1. catching the last duplicate at distance 31 means opening a radius that admits half the corpus where the banding's shortlist is 3.5% of it.
 
 ## tradeoffs
 
-minhash + lsh keeps a tunable estimate of jaccard and a tunable candidate curve, at 128 integers per doc plus b hash tables. simhash spends 8 bytes per doc, and hamming balls can be indexed with bit-permutation tables, which is why crawlers use it at web scale. but it has no verification story of its own (the fingerprint cannot re-derive similarity, you need the original shingles anyway) and its distance distribution squeezes 0..1 similarity into 64 bits, so thresholds are coarse and the dup/non-dup overlap here is structural, not bad luck. the pipeline shape that works is lsh for candidates, exact jaccard for verdicts; the sketch narrows the search, it should not issue the verdict.
+minhash + lsh keeps a tunable estimate of jaccard and a tunable candidate curve, at 128 integers per doc plus b hash tables. simhash spends 8 bytes per doc, and hamming balls can be indexed with bit-permutation tables, which is why crawlers use it at web scale. neither sketch can verify out of itself - the fingerprint cannot re-derive similarity and neither can the signature, both verdicts read the original shingle sets - so the honest difference is the candidate bill, not the verdict quality. squeezing 0..1 similarity into 64 bits leaves the dup/non-dup distributions overlapping, which is structural rather than bad luck, and it is what makes the full-recall radius 14x the banding's shortlist. the pipeline shape that works is sketch for candidates, exact jaccard for verdicts; the sketch narrows the search, it should not issue the verdict - the 0.942 row is what issuing it costs.
 
 ## where it breaks
 
@@ -78,6 +90,15 @@ minhash + lsh keeps a tunable estimate of jaccard and a tunable candidate curve,
 the ml-adjacent dedup literature and tooling (datasketch, spark minhash) live here, and the project is set arithmetic over big integers, which python does natively with zero dependencies; the whole thing is stdlib plus pytest and runs offline. the typescript version would spend its effort fighting 64-bit integer hashing in a language with 53-bit doubles.
 
 ## fixes
+
+- 2026-10-13 — the head to head scored minhash's candidates after an exact
+  jaccard verdict and simhash's without one, then read the 1.000 vs 0.942 gap
+  as a ceiling the hamming tails impose. the reason given for the asymmetry -
+  simhash has no verification story of its own - is true of the banding too,
+  which verifies off the same shingle sets. verified the same way simhash
+  reaches f1 1.000 at d<=31 and 0.966 at the banding's own 353-verification
+  budget, so the tails cost candidates and not f1 - 5041 verifications against
+  360, 14x. nothing already published moves, the verified sweep is new output
 
 - 2026-10-05 — all 31 pairs the mistuned banding misses were credited to
   its 50% collision point (0.383) sitting above the duplicate floor
@@ -119,6 +140,6 @@ the ml-adjacent dedup literature and tooling (datasketch, spark minhash) live he
 
 - the s-curve placement was tuned knowing the duplicate floor (0.280), which real pipelines never know. what does an adaptive scheme look like, sampling candidate similarities to pick b and r online?
 - of the 31 missed pairs at b=32 r=4, 9 sit below the curve's 50% point and 22 are tail losses above it. multi-probe lsh claims to buy back recall without more tables, but it probes near-miss buckets, which is the second group; how much of the 0.086 gap does it actually reach, and at what probe cost?
-- simhash used unit weights per shingle. idf weighting is what the original paper does; does it pull the duplicate and non-duplicate hamming distributions apart enough to close the f1 gap?
+- simhash used unit weights per shingle. idf weighting is what the original paper does; does it pull the duplicate and non-duplicate hamming distributions apart enough to bring the full-recall radius in from 49% of the corpus?
 - band buckets here are exact tuples in dicts. at billions of docs the tables themselves are the memory problem; what do the bucket-size distributions look like and when do hot buckets (boilerplate shingles) blow up the candidate count?
 - exact jaccard as the verifier reuses shingle sets already in memory. in a store where fetching originals costs io, when is verifying with a bigger signature (k=512) cheaper than fetching, and what false-verdict rate does that introduce?

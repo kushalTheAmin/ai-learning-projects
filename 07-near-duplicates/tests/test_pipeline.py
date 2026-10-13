@@ -70,7 +70,10 @@ class TestHeadlineResults:
             (dup if (a, b) in truth else non).append(d)
         assert sum(dup) / len(dup) < sum(non) / len(non)
         # the distributions overlap: the widest duplicates sit past the
-        # nearest non-duplicates, which is why simhash cannot reach f1 1.0
+        # nearest non-duplicates, which is why the fingerprint cannot reach
+        # f1 1.0 on its own. with exact jaccard issuing the verdict it does,
+        # at 14x the banding's candidates - see
+        # test_simhash_tails_cost_candidates_not_f1.py
         assert max(dup) > min(non)
 
 
