@@ -18,7 +18,8 @@ if str(_RETRIEVAL_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_RETRIEVAL_EVAL_DIR))
 
 from retrieval_eval.bm25 import BM25Index  # noqa: E402
+from retrieval_eval.bootstrap import paired_bootstrap  # noqa: E402
 from retrieval_eval.metrics import mean, reciprocal_rank  # noqa: E402
 from retrieval_eval.tokenizer import tokenize  # noqa: E402
 
-__all__ = ["BM25Index", "mean", "reciprocal_rank", "tokenize"]
+__all__ = ["BM25Index", "mean", "paired_bootstrap", "reciprocal_rank", "tokenize"]

@@ -203,7 +203,7 @@ def test_entry_point_prints_the_decomposition():
     )
     assert re.search(
         r"^\s+the relevant chunk shrinks 80\.0 -> 70\.9 words on those 23, "
-        r"4 rank worse, 3 fall out of the top 10$",
+        r"4 rank worse, 3 rank better, 3 fall out of the top 10$",
         out,
         re.MULTILINE,
     )

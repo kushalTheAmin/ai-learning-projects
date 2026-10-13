@@ -85,9 +85,17 @@ what the table says:
   happened to span. q11 is the sharpest: the answer sits in
   rate-limit-design#2 either way, rank 1 under fixed-80 and out of the top 10
   under sentence-80, because the words the question asks with land in the next
-  sentence group. the drag runs -0.004 at budget 40, -0.090 at 80 and -0.036
-  at 160, so it is real everywhere and still only a sixth of what packing
-  wins — the ordering stands, the "free" part doesnt.
+  sentence group. the drag needs an interval, not three point estimates: 02s
+  paired bootstrap puts budget 80 at -0.090 [-0.220, +0.016], sign holding in
+  94.9% of resamples, and budget 160 at -0.036 [-0.089, +0.003] holding in
+  96.6% — but budget 40 at -0.004 [-0.192, +0.154], wrong side of zero in
+  50.0% of resamples, a coin flip. 9 of those 13 queries dont move at all and
+  the sign is q19s alone — it falls rank 1 to rank 9 while q08 and q29 each
+  gain a rank, drop it and the drag turns +0.069. so the cost is a direction
+  at 80 and 160 and nothing measured at 40, and no budgets interval excludes
+  zero on 40 queries, so a direction is all this corpus pins. at 80 it is
+  still only a sixth of what packing wins — the ordering stands, the "free"
+  part doesnt.
 - overlap is the expensive version of the same fix. fixed-80/ov-20 recovers 15
   of the 17 splits for +30.4% index size, ov-40 gets 16 of 17 for +89.0%. and
   overlap moves every boundary rather than only adding windows: the stride
@@ -113,6 +121,12 @@ what the table says:
   mode belongs to 03s dense retrieval story, not to chunking.
 
 ## fixes
+
+- 2026-10-13 — the packing drag read "real everywhere" off three point
+  estimates, and budget 40s -0.004 is a coin flip: [-0.192, +0.154], wrong
+  side of zero in 50.0% of resamples, the sign q19s alone. the entry point now
+  bootstraps the drag and counts both directions, and the bullet claims a cost
+  at 80 and 160 only. no measured number moved.
 
 - 2026-10-06 — "sentence packing costs nothing and fixes all of it" was read
   off three columns that are true and one that was never measured: on the 23
@@ -156,9 +170,9 @@ pipelines) is python-first anyway.
   damage visible and the eval deterministic, but it treats a 95% chunk as a
   total miss, which understates fixed chunking against any reader tolerant of
   partial facts.
-- 40 queries is enough to see the ordering but not to resolve close calls; the
-  bootstrap machinery in 02 could put intervals on these gaps and was not run
-  here.
+- 40 queries is enough to see the ordering but not to resolve close calls. 02s
+  paired bootstrap runs on the packing drag now — and calls budget 40s a coin
+  flip — but every gap in the main table is still a bare point estimate.
 
 ## open questions
 
@@ -169,8 +183,9 @@ pipelines) is python-first anyway.
   is in the top 5 for 14 of fixed-80s 17 splits. what is left is the reader:
   how often does a model actually answer correctly from a 71% chunk? needs a
   model in the loop, and would turn split% from a proxy into a measured cost.
-- 02s paired bootstrap on these deltas: is hit@5 0.850 vs 0.775 (sentence-80 vs
-  fixed-80/ov-20) a real gap on 40 queries or noise?
+- 02s paired bootstrap on the table's gaps: is hit@5 0.850 vs 0.775
+  (sentence-80 vs fixed-80/ov-20) a real gap on 40 queries or noise? the drag
+  is priced now, these arent.
 - semantic chunking (split where topic shifts, not where the word counter
   says) is the fashionable answer; measuring it against sentence-80 on this
   corpus needs an embedder, which is exactly what this repo does not have yet.

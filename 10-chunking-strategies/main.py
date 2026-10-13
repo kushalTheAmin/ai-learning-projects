@@ -2,7 +2,8 @@
 
 Sweeps fixed-size, fixed-with-overlap, and sentence-packed chunking,
 indexes each with 02's BM25, and scores every gold query by exact answer
-containment. Deterministic: no randomness anywhere, same output every run.
+containment. Deterministic: the only random source is 02's paired
+bootstrap, seeded, so every run prints the same output.
 """
 
 from pathlib import Path
@@ -10,10 +11,17 @@ from pathlib import Path
 from chunking.chunkers import fixed_chunks, sentence_chunks, word_count
 from chunking.corpus import Doc, load_docs, load_queries, validate
 from chunking.evaluate import HIT_K, ConfigResult, evaluate_config
-from chunking.retrieval import mean
+from chunking.retrieval import mean, paired_bootstrap
 from chunking.sentences import split_sentences
 
 DATA = Path(__file__).parent / "data"
+
+# 02's bootstrap settings, reused so the two projects' intervals are
+# comparable. A drag whose sign survives fewer than SIGN_HOLDS of the
+# resamples is reported as a coin flip rather than as a cost.
+N_RESAMPLES = 10_000
+BOOTSTRAP_SEED = 0
+SIGN_HOLDS = 0.90
 
 
 def build_configs() -> list[tuple[str, object]]:
@@ -98,7 +106,9 @@ def print_packing_cost(results: dict[str, ConfigResult], docs: list[Doc]) -> Non
     Packing redraws every chunk, not only the ones that were cutting an
     answer, so its aggregate win is a recovery on the cut answers netted
     against a drag on the rest. Splitting the two is the control the
-    "costs nothing" reading never had.
+    "costs nothing" reading never had — and the drag is a mean over a
+    subset small enough that it needs an interval, which is why 02's
+    paired bootstrap is run on it here rather than left as a question.
     """
     print("\n== is sentence packing free? ==")
     for size in (40, 80, 160):
@@ -136,9 +146,47 @@ def print_packing_cost(results: dict[str, ConfigResult], docs: list[Doc]) -> Non
             f"{mean([float(words['s' + by_packed[q].relevant_chunk_ids[0]]) for q in whole]):.1f} "
             f"words on those {len(whole)}, "
             f"{sum(1 for q in whole if by_packed[q].rr_at_k < by_fixed[q].rr_at_k)} rank worse, "
+            f"{sum(1 for q in whole if by_packed[q].rr_at_k > by_fixed[q].rr_at_k)} rank better, "
             f"{sum(1 for q in whole if by_fixed[q].rr_at_k > 0 and by_packed[q].rr_at_k == 0.0)} "
             "fall out of the top 10"
         )
+        # the drag is a mean over `whole` alone, so resample it before
+        # reading a sign off it: at budget 40 that sign is a coin flip
+        comparison = paired_bootstrap(
+            [by_packed[q].rr_at_k for q in whole],
+            [by_fixed[q].rr_at_k for q in whole],
+            N_RESAMPLES,
+            seed=BOOTSTRAP_SEED,
+        )
+        print(
+            f"  the drag over those {len(whole)}, paired bootstrap over queries "
+            f"({N_RESAMPLES} resamples, 95% ci): {comparison.diff:+.3f} "
+            f"[{comparison.ci.lo:+.3f}, {comparison.ci.hi:+.3f}] "
+            f">=0 in {100 * comparison.p_ge_zero:.1f}% of resamples"
+        )
+        if comparison.p_le_zero >= SIGN_HOLDS:
+            print(
+                f"    the sign holds in {100 * comparison.p_le_zero:.1f}% of resamples, "
+                "the interval straddles zero — a direction, not a magnitude"
+            )
+        else:
+            print(
+                f"    a coin flip at {100 * comparison.p_ge_zero:.1f}% — the resample decides "
+                "the sign, so this budget measures no cost at all"
+            )
+            # name the query the sign belongs to: a drag this thin is a
+            # leave-one-out away from pointing the other way
+            moves = sorted(
+                ((by_packed[q].rr_at_k - by_fixed[q].rr_at_k, q) for q in whole),
+                key=lambda pair: abs(pair[0]),
+                reverse=True,
+            )
+            worst, rest = moves[0], [q for _, q in moves[1:]]
+            print(
+                f"      the sign hangs on {worst[1]} ({worst[0]:+.3f} alone): drop it and the "
+                f"drag turns {mean([by_packed[q].rr_at_k - by_fixed[q].rr_at_k for q in rest]):+.3f} "
+                f"over the other {len(rest)}"
+            )
 
 
 def print_category_split(results: dict[str, ConfigResult]) -> None:
