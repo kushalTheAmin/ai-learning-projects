@@ -1899,6 +1899,83 @@ question is not reopened.
   untested at the loop level, though the tool-level error returns themselves
   are covered in `tests/tools.test.ts`. found 2026-10-06
 
+- [fixed 2026-10-13] 10 — the packing drag was published as a cost at all
+  three budgets and one of the three is a coin flip. the 2026-10-06 fix
+  measured what sentence packing does to the answers fixed chunking already
+  kept whole — the control the "costs nothing" reading never had — and closed
+  on "the drag runs -0.004 at budget 40, -0.090 at 80 and -0.036 at 160, so it
+  is real everywhere". three point estimates, no uncertainty on any of them,
+  each a mean over a subset selected by whether fixed-`size` happened to cut
+  the answer: 13 queries at budget 40, 23 at 80, 30 at 160. resampled with
+  02's paired bootstrap (10000 resamples, seed 0, the same settings 02 uses)
+  two of the three hold and the smallest subset does not. budget 80 is -0.090
+  [-0.220, +0.016] with the sign surviving 94.9% of resamples and budget 160
+  is -0.036 [-0.089, +0.003] surviving 96.6%, but budget 40 is -0.004 [-0.192,
+  +0.154] — on the wrong side of zero in 50.0% of resamples, which is as
+  uninformative as the statistic gets. the per-query view says why: 9 of those
+  13 queries do not move at all, q08 and q29 each gain a rank (rr 0.500 to
+  1.000), q24 gives back 0.167, and q19 alone falls rank 1 to rank 9 for
+  -0.889. drop q19 and the drag turns +0.069 over the other 12. so the sign at
+  budget 40 belongs to one query of 13, and the project already knew it from
+  another angle — `test_hit_at_1_confirms_the_drag_at_80_and_160_and_
+  contradicts_it_at_40` records hit@1 on that same subset going 0.692 to 0.769,
+  packing *better* at rank 1, and nothing published said so. the entry point's
+  own accounting pointed one way too: it printed "2 rank worse" at budget 40
+  and never the matching "2 rank better" (4 against 3 at budget 80, 3 against 1
+  at 160), so a near-cancellation read as a cost. same shape as 02's growth
+  fit and 26's rr@10 tie — a number the data does not resolve, published as
+  though it did — except here the project's own "where it breaks down" already
+  named the missing tool: "the bootstrap machinery in 02 could put intervals on
+  these gaps and was not run here". fix: `chunking/retrieval.py` imports 02's
+  `paired_bootstrap` beside its BM25, `print_packing_cost` prints the interval
+  and the wrong-side share per budget plus both direction counts, labels budget
+  40 a coin flip and names the query its sign hangs on, and the readme's bullet
+  claims a cost at 80 and 160 only — noting that no budget's interval excludes
+  zero on 40 queries, so direction is all this corpus pins.
+  `tests/test_the_packing_drag_is_not_real_at_every_budget.py`, 10 tests: four
+  hold the measurement (each budget's interval, the wrong-side shares, the
+  leave-one-out on q19, both direction counts), four the entry point and the
+  readme, one that no budget's interval excludes zero so the stronger reading
+  cannot come back, and one that the run stays byte-identical now that the
+  project has a random source. 4 of the 10 fail with the fix reverted and all
+  83 pre-existing tests pass either way, one assertion updated where it pinned
+  the old one-sided "4 rank worse, 3 fall out" line. no measured number moved —
+  the table and every decomposition figure are byte-identical, the new output
+  is additions only. the project is no longer deterministic by having no
+  randomness; it is deterministic by seeding the one source it now has, and
+  main.py's docstring says which.
+
+- [medium] 10 — the drag's published mechanism is shrinkage and the per-query
+  data says relocation. the readme explains the cost as "it redraws every
+  chunk, not only the ones that were cutting an answer, so the chunk holding
+  the answer shrinks 80.0 to 70.9 words and loses query terms the arbitrary
+  window happened to span", and `test_the_mechanism_is_a_smaller_chunk_holding_
+  fewer_query_terms` pins the 80.0 and the 70.9. both numbers are right and the
+  causal reading does not follow. at budget 80 the seven queries whose rank
+  moves shrink by 12.1 words on average against 7.8 for the sixteen that do not
+  — a 4-word separation two queries carry — and the two extremes point opposite
+  ways: q09's relevant chunk loses 29 words, the largest shrink on the subset,
+  and its rr does not budge off 1.000, while q11 loses 2 words and falls from
+  rank 1 out of the top 10 entirely. q11 is the readme's own sharpest case and
+  the readme's own explanation of it is relocation, not size: "the words the
+  question asks with land in the next sentence group" — 5 of the query's terms
+  in the 80-word window against 2 in the 78-word packed chunk. so what costs
+  the rank is which terms end up together, which a sentence boundary decides
+  independently of how many words it keeps. the honest version leads on the
+  boundary moving and keeps 80.0 to 70.9 as the size the strategy gives up, not
+  as the reason the rank fell. found 2026-10-13
+
+- [low] 10 — the one metric that contradicts the drag at budget 40 lives in a
+  test name and nowhere a reader looks. on the 13 answers fixed-40 kept whole,
+  hit@1 goes 0.692 to 0.769 under sentence-40: packing is better at rank 1 on
+  the very subset the mrr drag is read off, and
+  `test_hit_at_1_confirms_the_drag_at_80_and_160_and_contradicts_it_at_40`
+  asserts both halves of that, deliberately. the entry point prints no hit@1
+  for the subset and the readme does not mention it. today's fix makes budget
+  40 "nothing measured" rather than a cost, so nothing published is false any
+  more — but the strongest single piece of evidence for that verdict is still
+  only visible to someone reading the test suite. found 2026-10-13
+
 - [fixed 2026-10-06] 10 — "sentence packing costs nothing and fixes all of it"
   was read off three columns that are true and one that was never measured. the
   readme's second bullet backed "costs nothing" with same index size (5391
@@ -6363,7 +6440,7 @@ question is not reopened.
 | 13-ann-hnsw | 2026-10-08 |
 | 12-groundedness-scoring | 2026-10-07 |
 | 11-prompt-caching | 2026-10-07 |
-| 10-chunking-strategies | 2026-10-06 |
+| 10-chunking-strategies | 2026-10-13 |
 | 09-concurrency | 2026-10-06 |
 | 08-agent-tool-loop | 2026-10-06 |
 | 07-near-duplicates | 2026-10-13 |
@@ -6371,6 +6448,56 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-12 |
 | 04-bpe-tokenizer | 2026-10-12 |
 | 02-retrieval-eval | 2026-10-12 |
+
+10 was last reviewed on 2026-10-06 and the catch this time is the fix that
+review shipped. all 83 committed tests passed before and 93 after, and the run
+reproduces: two local runs plus a third from a fresh clone print
+byte-identical, which now means something it did not before — the project has
+a random source as of today and it is seeded, so the docstring claim moved
+from "no randomness anywhere" to "the only random source is 02's paired
+bootstrap, seeded". the mechanical cross-check came back clean on the
+measurements: of the 270 numeric tokens in the readme, 259 appear in today's
+entry-point output character for character, and the eleven occurrences that do
+not are five values — 2026 four times and 3.11 once, which are dates and the
+python version, and +0.253, 1.95x and 2.05x twice each, which are the prose
+ratios the earlier fixes left as arithmetic over printed operands, each pinned
+by its own test. the table is untouched, every one of the eight config rows
+identical.
+
+what the re-read turned up is that the 2026-10-06 fix traded one unsupported
+claim for another. it was right that "sentence packing costs nothing" needed a
+control, right to build it (split the queries by whether fixed-`size` cut the
+answer), and right about budget 80 — but it then read three point estimates
+over subsets of 13, 23 and 30 queries and called the cost "real everywhere".
+02's paired bootstrap, which this project's own "where it breaks down" names
+as the tool it did not run, says two of the three survive and budget 40's does
+not: -0.004 [-0.192, +0.154], wrong side of zero in half the resamples, the
+sign owned by q19 alone out of 13 queries where 9 do not move at all. the
+giveaway was in the repo already — the fix's own test is named
+`..._confirms_the_drag_at_80_and_160_and_contradicts_it_at_40`, because hit@1
+on that subset goes the other way, and no published line said so. the entry
+point's one-sided "2 rank worse" (against 2 better, unprinted) is what let a
+cancellation read as a cost.
+
+the rest of the project held up, and it is the solid end of the repo. the
+three chunkers are exercised directly rather than trusted: windows and
+overlap cover every word with no duplicated span across every size and corpus
+length tried, a sentence longer than the budget becomes its own oversized
+chunk as documented, and the splitter survives unicode (accented sentence
+starts split, cjk does not — stated under "where it breaks down"). exact
+containment is still an honest relevance rule and the eval still has nothing
+to leak: no fitting, no tuning, gold used only to label relevance and to pick
+the best-covering chunk, which the readme labels as label-derived where it
+quotes it. 02's imported stack checks out at the seams this project leans on —
+`reciprocal_rank` 1-indexed, the non-negative lucene idf, query terms deduped
+once — so hit@1 as `reciprocal_rank(..., 1) > 0` is the metric it claims to
+be. the known mediums all reproduce as written: the empty-query-list crash
+inside 02's `mean`, the ov-40 stride parenthetical, and the interior optimum
+the overlap bullet does not name. one new medium above them is the next fix
+unless a higher one lands: the drag's published mechanism is chunk shrinkage
+and the per-query data says boundary relocation — q09 loses 29 words off its
+relevant chunk and does not move a rank, q11 loses 2 and falls out of the top
+10.
 
 05 was last reviewed on 2026-10-06 and the catch this time is the number that
 review deliberately left behind. all 147 committed tests passed before the fix
