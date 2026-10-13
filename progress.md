@@ -1995,7 +1995,7 @@ question is not reopened.
   point prints is identical across three runs and again from a fresh clone,
   141 tests to 147
 
-- [medium] 05 — the one wall clock measurement 5 still states as a fact is the
+- [fixed 2026-10-13] 05 — the one wall clock measurement 5 still stated as a fact was the
   one no run reproduces. the section retired its whole speedup column because
   two significant figures of wall clock move further than the figure does, and
   the table above it says so in as many words ("those four are one run and the
@@ -2011,8 +2011,63 @@ question is not reopened.
   magnitude, the consumer is still the likely bottleneck, and the load-bearing
   number in the same sentence is a counted 44074751901 chars — it is just the
   same clock-as-result the 2026-09-04 fix removed everywhere else, left in the
-  two places that state it without the caveat. left out of the fix commit to
-  keep that diff one intentional change
+  two places that state it without the caveat. left out of that fix commit to
+  keep its diff one intentional change. re-measured this run: four more runs
+  land 132.9ms, 121.2ms, 123.8ms and 128.6ms and a fifth from a fresh clone
+  128.0ms, so 1.44 to 1.58µs per fragment — seven observations across two
+  sessions now, range 109.9ms to 132.9ms, and 76.0ms sits outside all of them.
+  upgraded to high on the way in: by this repo's own taxonomy a published
+  figure no run reproduces is a wrong claim, not a robustness gap, and it was
+  the only number in the whole project that the entry point contradicts (the
+  other 71 exact figures the readme publishes all appear in today's output
+  character for character). fix: the 1048586 row leads on what is counted and
+  exact every run — 44074751901 baseline scanned chars, 42032.6x the document,
+  84070 fragments, each of the 1048586 chars read once — and names its clock
+  run-dependent like the table above it, publishing no figure for it, with the
+  observed range given as observations rather than a bound. the open question
+  keeps its conclusion ("the consumer reacting to every fragment") on an order
+  of magnitude instead of the ~0.8µs constant. no source file changed and no
+  measured number moved: the entry point is byte-identical above the wall-clock
+  lines. `tests/millionCharClock.test.ts`, 10 tests: four pin the counted
+  claims against the bench that computes them (1048586 from the generator,
+  84070 from the chunker, 44074751901 and the 42032.6x ratio from
+  `baselineScanChars`), four hold the section off a published clock (no 76.0ms,
+  no 0.9µs, no `<n>ms over 84070 fragments` shape, no per-fragment µs figure
+  anywhere in the section) and two hold the open question. 7 of the 10 fail
+  with the readme reverted and the 3 that pass are the pure bench pins, so
+  nothing pre-existing was load-bearing on the old prose. 147 tests → 157
+
+- [medium] 05 — `runPipeline` lets `JSON.parse` escape on any event the
+  parser is spec-correct to deliver. `pipeline.ts:64` runs
+  `JSON.parse(event.data)` with no guard, after special-casing exactly one
+  non-JSON payload (`[DONE]`), so the author clearly expected frames that are
+  not documents and handled only the one this fixture emits. the sse layer's
+  own docstring lists "a bare `data` field dispatching empty data" as part of
+  the WHATWG model it deliberately follows, and sse.test.ts pins it — so the
+  parser correctly hands up an event with `data: ""` and the pipeline dies on
+  it: measured, `data\n\n` and `data:\n\n` both take `runPipeline` down with
+  `SyntaxError: Unexpected end of JSON input`, and a `data: keep-alive` text
+  frame, which is what a real provider's liveness ping looks like, with
+  `Unexpected token 'k'`. the committed fixture emits only well-formed
+  payloads so nothing published is affected, but this is the same seam as the
+  `parsePartialJson` medium below one layer up: the sse parser is hardened
+  against hostile wires all the way down to `SseLimits`, and then the consumer
+  above it treats every delivered frame as valid JSON. found 2026-10-13
+
+- [low] 05 — measurement 5's wall-clock table is a machine no run here comes
+  within 2x of. the readme publishes 0.07/0.79/29.82/1992.70ms for
+  rescan+reparse and 0.02/0.16/0.67/4.27ms for the resumable view; five runs
+  here give 0.11-0.12, 1.22-2.62, 59.05-72.87 and 3730.10-4152.15 for the
+  first column and 0.04, 0.25-0.46, 0.98-1.14 and 6.65-10.14 for the second —
+  the 65619 row is about 2x off in both. the section hedges it correctly
+  ("those four are one run and the ratio between the two time columns is not a
+  property of the code") and the entry point reprints the same caveat, so no
+  claim is wrong and the counted table beside it carries the argument. it is
+  just that the one table in the project a reader would naturally check their
+  own run against is a stale artifact of another machine, kept next to the
+  exact table that was built to replace it. printing it and not publishing it
+  is an option the 2026-09-04 fix already took for the speedup column.
+  found 2026-10-13
 
 - [low] 05 — `replayTimed`'s median is the upper middle value on an even repeat
   count. `resumableBench.ts:164` takes `times[Math.floor(times.length / 2)]`, so
@@ -6312,10 +6367,44 @@ question is not reopened.
 | 09-concurrency | 2026-10-06 |
 | 08-agent-tool-loop | 2026-10-06 |
 | 07-near-duplicates | 2026-10-13 |
-| 05-token-streaming | 2026-10-06 |
+| 05-token-streaming | 2026-10-13 |
 | 03-hybrid-search | 2026-10-12 |
 | 04-bpe-tokenizer | 2026-10-12 |
 | 02-retrieval-eval | 2026-10-12 |
+
+05 was last reviewed on 2026-10-06 and the catch this time is the number that
+review deliberately left behind. all 147 committed tests passed before the fix
+and 157 after, typecheck is clean, and the run reproduces: four local runs plus
+a fifth from a fresh clone are byte-identical on every exact figure and differ
+only in the wall-clock lines, which the readme already names run-dependent. the
+cross-check that mattered was mechanical — of the 72 exact figures measurement
+1 through 7 publish, 71 appear in today's entry-point output character for
+character, and the 72nd (the 6.2x hostile-ordering ratio) is prose arithmetic
+over two peaks that are both printed and is pinned by its own test. that left
+exactly one published number the entry point contradicts, which is the one this
+run fixed: the 1048586 row's 76.0ms and its 0.9µs restatement, in the one
+section that retired its whole speedup column for being a wall clock quoted to
+two significant figures. seven observations across two sessions put that replay
+at 109.9ms to 132.9ms. the fix is the 2026-09-04 shape applied to the paragraph
+that fix skipped — lead on the counted chars, name the clock run-dependent,
+publish no figure for it — and no source file changed.
+
+the rest of the project held up on re-read. the sse parser still matches the
+whatwg processing model line by line where it claims to (the bom and
+connection-level-retry divergences are the two open lows and both are logged),
+`SseLimits` still bounds both growth paths with the cap-boundary CR trap
+handled, and the byte queue's admission rule still defers to the waiting line
+before the budget. two robustness seams are now logged against the layer that
+owns them rather than the layer that documents them: the known
+`parsePartialJson` medium reproduces exactly as written
+(`parsePartialJson('{"a":"x<newline>y"}')` throws `SyntaxError` out of the
+`complete` branch where every other path returns `unparseable`, confirmed
+today), and a new one above it — `runPipeline` calls `JSON.parse` on every
+delivered frame with no guard, so the bare `data` field the sse layer is
+spec-correct to deliver as empty data, and a plain `keep-alive` ping, both take
+the pipeline down. that is the next fix in this project unless a higher one
+lands first: the parser is hardened against hostile wires all the way to a
+typed limit error, and then its own consumer assumes every frame is a document.
 
 25 was last reviewed on 2026-10-03 and the catch this time is a claim, not
 code. all 97 committed tests passed before the fix and 115 after, and the run
