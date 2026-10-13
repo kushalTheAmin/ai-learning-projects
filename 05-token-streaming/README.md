@@ -82,7 +82,7 @@ that, from scratch, and measures each one.
 
 ```
 npm ci
-npm test        # 147 tests
+npm test        # 157 tests
 npm start       # the seven measurements below
 npm run typecheck
 ```
@@ -190,11 +190,15 @@ noise dressed as a result, so no speedup figure is published here — the
 character counts above are the reproducible claim and they say the same
 thing louder.
 
-At 1048586 chars the resumable view finishes the whole replay in 76.0ms over
-84070 fragments, about 0.9µs per fragment. The same replay costs the
-baseline 44074751901 scanned chars, 42032.6x the document (counted exactly,
-not run — actually running it is minutes of CPU for one megabyte of streamed
-JSON, which is why it is counted).
+At 1048586 chars the replay costs the baseline 44074751901 scanned chars,
+42032.6x the document (counted exactly, not run — actually running it is
+minutes of CPU for one megabyte of streamed JSON, which is why it is
+counted). The resumable view reads each of those 1048586 chars once, over
+84070 fragments. Its wall clock is the same run-dependent number as the
+table above, so no figure for it is published here either — repeated runs of
+this committed code land between 109.9ms and 132.9ms, single microseconds per
+fragment, and those are observations, not a bound. The counted column is what
+makes the point anyway.
 
 The snapshot column is the honest asterisk: a deep copy per fragment is
 O(tree) again, so it grows quadratically too — a few times cheaper than the
@@ -379,6 +383,12 @@ of the well-formed fixture parse byte-identical to the uncapped reference.
 
 ## fixes
 
+- 2026-10-13 — the 1MB row still published a wall clock as a fact in the one
+  section that retired wall clocks as results — "76.0ms over 84070 fragments,
+  about 0.9µs per fragment", with the open question reasoning off ~0.8µs. no
+  run reproduces it, repeated runs land 109.9ms to 132.9ms. the row leads
+  on its counted chars now and names the clock run-dependent, 147 tests → 157
+
 - 2026-10-06 — measurement 6 priced the hostile arrival order at "4.5x the
   friendliest seed" and 4.5x is 221864/49061 — the as-generated order, fourth
   friendliest of the five. the friendliest is shuffle 3 at 35570, so against
@@ -447,7 +457,8 @@ of the well-formed fixture parse byte-identical to the uncapped reference.
   a `TextDecoder` pass between the SSE layer and this one. A scanner over
   raw UTF-8 bytes would fuse those and could feed directly from the wire;
   whether the fused version beats decoder + scanner is unmeasured.
-- `view()` per fragment is ~0.8µs, so the next bottleneck in a real client
-  is probably the consumer reacting to every fragment. A dirty-flag layer
+- `view()` per fragment costs single microseconds — run-dependent, like
+  every clock in measurement 5 — so the next bottleneck in a real client is
+  probably the consumer reacting to every fragment. A dirty-flag layer
   (which paths changed since the last view) would let a UI re-render only
   what moved; the bookkeeping cost per push is the open number.
