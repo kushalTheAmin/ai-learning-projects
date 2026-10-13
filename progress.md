@@ -190,6 +190,86 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-13] 07 — the head-to-head compared a verified pipeline
+  against an unverified sketch and published the difference as simhash's
+  ceiling. main.py printed "minhash lsh + verify (b=64 r=2, t=0.2): f1 1.000"
+  next to "simhash (d<=20): f1 0.942", the readme read the pair as "head to
+  head: minhash lsh + verify 1.000, simhash 0.942 ... the gap is the tails",
+  the root index row said the fingerprint "tops out at F1 0.942 because its
+  duplicate/non-duplicate Hamming tails overlap structurally" and the ledger
+  row said the same. only one side of that comparison had a verdict step:
+  minhash's 1.000 is an lsh candidate set filtered by exact jaccard >= 0.2,
+  simhash's 0.942 is the fingerprint deciding by itself. the readme even
+  stated the reason for the asymmetry — simhash "has no verification story of
+  its own (the fingerprint cannot re-derive similarity, you need the original
+  shingles anyway)" — and that is true of the banding too: main.py verifies
+  lsh candidates against `exact[p]`, the full shingle sets, never the
+  signature. so the project's own recommended shape (`lsh for candidates,
+  exact jaccard for verdicts`) was granted to one sketch and denied to the
+  other, and the resulting gap was then explained by a mechanism that
+  verification removes. measured: every non-duplicate on this corpus sits
+  below 0.2, so the verdict step costs simhash no precision at any radius and
+  each row is just candidate recall — d<=20 gives f1 0.966 on 353
+  verifications (fewer than the banding's 360), d<=24 0.990 on 674, and
+  d<=31, the radius holding the widest duplicate pair, reaches precision
+  1.000 recall 1.000 f1 1.000 on 5041. the tails are real (widest duplicate
+  31, nearest non-duplicate 19) and they do cost, but they cost candidates,
+  not f1: 5041 verifications against 360, 14.0x, for the same verdicts. same
+  shape as 22's streaming headline — two populations averaged into one
+  number — except here it is two pipelines scored as one method. fix: a new
+  `== simhash as a candidate generator, verified with exact jaccard >= 0.2 ==`
+  section prints the sweep and the 14.0x line, the head-to-head block names
+  the verification count on both sides and labels the 0.942 as the unverified
+  reading, and the readme, the root index row and the ledger row carry the
+  cost reading instead of the ceiling one.
+  `tests/test_simhash_tails_cost_candidates_not_f1.py`, 13 tests: two hold
+  the overlap and the unverified 0.942 (both unchanged), four pin the
+  verified mechanism (precision 1.000 at every radius, 0.966 at d<=20 on 353,
+  1.000 at d<=31 on 5041, the 14.0x ratio), three hold the entry point and
+  four the readme, the index row and the ledger row. 7 of the 13 fail with
+  the fix reverted and all 145 pre-existing tests pass either way. no
+  previously published number moves — the whole run is byte-identical above
+  the head-to-head block. note the new d<=31 row is label-derived by
+  construction (it is the radius that contains every true pair) and the text
+  says so; it measures what full recall costs rather than offering a
+  tunable operating point, and the open tuning finding below still stands.
+
+- [cleared 2026-10-13] 07 — the tuned banding's recall 1.000 is not a lucky
+  seed. b=64 r=2 recovering exactly the 360 labeled pairs is the project's
+  headline and it rests on one minhash seed, so the question is whether
+  another seed would lose a pair at the 0.280 floor. summed over all 360
+  pairs the s-curve predicts 0.02 misses (sd 0.12) against 0 observed, and
+  the floor pair alone sits at collision probability 0.995, so the exact
+  match is what the curve expects rather than a draw worth re-running. the
+  mistuned banding's 35.2-predicted / 31-observed control already in the run
+  is the same arithmetic on the other side.
+
+- [medium] 07 — `shuffle_sentences` never returns when every sentence in a
+  document is identical. the guard is `while sentences == original:
+  rng.shuffle(sentences)`, and if the split yields `["go.", "go."]` no
+  permutation differs from the original list, so the loop spins forever —
+  a hang, not an exception, with no output and no traceback. the committed
+  corpus never hits it (24 authored paragraphs, no repeated sentence) and
+  nothing published is affected, but real dedup inputs are exactly where
+  repeated boilerplate lines live, which is the corpus this mutation claims
+  to model. the two early returns above it already handle the unshufflable
+  cases (`len(sentences) < 2` returns the text unchanged), so the fix is one
+  more condition of the same shape: fewer than two *distinct* sentences and
+  the reorder is impossible. the test file covers one sentence and many
+  distinct ones, not this. found 2026-10-13
+
+- [low] 07 — the "where it breaks" bullet oversizes the corpus it is
+  cautioning about. it reads "3-word shingles on 70-word docs give ~70
+  shingles per doc. minhash variance at that set size is fine, but simhash
+  with 70 voters per bit is noisy". measured: the 24 base documents are 57 to
+  68 words (mean 61), and over all 144 documents the shingle sets run 37 to
+  67 with a mean of 56.3 — the truncate mutants are the small end at ~40.
+  so the voter count the bullet reasons from is a quarter higher than any
+  document actually has, and the smallest document votes with 37. the
+  direction is safe (fewer voters is noisier, which is the bullet's own
+  point, and ~10% of simhash bit positions tie on an even voter count and
+  break to 0), so no claim flips. found 2026-10-13
+
 - [fixed 2026-10-13] 06 — every peak-arrivals figure in the project was the
   worst of one fixed set of windows rather than the worst window, so a burst
   landing across a bin edge was split and published at its larger half. two
@@ -6231,7 +6311,7 @@ question is not reopened.
 | 10-chunking-strategies | 2026-10-06 |
 | 09-concurrency | 2026-10-06 |
 | 08-agent-tool-loop | 2026-10-06 |
-| 07-near-duplicates | 2026-10-05 |
+| 07-near-duplicates | 2026-10-13 |
 | 05-token-streaming | 2026-10-06 |
 | 03-hybrid-search | 2026-10-12 |
 | 04-bpe-tokenizer | 2026-10-12 |
