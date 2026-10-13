@@ -190,6 +190,103 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-13] 06 — every peak-arrivals figure in the project was the
+  worst of one fixed set of windows rather than the worst window, so a burst
+  landing across a bin edge was split and published at its larger half. two
+  implementations, both bucketing by `floor(t / windowMs)` and taking the
+  fullest bucket: `SimulatedApi.peakArrivalsPerWindow` in server.ts, feeding
+  the main table's `peak/100ms` and the outage extension's study-1 column,
+  and `peakPerWindow` in outage.ts, feeding `rec peak` and `peak att/s` in
+  studies 2 and 3 and (unprinted) breaker-study.ts. both docstrings claimed
+  the strong thing — "largest number of arrivals landing inside any single
+  window" — and the column names and prose assert a rate: "fixed-100ms
+  hammers 440 attempts/s", "a 7-per-100ms trickle". a fixed-bin histogram
+  maximum is a lower bound on that, and the gap is not academic here because
+  the retry schedules under test are built out of round delays that land on
+  bin edges by construction. the clearest case is the dead-service study:
+  fixed-100ms retries every 100ms, 9 attempts per request, and a request
+  gives up at the same instant the next one starts, so there is a doubled
+  arrival every 800ms. a 1000ms window straddling two of those seams holds 12
+  attempts per client; no bin anchored at 0 ever covers two seams, so the
+  published figure was 11 per client, 440 against a real 480. the author had
+  already met this bug once and half-fixed it — `peakPerWindow` grew its
+  `fromMs` parameter specifically so the recovery spike was measured "rather
+  than wherever t=0 bins happen to fall", which is bin alignment named as a
+  measurement error and then worked around by moving the origin instead of
+  removing it. the existing test pinned the artifact: `peakPerWindow([100,
+  950, 1000, 1049], 100, 0) == 2`, three arrivals inside a 99ms span reported
+  as two. both now call one `peakInAnyWindow` in server.ts (outage.ts already
+  imports from server.ts, so no cycle) which slides the window: every maximal
+  window can be slid until it starts on an arrival, so testing each arrival
+  as the window start is exact, and `fromMs` is a filter rather than a bin
+  origin. measured, four published numbers were lower bounds and move up:
+  dead-service `peak att/s` 440 -> 480 (fixed-100ms) and 160 -> 200
+  (exp-no-jitter), the 10s-outage `rec peak` 7 -> 8 (retry-after-jittered),
+  the main table's `peak/100ms` 69 -> 70 (fixed-100ms). nothing else in any
+  of the six entry points moved, byte for byte. every comparison the readme
+  draws from those columns survives: 480 vs 200 still contrasts the hammer
+  with the drip, and 54 vs 8 still contrasts the exact hint's recovery spike
+  with the jittered hint's trickle. cross-project check: no other project
+  bins arrivals into windows for a peak — 05's `peakBufferedBytes` is a
+  continuous high-water mark and 09's `maxQueueDepth` is sampled at entry
+  instants, both exact by construction — so there is nothing to port.
+  162 -> 165 tests. two in tests/outage.test.ts (three arrivals spanning 99ms
+  read as 3 not 2 with the half-open edge pinned at exactly windowMs, and the
+  fixed-delay retry train's worst second reading 12 not 11), one in
+  tests/server.test.ts (arrivals at 0/50/100/149 through the virtual clock
+  read as 3 not 2); the retired `peakPerWindow` anchoring test is rewritten to
+  pin `fromMs` as a filter, which is the part of its behavior that survives.
+  all three fail on the reverted implementation and pass on the fix
+
+- [cleared 2026-10-13] 06 — the main table's headline peak comparison is not
+  an artifact of the binning bug above. checked every row of the main table
+  and every row of the outage extension's study-1 hint sweep, tumbling against
+  sliding: exp-full-jitter 104, exp-no-jitter 61, exp-equal-jitter 86,
+  decorrelated 61, no-retry 200, full-jitter+retry-after 92, pacing 21, and
+  the sweep's 92/91/78/70/65 are all identical under both, because the t=0
+  herd dominates those runs and its arrivals cluster well inside single bins.
+  only fixed-100ms moved (69 -> 70). so "full jitter's peak-window load is
+  actually higher (104 vs 61)" stood correct before the fix and stands after
+
+- [medium] 06 — `maxSimultaneousRetries` keys arrivals on exact float
+  equality (`counts.set(t, ...)` over `retryArrivalsMs`), so it reports the
+  width of exactly-coincident retry waves and nothing else. for any policy
+  whose delay is a real-valued draw, two clients essentially never produce the
+  same float, so the metric reads 1 by construction rather than by
+  measurement — a hypothetical jitter of `100 + rng() * 0.001` ms would land
+  the whole herd inside one microsecond, as perfect a wall as the jitterless
+  schedule, and still read 1. it is delay-value distinctness, not herd
+  spreading. the `collide` column happens to tell the truth for the policies
+  actually measured (full jitter draws from [0, exp), which genuinely spreads,
+  and the readme's own `peak/100ms` column carries the counter-evidence that
+  it spreads *thicker* near t=0), and the exact-hint rows collide honestly
+  because `Math.ceil` makes those delays integers. so no published number is
+  wrong. but the main table's lead claim — "synchronization, not volume, is
+  what jitter fixes", argued from 20 -> 1 — rests on a metric that cannot
+  distinguish a wide jitter from a microscopic one, and the readme does not
+  say so where it presents the column. a tolerance-bucketed version (retries
+  within 1ms, say) would measure the thing the sentence claims; it would move
+  every `collide` figure in the project, so it is a new measurement rather
+  than a correction and belongs in its own run
+
+- [low] 06 — the header extension's part-1 bullet says the hdr-remaining rate
+  trace "sits at 7.7 to 8.4 for the whole second phase, and every wobble above
+  8.0 is a 429", but the trace printed four lines above it dips to 6.8 at
+  t=50s. the phase-2 samples are 7.7, 8.4, 8.0, 6.8, 7.8, 7.9, 8.0, 8.0, 7.8,
+  8.0, 8.0, so the stated floor is wrong by one sample out of eleven. the
+  claim the sentence is making — that the estimator locks on near 8 and pays
+  429s on the overshoots — is unaffected; the quoted range just does not cover
+  its own data
+
+- [low] 06 — `requestWithRetry` and `requestWithBreaker` both assign
+  `prevDelayMs = delayMs` before applying the Retry-After floor, so under
+  `respectRetryAfter` the decorrelated-jitter chain advances on the delay the
+  policy computed rather than the delay actually slept. decorrelated jitter is
+  the one policy that feeds the previous delay back in, so the hint would be
+  invisible to its own growth. unreachable today: no strategy in any of the
+  six entry points combines `decorrelated-jitter` with `respectRetryAfter`, so
+  nothing published is affected
+
 - [fixed 2026-10-12] 04 — the word baseline's oov rate was published over a
   denominator padded with tokens that cannot be unknown, which halved every
   row. the readme said "my word-level tokenizer hits 20.3% unknown tokens on
@@ -6113,7 +6210,7 @@ question is not reopened.
 
 | project | last review |
 |---|---|
-| 06-rate-limiting | 2026-10-05 |
+| 06-rate-limiting | 2026-10-13 |
 | 01-structured-output | 2026-10-11 |
 | 22-rag-vertical-slice | 2026-10-12 |
 | 26-reranking | 2026-10-11 |
