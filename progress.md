@@ -190,6 +190,93 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-14] 09 — the retry budget earned a token on every arriving
+  task, so tasks the breaker shed before the wire funded other tasks' retries.
+  `runTask` opened with `budget?.earn()` before the gate check, while the
+  option, the method and the readme all say the balance is earned per first
+  attempt and that the ratio "caps the whole client population's retry volume
+  at `ratio` of offered load". a task the gate rejects makes zero wire
+  attempts and offers the server nothing, so crediting it inflates the
+  allowance by `ratio` per shed task. breakerless runs cannot see it — every
+  task there reaches the wire, so earn-per-arrival and earn-per-first-attempt
+  are the same number, which is why it survived the storm and cancellation
+  reviews. measured: on a small hard-failing run (50 arrivals, 43 shed at the
+  gate, 7 first attempts) the stated ceiling is cap + ratio x first attempts =
+  1 + 0.1 x 7 = 1.7 granted retries and the old code granted 5, 2.9x its own
+  cap; earning on the wire grants 1. on the published grid only the budgeted
+  breaker row moves, denials 34 → 44 and fastfail 13.3% → 12.8%; `ok` 85.2%,
+  `amp` 0.88, `1st att` 100.0%, `wasted` 2.9%, trips, probefail, recovery,
+  drained and $/1k ok are all byte-identical, and `npm start`, `start:flaky`,
+  `start:storm` and `start:cancel` print byte-identical output because none of
+  them carries a breaker. the narrative survives either way — 44 against 897
+  is still almost nothing to deny — but the cap the mechanism advertises was
+  not the cap it enforced. fix is three lines: the earn moves from task entry
+  to the first admitted attempt. `tests/budget-earns-on-the-wire.test.ts`, 8
+  tests: one holds granted retries inside cap + ratio x first attempts, one
+  pins the shed-heavy ledger (1 granted, 6 denied, 8 attempts either way, so
+  only the accounting moved), one is the breakerless control (every task a
+  first attempt, 60.1% / 1.04 / 897 unchanged), one pins the published row's
+  44 and 12.8% beside the four headline cells that do not move, two hold the
+  entry point and the readme row, and two hold the prose. the revert check
+  splits in a fresh clone: reverting src alone fails 6 (the 5 measurement and
+  output tests plus the pre-existing first-attempt-share block test, since the
+  readme no longer matches the print) with 167 green, reverting README.md
+  alone fails exactly the 4 block and prose tests. the root index row quotes
+  85.2%, 0.0s and $1.89, none of which moved, so nothing to update there. no
+  other project builds a retry budget — `RetryBudget` exists only in 09 — so
+  nothing to port. 165 tests → 173
+- [cleared 2026-10-14] 09 — the storm and cancellation arithmetic re-derived
+  from the runs rather than trusted. the admission log rebuilds the no-retry
+  abandon queue depth event by event and gives a peak of exactly 259 at
+  t=35240.00ms, which is the readme's "259 is the run's peak depth and it
+  lands at 35.24s" to the digit, and the composition at t=35000 is 256 queued
+  / 231 timed out / 90.2% / 256 gone at exit / 100.0%, matching the printed
+  block. the isolation table rebuilds by hand: bisect's 11 / 19 / 31 calls are
+  1 + 2 per level over 5 levels for one poison, 1+2+4+4+4+4 for two in
+  opposite halves, and 1+2+4+8+8+8 for four, and the token column follows from
+  400 + 60n per call (2320 + 2720 + 1760 + 1280 + 1040 + 920 = 10040 for the
+  single-poison row, one-by-one's 2320 + 32 x 460 = 17040, retry-whole's 4 x
+  2320 = 9280). the flaky study's `1st fail` is identical across all four
+  strategies in every config, which is what the shared trial seeds promise.
+  all 21 published fenced blocks match a live entry-point line character for
+  character modulo leading whitespace, and three repeat runs of `npm start`,
+  `start:storm` and `start:cancel` are byte-identical, so the seeding holds.
+- [medium] 09 — `runWithIsolation` and `runFlakyRecovery` disagree on an empty
+  batch. flaky.ts wraps its whole strategy switch in `if (items.length > 0)`
+  and returns a zero-call outcome; isolate.ts has no such guard, so all four
+  strategies call `api.call([])`, the api throws ApiError "empty", and
+  `assertValidationError` rethrows it because the kind is not "validation" —
+  the function throws instead of returning an outcome. same strategy set, same
+  helper, opposite behavior on the same input. nothing published reaches it
+  (`ISOLATION.poisonSets` are all non-empty and `makeItems` is always called
+  with a positive count) and the throw is loud rather than silent, so no
+  number is exposed; it is the two implementations drifting. found 2026-10-14
+- [low] 09 — section 2's `call p50/p95` is item-weighted, not call-weighted.
+  `runBatchSizeSweep` pushes a batch's elapsed time once per item it carried,
+  so the percentile is over items while the column is documented as "how long
+  one call takes once a client worker picks it up". it only matters where
+  chunking is ragged, which is batch 32 alone (240 items is 7 calls of 32 and
+  one of 16); there the 16-item call's ~400ms sits below 224 values near
+  720ms, so both weightings land in the same group and the printed 724ms /
+  771ms are what a call-weighted read gives too. every other row divides 240
+  evenly and the two readings are identical by construction. found 2026-10-14
+- [low] 09 — "no-retry has no memory, so all 375 dip arrivals march into the
+  queue, time out, and orphan" overstates by the eight arrivals that beat the
+  queue. the dip starts on an idle server with all 4 slots free, so the
+  arrivals at 20000, 20040, 20080, 20120, 20160, 20200, 20240 and 20280ms are
+  served in ~500ms, under the 1000ms timeout, and succeed; 367 of the 375 time
+  out, not 375. the printed timeline says as much one block over (the
+  20.0s-30.0s bin reads 3.2% ok) and the direction is against the project's
+  own argument, so nothing is oversold. found 2026-10-14
+- [low] 09 — `recoveryLagMs`'s 5s guard reads one late failure as no recovery.
+  a run whose last failed arrival lands within `guardMs` of the arrival
+  horizon returns undefined and prints NEVER, whatever happened in between, so
+  a single flake-driven failure at 86s in a run that recovered at 40s would
+  print NEVER beside a healthy timeline. no published cell is exposed: the
+  flake experiments do not print a recovery column, the dip and cliff tables
+  run with flake off, and every NEVER in them is a run still failing at the
+  horizon (the jitter-x4 timeline reads 0.0% ok in all six post-dip bins).
+  found 2026-10-14
 - [fixed 2026-10-14] 08 — the flaw-cost table's summary sentence priced all
   six rows as one-round corrections, and two of the six never corrected. the
   prose under the table read "a one-round correction costs one extra model
@@ -6501,7 +6588,7 @@ question is not reopened.
 | 12-groundedness-scoring | 2026-10-07 |
 | 11-prompt-caching | 2026-10-07 |
 | 10-chunking-strategies | 2026-10-13 |
-| 09-concurrency | 2026-10-06 |
+| 09-concurrency | 2026-10-14 |
 | 08-agent-tool-loop | 2026-10-14 |
 | 07-near-duplicates | 2026-10-13 |
 | 05-token-streaming | 2026-10-13 |
