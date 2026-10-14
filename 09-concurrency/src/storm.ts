@@ -205,7 +205,6 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
   const orphans: Promise<void>[] = [];
 
   const runTask = async (id: number, arrivedMs: number): Promise<TaskRecord> => {
-    budget?.earn();
     let prevDelayMs: number | undefined;
     for (let attempt = 1; ; attempt++) {
       const gate = breaker?.tryAcquire();
@@ -223,6 +222,10 @@ export async function runStorm(cfg: StormConfig): Promise<StormResult> {
           fastFailed: true,
         };
       }
+      // The balance is earned per first attempt that reaches the wire, so a
+      // task the gate shed before any attempt credits nothing: it offered the
+      // server no load for the ratio to be a fraction of.
+      if (attempt === 1) budget?.earn();
       attemptsStarted++;
       const controller = cfg.cancelOnTimeout ? new AbortController() : undefined;
       const call = api.call([{ id, poisoned: false, flakeRate }], controller?.signal);

@@ -642,7 +642,7 @@ npm run start:storm-breaker
  jitter+budget10  60.1%  1.04    95.8%   42.4%      0.0%      -          -     897     21.3s    90.1s    $3.18
     no-retry+brk  85.2%  0.88   100.0%    2.9%     12.2%      2        0/2       0      0.0s    90.1s    $1.89
    jitter-x4+brk  85.2%  0.88   100.0%    2.9%     14.8%      2        0/2       0      0.0s    90.1s    $1.89
-jitter+bgt10+brk  85.2%  0.88   100.0%    2.9%     13.3%      2        0/2      34      0.0s    90.1s    $1.89
+jitter+bgt10+brk  85.2%  0.88   100.0%    2.9%     12.8%      2        0/2      44      0.0s    90.1s    $1.89
 ```
 
 The top three rows are the storm extension's rows reproduced to the digit,
@@ -667,7 +667,7 @@ slow one.
 The three breaker rows print the same headline numbers because almost every
 retry the policies want dies at the gate: by the time a 500ms backoff draw
 comes around, the breaker that watched five 40ms-spaced timeouts is already
-open. The budget row's 34 denials against 897 says the same thing from the
+open. The budget row's 44 denials against 897 says the same thing from the
 other side, the breaker leaves the budget almost nothing to deny. Evidence
 beats volume accounting on this pulse because evidence acts on first
 attempts too, and the `1st att` column says first attempts are nearly the
@@ -769,6 +769,12 @@ extension's backoff policies come from 06-rate-limiting, the seeded rng from
 
 ## fixes
 
+- 2026-10-14 — the retry budget credited a token to every arriving task, so a
+  task the breaker shed before it ever reached the wire still bought someone
+  else a retry — against a ratio the project calls a fraction of offered
+  load. it earns on a task's first wire attempt now. only the budgeted
+  breaker row moves: denials 34 → 44, fastfail 13.3% → 12.8%. breakerless
+  runs are untouched, every task there reaches the wire
 - 2026-10-06 — the cancellation section read the ugly success tail as cancel
   mode's, "multi-attempt slogs at 6.5-12s p95", and immediate-x4 cancel
   prints 110ms against abandon's 109ms. experiment 1 prints `multi ok` and
