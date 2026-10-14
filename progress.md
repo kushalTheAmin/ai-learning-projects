@@ -190,6 +190,78 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-14] 08 — the flaw-cost table's summary sentence priced all
+  six rows as one-round corrections, and two of the six never corrected. the
+  prose under the table read "a one-round correction costs one extra model
+  call and roughly 140 to 220 extra tokens, because the retry pays for the
+  flawed emission, the error message, and a re-read of the whole longer
+  history", and the stubborn (153) and slow-corrector (172) rows land inside
+  that range while completing 0 of their 4 tasks. measured: all 4 of those
+  tasks end loop-detected at the 3rd emission under the guarded policy, and
+  their clean twins finish in 2 model calls, so the 1.0 extra model call the
+  table prints for them is the guard's third strike, not a retry being paid
+  for — what the flaw cost there is the task, and the extra-tokens figure is
+  what dying cost on top of a clean run rather than what recovering cost. the
+  four correcting rows are the ones the sentence describes and they carry
+  their own range, 139 to 218 extra tokens, with only wrong-type above one
+  extra call (1.25, because `wrong-type-search-limit` takes two rounds).
+  nothing in the table was false and the `ok` column printed 0 for both rows;
+  it was the sentence that read all six as the same kind of event, same class
+  as 25's prf gain published as a group tendency. fix is the readme prose
+  alone, split into a correcting paragraph and an aborting one, no code and no
+  new measurement.
+  `tests/flawRowsAreNotAllCorrections.test.ts`, 9 tests: one pins the six
+  group labels, two pin which rows complete every task and which complete
+  none of their 4, one holds the aborting rows to loop-detected at
+  DEFAULT_GUARD_LIMIT against a clean twin of 2 model calls (the mechanism the
+  prose now names), one pins the correcting rows' 139-218 range and the 1.25,
+  and four hold the readme — the retired sentence gone from live prose, the
+  new range and the third-strike reading present, and the retired sentence
+  still quoted in the fixes section. the 3 prose tests fail with the readme
+  reverted and the 6 measurement tests pass either way; verification gate ran
+  from a fresh clone (npm ci / typecheck / 181 tests / entry point) and all 11
+  published fenced blocks still match the entry point character for character
+  modulo leading whitespace. no published number moved — main.ts output is
+  byte-identical. no other project prices a flawed run against a clean twin,
+  so nothing to port. 172 tests → 181.
+- [cleared 2026-10-14] 08 — the three extensions' arithmetic re-derived from
+  the run rather than trusted. the caching layer: the read/write split
+  telescopes as documented and the composition rows sum back to the token
+  table (feedback stubborn 2553 read + 975 write = 3528 in and 441 out = the
+  published 3969; guarded 223 + 347 = 570 and 189 = 759), uncached rates
+  reproduce every policy's published cost, and the 0.1x/1.25x multipliers are
+  anthropic's. the drift study: the exact key is strictly finer than the
+  signature key by construction, not just on this suite — identical args give
+  identical issues, so same-exact implies same-signature and the signature
+  guard can only trip earlier, which is what makes "strict widening" more than
+  a 25-task observation. the uncapped trip rounds rebuild by hand from the
+  authored lists (4 cycle-1 drifters at L each, alternate at 2L-1, rotate3 at
+  3L-2, all clamped from emission 7) and give 15/24/31/37/43 against the
+  published 15/24/30/34/38. the result grid: every final answer checked, and
+  the prose matches them — "doubled population: 0" for the empty result, the
+  html page shipped by garbage@calc and garbage@search_notes, 2797500 for both
+  lies, and the lie rows at 168 tokens-in against a-clean's 168. the main
+  table's 37/68/82 model calls and 15/24/36 wasted recount task by task.
+- [low] 08 — the bomb's 902.4x is a floor the loop guard sets, not the price
+  of letting a bomb into the history. the guarded row bills 15341 tokens-in
+  over 4 model calls because the guard kills the task at the 3rd identical
+  invalid call; the printed line says "before the loop guard fires" but the
+  readme bullet and the root index row both quote 902.4x as the cost itself.
+  measured on the same task under `feedback`, which has no guard: 36529
+  tokens-in over 8 model calls, 2148.8x the boundary's 17, and the same run
+  takes the garbage row's 22x to 94.5x (1606 against 17). direction is
+  conservative — the project understates its own strongest argument, which is
+  why it survived four reviews — so no claim is overstated, but the ratio is
+  a property of the guard limit and reads as a property of the bomb. found
+  2026-10-14
+- [low] 08 — `renderResultReport` hardcodes the result grid's column labels
+  (`["guarded", "+reject", "+retry2"]`) while the cells underneath come from
+  `resultStudyPolicies()` order, so changing the study's policy set would
+  relabel nothing and mislabel every cell. the line directly above prints the
+  real names off `report.policies`, which is what keeps today's grid honest,
+  and `tests/resultStudy.test.ts` pins the policy list — so nothing published
+  is wrong, the header is just not derived from the thing it describes. found
+  2026-10-14
 - [fixed 2026-10-13] 07 — the head-to-head compared a verified pipeline
   against an unverified sketch and published the difference as simhash's
   ceiling. main.py printed "minhash lsh + verify (b=64 r=2, t=0.2): f1 1.000"
@@ -1874,18 +1946,6 @@ question is not reopened.
   the policy tables, the limit sweep and every other published figure are
   byte-identical, verified across three local runs and again from a fresh
   clone, 161 tests to 172
-
-- [medium] 08 — the flaw-cost table's summary sentence generalizes a one-round
-  correction across two rows that never corrected. the prose under the table
-  reads "a one-round correction costs one extra model call and roughly 140 to
-  220 extra tokens, because the retry pays for the flawed emission, the error
-  message, and a re-read of the whole longer history", and the stubborn (153)
-  and slow-corrector (172) rows both land inside that range while completing 0
-  of their tasks — for those two the real cost is the task, not the extra call,
-  and the extra-model-calls 1.0 they print is the guard aborting rather than a
-  correction being paid for. nothing in the table is false and the `ok` column
-  prints 0 for both; it is the sentence that reads all six rows as the same
-  kind of event. found 2026-10-06
 
 - [medium] 08 — the loop counts a tool-reported error as a completed intent. a
   call that parses pushes `{ role: "tool", result }` into the history whatever
@@ -6442,7 +6502,7 @@ question is not reopened.
 | 11-prompt-caching | 2026-10-07 |
 | 10-chunking-strategies | 2026-10-13 |
 | 09-concurrency | 2026-10-06 |
-| 08-agent-tool-loop | 2026-10-06 |
+| 08-agent-tool-loop | 2026-10-14 |
 | 07-near-duplicates | 2026-10-13 |
 | 05-token-streaming | 2026-10-13 |
 | 03-hybrid-search | 2026-10-12 |
