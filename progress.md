@@ -231,8 +231,21 @@ question is not reopened.
   reverting `src/pricing.ts` alone fails 6, reverting `README.md` alone fails
   exactly the 3 readme-binding tests, restored is 124 green. 114 tests → 124
 
-- [high] 11 — the position-extension ledger row still publishes the monotone
-  curve the 2026-09-05 fix retired. the row reads "the aware curve falls
+- [medium] 11 — the rest of the position-extension ledger row is still bound
+  by nothing. the shape clause is held now, and the 2.4x swing dollars have
+  been held since 2026-10-14, but the same row also publishes the oblivious
+  operator's flat 0.886x with 31.7% hits and 31625 never-read write tokens,
+  the exact 1.250x with 0 hits when the block leads, and position 1's
+  882-token tools prefix under the 1024-token floor printing exactly 1.000x.
+  checked every one of those against `npm run start:volatile` this run and all
+  are right today — this is not a wrong claim, it is the same unbound-prose
+  mechanism that has now produced two wrong published claims in this row's
+  neighbourhood (the 1.252x base row on 2026-10-07, this one). the reader
+  already exists in `tests/ledger-extension-row.test.ts`, so binding the
+  remaining figures is a handful of recomputed substrings in that file
+
+- [fixed 2026-10-14] 11 — the position-extension ledger row published the
+  monotone curve the 2026-09-05 fix retired. the row read "the aware curve falls
   monotonically 1.000x at position 0 to 0.722x at position 2 to 0.301x at the
   tail against the 0.255x stable floor", and "falls monotonically" is the
   exact phrase that fix removed from the readme after sweeping every index
@@ -247,7 +260,25 @@ question is not reopened.
   exactly one match, which excludes the `, position extension` row by
   construction. so the extension row's prose is bound by nothing. the fix is
   the row's sentence plus a test that holds its shape claim to the dense
-  sweep, the way `volatile-tail-turn.test.ts` holds the readme's
+  sweep, the way `volatile-tail-turn.test.ts` holds the readme's. fixed: the
+  row's shape clause now reads "falls steeply and then turns back up before
+  the tail, 1.000x at position 0 to 0.722x at position 2, bottoming at 0.299x
+  at position 42 and rising to 0.301x at the tail, against the 0.255x stable
+  floor" — same four ratios the sweep prints, with the minimum and the turn
+  named instead of the tail standing in for the floor. no measured number
+  moved and no code changed: the row was the only wrong thing, the readme and
+  the root index row already carry the corrected shape from the 2026-09-05 and
+  2026-10-07 passes. `tests/ledger-extension-row.test.ts`, 4 tests with their
+  own `extensionRow()` reader since `ledgerRow()` filters this row out by
+  construction: one holds the row is the extension not the base, one rebuilds
+  the whole shape sentence from a scan of all 47 positions and requires the
+  row to contain it character for character, one forbids "falls monotonically"
+  and the retired "0.722x at position 2 to 0.301x at the tail" shape, and one
+  re-derives that the minimum sits before the tail with the stable floor under
+  both. revert check in a fresh clone: putting the old sentence back fails
+  exactly those 2 prose tests with the other 2 green, restored is 128 green,
+  typecheck clean, both entry points byte-identical to the readme. 124 tests →
+  128
 
 - [cleared 2026-10-14] 11 — the position extension's arithmetic re-derived at
   every index rather than trusted. swept all 47 positions: the aware minimum
