@@ -85,12 +85,22 @@ stubborn           3   0                1.0           153     $0.0007       836
 slow-corrector     1   0                1.0           172     $0.0009       991
 ```
 
-a one-round correction costs one extra model call and roughly 140 to 220 extra
-tokens, because the retry pays for the flawed emission, the error message, and a
-re-read of the whole longer history. the twin runs on the same seed as the
-flawed run, so the calls they share draw identical latency jitter and cancel -
-the extra-ms is the marginal cost of the flaw, not a difference of two
-independent runs.
+the top four rows are the corrections. they complete every task they price,
+and a correction costs one extra model call - 1.3 for wrong-type, where
+`wrong-type-search-limit` takes two rounds - and 139 to 218 extra tokens,
+because the retry pays for the flawed emission, the error message, and a
+re-read of the whole longer history.
+
+the bottom two print the same shape and mean something else. stubborn and
+slow-corrector complete 0 of their 4 tasks, and all 4 die loop-detected on the
+3rd emission against a clean twin that finishes in 2 model calls - so the 1.0
+extra model call there is the guard's third strike, not a correction being paid
+for, and 153 and 172 extra tokens is what dying cost on top of a clean run, not
+what recovering cost. the `ok` column is the tell.
+
+the twin runs on the same seed as the flawed run, so the calls they share draw
+identical latency jitter and cancel - the extra-ms is the marginal cost of the
+flaw, not a difference of two independent runs.
 
 the stubborn tasks are where the policies really separate:
 
@@ -398,6 +408,14 @@ unions over message types, and async loop control, and the strict compiler
 holds the message-passing honest end to end.
 
 ## fixes
+
+- 2026-10-14 — the flaw-cost table's summary sentence priced all six rows as
+  corrections: "a one-round correction costs one extra model call and roughly
+  140 to 220 extra tokens". two of the six never corrected - stubborn and
+  slow-corrector complete 0 of their 4 tasks, and all 4 die loop-detected on
+  the 3rd emission, so their 1.0 extra model call is the guard aborting, not a
+  retry being paid for. the prose now reads the four correcting rows (139 to
+  218 extra tokens) apart from the two aborting ones. no published number moved
 
 - 2026-10-06 — the limit sweep blamed the feedback cap for its flattening
   stubborn-model-calls column ("+9, +6, +4, +4 instead of +6 a row") and said
