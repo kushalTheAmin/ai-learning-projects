@@ -20,19 +20,19 @@ npm start
 npm run start:volatile
 ```
 
-node 20+. no network calls at runtime, everything is offline and deterministic (seed 20260827, pricing $2/MTok input).
+node 20+. no network calls at runtime, everything is offline and deterministic (seed 20260827, pricing $3/MTok input).
 
 ## what the numbers say
 
-**1. breakpoint placement, 6 interleaved conversations x 10 turns, 30s mean gap.** no caching bills $0.3184 input. one breakpoint on the static tools+system prefix saves 44.2% ($0.1775, hit rate 49.4%), and the documented agent-loop combination, static breakpoint plus a moving one on the last block, saves 78.0% ($0.0700, hit rate 89.6%). the incremental run shows the healthy signature: uncached drops to 0, reads carry the conversation (142616 tokens), writes stay small (16608 tokens, each turn writing only its own delta).
+**1. breakpoint placement, 6 interleaved conversations x 10 turns, 30s mean gap.** no caching bills $0.4777 input. one breakpoint on the static tools+system prefix saves 44.2% ($0.2663, hit rate 49.4%), and the documented agent-loop combination, static breakpoint plus a moving one on the last block, saves 78.0% ($0.1051, hit rate 89.6%). the incremental run shows the healthy signature: uncached drops to 0, reads carry the conversation (142616 tokens), writes stay small (16608 tokens, each turn writing only its own delta).
 
-**2. the volatile header.** same conversations, same incremental breakpoints, but the system prompt now starts with a per-request `session N request M` line. hits go from 59/60 to 0/60 and cost lands at exactly 1.250x of not caching this traffic ($0.3988 vs $0.0700 with a stable header, more than a 5x swing from one line of prompt assembly). the header is extra tokens on every request, so it gets its own no-caching baseline — priced against it, the ratio is the 1.25x write multiplier and nothing else. this is the classic silent invalidator: nothing errors, the bill just goes up, because every request pays the 1.25x write premium on a prefix nobody will ever read back.
+**2. the volatile header.** same conversations, same incremental breakpoints, but the system prompt now starts with a per-request `session N request M` line. hits go from 59/60 to 0/60 and cost lands at exactly 1.250x of not caching this traffic ($0.5982 vs $0.1051 with a stable header, more than a 5x swing from one line of prompt assembly). the header is extra tokens on every request, so it gets its own no-caching baseline — priced against it, the ratio is the 1.25x write multiplier and nothing else. this is the classic silent invalidator: nothing errors, the bill just goes up, because every request pays the 1.25x write premium on a prefix nobody will ever read back.
 
-**3. one-shot requests.** 40 unique prompts with caching left on bill exactly 1.250x of no caching ($0.1548 vs $0.1239): all 61931 prospective tokens are written, none are ever read. caching is not a default-on flag, it is a bet on repetition, and unique traffic loses the bet by construction.
+**3. one-shot requests.** 40 unique prompts with caching left on bill exactly 1.250x of no caching ($0.2322 vs $0.1858): all 61931 prospective tokens are written, none are ever read. caching is not a default-on flag, it is a bet on repetition, and unique traffic loses the bet by construction.
 
 **4. turn gap vs ttl, 12 turns.** with 1m or 4m between turns the 5m ttl wins (0.246x vs 0.341x for the 1h ttl, whose writes cost 2x for nothing extra, since every read refreshes the timer for free and keeps the entry alive indefinitely). at 8m or 25m gaps the 5m cache expires between every turn and becomes a pure loss, exactly 1.250x, while the 1h ttl still delivers 0.341x. at 70m both expire: 1.250x and 2.000x. the ttl choice is a function of one number, the start-to-start gap between requests sharing the prefix, and picking wrong doesnt degrade gracefully, it flips the sign of the whole feature.
 
-**5. the 20-block lookback.** each breakpoint only walks back 20 content blocks to find a prior cache entry. the tail breakpoint of turn n sits exactly one turns worth of blocks behind the entry turn n-1 wrote, so the naive strategy survives up to 20 blocks a turn and collapses at 21. at 10 blocks per turn the tail breakpoint always finds last turns entry and the naive and spaced strategies price identically (0.340x). at 26 blocks per turn (a tool-heavy agent turn) the tail breakpoint cant see back far enough: hit rate collapses from 77.2% to 15.5%, every turn rewrites the whole history, and the naive strategy costs 1.072x, worse than not caching, while adding one intermediate breakpoint 15 blocks before the tail restores 0.362x. same code, same traffic, $0.1291 against $0.0436, from where two markers sit.
+**5. the 20-block lookback.** each breakpoint only walks back 20 content blocks to find a prior cache entry. the tail breakpoint of turn n sits exactly one turns worth of blocks behind the entry turn n-1 wrote, so the naive strategy survives up to 20 blocks a turn and collapses at 21. at 10 blocks per turn the tail breakpoint always finds last turns entry and the naive and spaced strategies price identically (0.340x). at 26 blocks per turn (a tool-heavy agent turn) the tail breakpoint cant see back far enough: hit rate collapses from 77.2% to 15.5%, every turn rewrites the whole history, and the naive strategy costs 1.072x, worse than not caching, while adding one intermediate breakpoint 15 blocks before the tail restores 0.362x. same code, same traffic, $0.1937 against $0.0654, from where two markers sit.
 
 ## the position extension: where the volatile block sits
 
@@ -42,34 +42,34 @@ run it with `npm run start:volatile`. each position is priced against its own no
 
 ```
 position final idx  strategy     input     ratio    hit rate  uncached/read/write tokens
-0        0          incremental  $0.1157   1.250x     0.0%    0/0/46288
-0        0          aware        $0.0926   1.000x     0.0%    46288/0/0
-1        1          incremental  $0.1157   1.250x     0.0%    0/0/46288
-1        1          aware        $0.0926   1.000x     0.0%    46288/0/0
-2        2          incremental  $0.0820   0.886x    31.7%    0/14663/31625
-2        2          aware        $0.0668   0.722x    31.7%    30292/14663/1333
-6        6          incremental  $0.0820   0.886x    31.7%    0/14663/31625
-6        6          aware        $0.0599   0.647x    40.3%    25925/18633/1730
-14       14         incremental  $0.0820   0.886x    31.7%    0/14663/31625
-14       14         aware        $0.0483   0.522x    54.6%    18502/25271/2515
-22       22         incremental  $0.0820   0.886x    31.7%    0/14663/31625
-22       22         aware        $0.0386   0.417x    66.8%    11955/30943/3390
-30       30         incremental  $0.0820   0.886x    31.7%    0/14663/31625
-30       30         aware        $0.0316   0.341x    75.8%    6872/35097/4319
-38       38         incremental  $0.0820   0.886x    31.7%    0/14663/31625
-38       38         aware        $0.0283   0.306x    80.2%    4010/37140/5138
-42       42         incremental  $0.0820   0.886x    31.7%    0/14663/31625
-42       42         aware        $0.0277   0.299x    81.2%    3108/37591/5589
-tail     46         incremental  $0.0820   0.886x    31.7%    0/14663/31625
-tail     46         aware        $0.0279   0.301x    81.2%    2780/37591/5917
-stable   -          incremental  $0.0229   0.255x    86.5%    0/38802/6046
+0        0          incremental  $0.1736   1.250x     0.0%    0/0/46288
+0        0          aware        $0.1389   1.000x     0.0%    46288/0/0
+1        1          incremental  $0.1736   1.250x     0.0%    0/0/46288
+1        1          aware        $0.1389   1.000x     0.0%    46288/0/0
+2        2          incremental  $0.1230   0.886x    31.7%    0/14663/31625
+2        2          aware        $0.1003   0.722x    31.7%    30292/14663/1333
+6        6          incremental  $0.1230   0.886x    31.7%    0/14663/31625
+6        6          aware        $0.0899   0.647x    40.3%    25925/18633/1730
+14       14         incremental  $0.1230   0.886x    31.7%    0/14663/31625
+14       14         aware        $0.0725   0.522x    54.6%    18502/25271/2515
+22       22         incremental  $0.1230   0.886x    31.7%    0/14663/31625
+22       22         aware        $0.0579   0.417x    66.8%    11955/30943/3390
+30       30         incremental  $0.1230   0.886x    31.7%    0/14663/31625
+30       30         aware        $0.0473   0.341x    75.8%    6872/35097/4319
+38       38         incremental  $0.1230   0.886x    31.7%    0/14663/31625
+38       38         aware        $0.0424   0.306x    80.2%    4010/37140/5138
+42       42         incremental  $0.1230   0.886x    31.7%    0/14663/31625
+42       42         aware        $0.0416   0.299x    81.2%    3108/37591/5589
+tail     46         incremental  $0.1230   0.886x    31.7%    0/14663/31625
+tail     46         aware        $0.0418   0.301x    81.2%    2780/37591/5917
+stable   -          incremental  $0.0343   0.255x    86.5%    0/38802/6046
 ```
 
 three findings.
 
 **the curve only exists if placement responds to it.** the oblivious incremental strategy prints the identical row at every position past the static prefix: 0.886x, hit rate 31.7%, at position 2 and at the tail alike. its breakpoints sit at the static prefix and the last block, so the only entry it can ever read back is the 1333-token static prefix, and the moving tail breakpoint writes 31625 tokens of history at 1.25x that nobody will ever read. the volatile blocks position is invisible to it because no breakpoint sits between the static prefix and the poison. and when the block leads the request (position 0 or 1) even the static hit dies and the row lands on the familiar pure-tax number, exactly 1.250x with 0 hits.
 
-**the aware curve falls steeply, then turns back up just before the tail.** 0.722x with the block right after the system prompt, then 0.647x, 0.522x, 0.417x, 0.341x, 0.306x as it moves deeper — and it bottoms at 0.299x at position 42, not at the tail, which prints 0.301x. against 0.255x for the same conversation with no volatile block at all. the read saturates at 42: reads carry 37591 tokens there and no deeper breakpoint adds one, because what the last request reads back is the entry the request before it wrote, and that entry stopped growing. so past 42 the only thing still moving is the last request's own write — 328 tokens at the tail, billed at 1.25x, that no later request ever reads because there is no later request. that premium is the entire gap: 328 x $2/MTok x 0.25 = $0.000164, exactly $0.0279 minus $0.0277. the same block rendered right after the system prompt still costs $0.0668 against $0.0277, a 2.4x swing from nothing but assembly order, so the operational rule survives with a caveat: render volatile content late and put a breakpoint directly in front of wherever it ends up — the last five positions sit within 0.6% of each other, and the deepest breakpoint on the final request of any conversation is a bet nothing collects on.
+**the aware curve falls steeply, then turns back up just before the tail.** 0.722x with the block right after the system prompt, then 0.647x, 0.522x, 0.417x, 0.341x, 0.306x as it moves deeper — and it bottoms at 0.299x at position 42, not at the tail, which prints 0.301x. against 0.255x for the same conversation with no volatile block at all. the read saturates at 42: reads carry 37591 tokens there and no deeper breakpoint adds one, because what the last request reads back is the entry the request before it wrote, and that entry stopped growing. so past 42 the only thing still moving is the last request's own write — 328 tokens at the tail, billed at 1.25x, that no later request ever reads because there is no later request. that premium is the entire gap: 328 x $3/MTok x 0.25 = $0.000246, exactly $0.0418 minus $0.0416. the same block rendered right after the system prompt still costs $0.1003 against $0.0416, a 2.4x swing from nothing but assembly order, so the operational rule survives with a caveat: render volatile content late and put a breakpoint directly in front of wherever it ends up — the last five positions sit within 0.6% of each other, and the deepest breakpoint on the final request of any conversation is a bet nothing collects on.
 
 **the minimum cacheable prefix can eat your last stable breakpoint.** at position 1 the only stable prefix is the tools block alone, 882 tokens by this estimator, under the 1024-token minimum. the aware strategys one legal breakpoint silently doesnt cache and its row prints exactly 1.000x: placement-aware code did everything right and got nothing, with no error anywhere, because below-minimum prefixes just quietly decline to cache. aware at position 0 prints the same 1.000x for the cleaner reason that nothing stable exists at all, and that 1.000x floor is still cheaper than the oblivious 1.250x, since the worst caching strategy under total volatility is any caching at all.
 
@@ -86,6 +86,14 @@ three findings.
 this is the day-job side of the portfolio: cache accounting is the kind of thing that ships inside a typescript api gateway or agent runtime, and the project imports the token estimator from 08 and the seeded rng from 05 rather than reimplementing either. strict mode, no `any`, exhaustive small tests on the billing arithmetic, since the whole value of a cost model is that the arithmetic binds.
 
 ## fixes
+
+- 2026-10-14 — pricing.ts called $2/$10 "a sonnet-class model" when
+  sonnet-class is $3/$15 — and 08, where this project gets its token
+  estimator, already prices that class right, so one repo carried two prices
+  for one model. base is $3/$15 now and the readme dollars are bound to what
+  the entry points print. every ratio, share, hit count and token count is
+  byte-identical, every dollar is 1.5x — headline incremental run $0.0700 →
+  $0.1051, aware floor $0.0277 → $0.0416
 
 - 2026-10-07 — the repo ledger row still published the volatile header at
   1.252x, the value the 2026-08-29 own-baseline fix retired here — nothing

@@ -2,7 +2,7 @@
  * Cost model for prompt-cached requests. Multipliers follow the published
  * first-party pricing shape: cache reads bill at 0.1x the base input price,
  * cache writes at 1.25x for the 5-minute TTL and 2x for the 1-hour TTL.
- * Base prices default to a sonnet-class model ($2/MTok in, $10/MTok out)
+ * Base prices default to a sonnet-class model ($3/MTok in, $15/MTok out)
  * and are parameters, not constants of the simulation.
  */
 
@@ -17,8 +17,8 @@ export interface Pricing {
 }
 
 export const DEFAULT_PRICING: Pricing = {
-  inputPerMTok: 2,
-  outputPerMTok: 10,
+  inputPerMTok: 3,
+  outputPerMTok: 15,
   readMultiplier: 0.1,
   writeMultiplierByTtlMs: { [TTL_5M_MS]: 1.25, [TTL_1H_MS]: 2 },
 };

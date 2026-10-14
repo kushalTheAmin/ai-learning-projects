@@ -117,7 +117,7 @@ describe("the turn is the last request's unamortized write", () => {
       const extra = lastWrite(dense[p]!) * perTok * premium;
       expect(dense[p]!.totals.inputCost - dense[42]!.totals.inputCost).toBeCloseTo(extra, 12);
     }
-    expect(dense[TAIL_INDEX]!.totals.inputCost - dense[42]!.totals.inputCost).toBeCloseTo(0.000164, 6);
+    expect(dense[TAIL_INDEX]!.totals.inputCost - dense[42]!.totals.inputCost).toBeCloseTo(0.000246, 6);
   });
 
   it("keeps the last five positions within 0.6% of each other", () => {
@@ -171,7 +171,7 @@ describe("the entry point and the readme", () => {
       "42",
       "42",
       "aware",
-      "$0.0277",
+      "$0.0416",
       "0.299x",
       "81.2%",
       "3108/37591/5589",
@@ -211,7 +211,7 @@ describe("the readme prose", () => {
 
   it("explains the rise as the last request's unread write", () => {
     expect(flat).toContain("328");
-    expect(flat).toContain("$0.000164");
+    expect(flat).toContain("$0.000246");
   });
 
   it("still quotes the sentence it retired, in the fixes section", () => {
