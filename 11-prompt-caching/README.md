@@ -87,6 +87,14 @@ this is the day-job side of the portfolio: cache accounting is the kind of thing
 
 ## fixes
 
+- 2026-10-14 — the repo ledger's position-extension row still called the
+  aware curve monotone with the tail as its bottom, the claim the
+  2026-09-05 fix retired here — the ledger test skips that row by
+  construction, so nothing bound it. row names the 0.299x minimum at
+  position 42 and the rise to 0.301x now, held by
+  tests/ledger-extension-row.test.ts against a scan of every position.
+  no measured number moved
+
 - 2026-10-14 — pricing.ts called $2/$10 "a sonnet-class model" when
   sonnet-class is $3/$15 — and 08, where this project gets its token
   estimator, already prices that class right, so one repo carried two prices
