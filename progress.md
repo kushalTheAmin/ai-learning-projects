@@ -190,6 +190,106 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-14] 11 — the base price was documented as a sonnet-class
+  model and set at two thirds of one. `src/pricing.ts` says "Base prices
+  default to a sonnet-class model" while `DEFAULT_PRICING` carried
+  `inputPerMTok: 2, outputPerMTok: 10`; sonnet-class is $3/$15, and 08 — the
+  project 11 imports `estimateTokens` from — already prices that class at
+  $3/$15 in its own `PRICING`, so one repo carried two prices for one model
+  class and 11's were the ones that matched nothing published. every other
+  constant in the simulation was already that class's real figure: the
+  1024-token minimum cacheable prefix, 0.1x reads, 1.25x 5m writes, 2x 1h
+  writes, 4 breakpoints, the 20-block lookback. so the project modelled the
+  published semantics exactly and then priced them against a base it invented,
+  which made every absolute dollar it publishes two thirds of the bill the
+  model it names would charge — and the readme's own hedge blamed the gap on
+  "real token counts and real conversation sizes", not on the base price. what
+  kept it alive is that nothing bound those dollars: the volatile sweep table
+  is held character for character by `volatile-tail-turn.test.ts`, but the
+  prose figures in sections 1-5 were typed. fix is two lines in
+  `DEFAULT_PRICING` plus the docstring. every ratio, share, hit count and
+  token count is byte-identical because every published ratio is
+  price-invariant (cost and baseline both scale), and every dollar scales by
+  exactly 1.5: section 1 none $0.3184 → $0.4777, static-only $0.1775 →
+  $0.2663, incremental $0.0700 → $0.1051; section 2 volatile $0.3988 →
+  $0.5982; section 3 $0.1239/$0.1548 → $0.1858/$0.2322; section 4 $0.0181 →
+  $0.0272 through $0.1475 → $0.2213; section 5 $0.1291 → $0.1937 and $0.0436
+  → $0.0654; the whole aware sweep including the $0.0277 → $0.0416 floor and
+  the $0.0279 → $0.0418 tail; and the tail-vs-42 write premium $0.000164 →
+  $0.000246. savings 78.0%/44.2%, hit rates 89.6%/49.4%, the 1.250x and
+  2.000x corners, 0.299x/0.301x/0.255x and 0.886x, the 882-token tools prefix
+  and the 1024 minimum all unmoved, so the root index row needed no edit — it
+  quotes only ratios and shares. `tests/sonnet-class-pricing.test.ts`, 10
+  tests: two pin the price to the class the docstring names and hold it equal
+  to 08's, one holds the cache-semantics constants that did not move, two
+  prove the fix moves dollars only (every input bill scales by exactly 1.5
+  while hit rate, token classes, hit counts and savings share are identical),
+  two bind the readme's per-MTok price and forbid the retired one, two hold
+  every four-decimal dollar in the live prose to what `npm start` and
+  `npm run start:volatile` actually print, and one binds the extension ledger
+  row's swing figures to the run. the revert check splits in a fresh clone:
+  reverting `src/pricing.ts` alone fails 6, reverting `README.md` alone fails
+  exactly the 3 readme-binding tests, restored is 124 green. 114 tests → 124
+
+- [high] 11 — the position-extension ledger row still publishes the monotone
+  curve the 2026-09-05 fix retired. the row reads "the aware curve falls
+  monotonically 1.000x at position 0 to 0.722x at position 2 to 0.301x at the
+  tail against the 0.255x stable floor", and "falls monotonically" is the
+  exact phrase that fix removed from the readme after sweeping every index
+  found the curve bottoms at 0.299x at position 42 and rises back to 0.301x at
+  the tail. the row names neither the minimum nor the turn, and it reads the
+  tail as the floor, which is the claim the sweep disproved. re-derived this
+  run at every index: 42 is 0.299286 and the tail 0.301058, so the row is
+  wrong about the shape and about which position is cheapest. this is the
+  2026-10-07 ledger-row finding one row over — and the test that fix shipped
+  cannot catch it, because `ledgerRow()` in `tests/ledger-row.test.ts`
+  deliberately filters to lines starting `"| 11-prompt-caching |"` and asserts
+  exactly one match, which excludes the `, position extension` row by
+  construction. so the extension row's prose is bound by nothing. the fix is
+  the row's sentence plus a test that holds its shape claim to the dense
+  sweep, the way `volatile-tail-turn.test.ts` holds the readme's
+
+- [cleared 2026-10-14] 11 — the position extension's arithmetic re-derived at
+  every index rather than trusted. swept all 47 positions: the aware minimum
+  is position 42 at 0.299286 against the tail's 0.301058, so the published
+  "bottoms at 0.299x at position 42, not at the tail, which prints 0.301x"
+  holds; reads saturate at exactly 37591 tokens from 42 through the tail, so
+  "no deeper breakpoint adds one" holds; positions 42-46 span 0.299286 to
+  0.301058, a 0.592% spread, so "the last five positions sit within 0.6% of
+  each other" holds on the dense sweep the table only samples; and the whole
+  tail-vs-minimum gap is the final request's own 328-token write at the 0.25
+  premium, $0.000246 at $3/MTok, matching the printed rows to 12 decimals.
+  also checked: both entry points are byte-identical across repeated runs,
+  prospective input tokens are conserved across all strategies (159224 in
+  section 1 under none, static-only and incremental alike), the 20-block
+  window reaches exactly 20 blocks back and the turn-size collapse sits at 21
+  blocks/turn as the readme says, and the four-corner ttl sweep matches the
+  write multipliers exactly. no action
+
+- [low] 11 — the "exactly $0.0418 minus $0.0416" display subtraction is
+  looser than the word "exactly" claims. the sentence is right about the
+  mechanism — the tail-vs-42 gap is exactly the final request's 328-token
+  write premium, $0.000246, and the test holds that to 12 decimals — but the
+  two four-decimal figures it invites the reader to subtract differ by
+  $0.0002, not $0.000246, because both are rounded for display. pre-existing:
+  at the retired price it read "$0.000164, exactly $0.0279 minus $0.0277",
+  the same $0.0002 rounded difference. either drop "exactly" from the display
+  subtraction or quote the unrounded pair
+
+- [low] 11/08 — 08's cache model cannot reproduce the two effects 11 publishes
+  as sign-flipping. `08-agent-tool-loop/src/caching.ts` prices a trace by
+  telescoping token counts — call n reads call n-1's whole input and writes
+  its own suffix — with no minimum cacheable prefix and no lookback window,
+  while 11 measures that the 1024-token minimum can silently eat an operator's
+  only legal breakpoint (its 1.000x position-1 row) and that a turn appending
+  21+ blocks outruns the 20-block lookback and flips naive caching to 1.072x,
+  worse than not caching. the multipliers agree (0.1x/1.25x in both) and 08's
+  docstring does state its assumption, so this is not a silent disagreement —
+  but 08 does not say that the assumption it waves through is the specific
+  thing the other project measured as the main way this bet is lost, and a
+  reader taking 08's savings as a general result would miss both. worth a
+  cross-reference in 08 rather than a second cache model
+
 - [fixed 2026-10-14] 09 — the retry budget earned a token on every arriving
   task, so tasks the breaker shed before the wire funded other tasks' retries.
   `runTask` opened with `budget?.earn()` before the gate check, while the
@@ -6586,7 +6686,7 @@ question is not reopened.
 | 14-context-window | 2026-10-08 |
 | 13-ann-hnsw | 2026-10-08 |
 | 12-groundedness-scoring | 2026-10-07 |
-| 11-prompt-caching | 2026-10-07 |
+| 11-prompt-caching | 2026-10-14 |
 | 10-chunking-strategies | 2026-10-13 |
 | 09-concurrency | 2026-10-14 |
 | 08-agent-tool-loop | 2026-10-14 |
