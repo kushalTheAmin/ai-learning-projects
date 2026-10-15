@@ -51,7 +51,7 @@ OPEN THREADS for the questions worth answering next.
 | 16-llm-as-judge | 2026-08-28 | typescript | scripted judge family as latent-utility scorers (quality weight + per-call gaussian noise + authored biases of known size: position bonus to the first-presented answer, ln-length verbosity term around a 120-token pivot, house-provenance self bonus, pass-threshold leniency; every verdict deterministic per (judge, item, presentation order) via fnv1a-derived mulberry32 streams with box-muller gaussians) + two eval modes over one cast (pointwise pass/fail vs pairwise forced choice, exact tie to first presented) + three presentation protocols (as-stored, seeded randomized shared across judges, both-order with abstain-on-flip) + cohen's kappa vs raw accuracy on a deliberately 0.70-imbalanced gold set (constant-rater case defined 0) + attribute-balanced pair sets built exact, not sampled (stored order, provenance, length each uncorrelated with gold by construction) + flip-rate diagnostic, decided/coverage/effective accuracy for abstentions, win-rate-vs-known-truth bias probes (champion-first, house inflation, longer-wins), per-protocol token and cost accounting; imports 05's rng and 08's estimator/pricing; measured — lenient passes 0.955 and still scores 0.745 accuracy on the 0.700 base rate where kappa says 0.198 (always-pass: 0.700 accuracy, kappa exactly 0.000), primacy flips 0.287 of order-swapped pairs yet is perfect (1.000) on the 0.713 it decides, champion-always-first drags a true 0.500 challenger to 0.380 and randomization takes back half of that at no cost (0.440) while both-order pays 2x ($2.53 vs $1.26 per 1k pairs) to reach 0.485 and to buy per-item confidence rather than aggregate accuracy (primacy effective 0.857 vs randomized 0.887), self-preference (0.600) survives order debiasing untouched (0.620) because it rides identity not position, and the two modes are mutually blind: pointwise cannot express position bias (primacy 0.990, identical to calibrated) and pairwise cannot express leniency (lenient 1.000 randomized) |
 | 15-embedding-quantization | 2026-08-28 | python | scalar quantization of vector stores behind 13's unchanged indexes (search runs on the dequantized reconstruction, queries stay float): symmetric per-vector int8 (max abs / 127 scale, zero-vector guard) + asymmetric per-dimension uniform grid at parameterized levels (256/16) with min/max or quantile fit, constant-dimension step-0 guard, out-of-grid clipping + int4 nibble packing two codes per byte + exact per-scheme byte accounting (codes plus float32 scales or grid params) + rmse reconstruction error + float rerank recovery (quantized flat top-C, full-precision rerank to top-k with id tie-break, duplicate collapse) + authored dual failure injections (near-constant rogue dimension ~40, rogue outlier rows in U(-40,40)); imports 13's ExactIndex/HnswIndex/datasets and ann_recall (itself 02's recall_at_k); measured — int8-asym flat recall@10 0.985 clustered / 0.989 uniform at 3.99x under fp32 where int4 drops to 0.797 / 0.888 at 7.96x, hnsw's quantization gap is flat +0.013..0.017 across ef 10-160 (converges to the 0.985 flat ceiling, more ef buys nothing back), rerank C=20 makes int8 exact and C=50 makes int4 exact, one rogue dimension crushes per-vector symmetric 0.987→0.515 (informative dims keep ~6 of 255 levels) leaving per-dim at 0.987, five rogue vectors stretch the min/max grid 0.987→0.649 (mean step 0.2051 vs 0.0062 needed) leaving per-vector at 0.987, and quantile-0.002 fit recovers 0.983 |
 | 14-context-window | 2026-08-28 | typescript | context assembly under a token budget as pure policy functions (full history, sliding window keeping a contiguous suffix of whole turns, head-and-tail with pinned first turns, summarize-evicted reserving a budget share for an extractive summary and degenerating to sliding-window while everything fits; system prompt and current user turn always pinned, over-budget flagged, context tokens defined as the sum of per-part estimates so fitting and reporting share one arithmetic) + luhn 1958 extractive salience (frequency-significant words, best cluster scored count^2/span under a gap cap) vs rarity salience (mean ln(N/sentence-frequency) over unique content words) behind one summarize interface + seeded ops-conversation generator planting 12 single-occurrence nonce facts per conversation (standalone vs buried sentence classes, probes ask by key at lag buckets 1-2/3-8/9-20 exchanges, generation-time validation that each value occurs exactly once) + retention-by-lag/class metrics with per-call token and dollar accounting; imports 08's token estimator and pricing and 05's rng; measured — sliding window is a step function in lag (100% inside the 800-token window, 23.8% past it), luhn summarization is worse than no summary at all (71.3% vs 74.6% overall, 15.0% long-lag, falling to 61.7% as the summary share rises to 50%) because frequency salience keeps the chatter and a once-stated decision is the rarest thing in a transcript, rarity salience at identical budget and cost reaches 85.8% overall and 57.5% long-lag (92.5% at 50% share, where luhn and rarity slope in opposite directions), the standalone/buried split doesnt survive the rest of its own column (rarity-25% at 800 is 89.2% standalone vs 82.5% buried, but luhn-25% goes the other way and sliding-window, which never scores a sentence, splits widest, and 1 of the 23 published rows clears z=2, rarity-50% at 800 where standalone sits at a 120-of-120 ceiling, against the 1.05 rows the threshold gives for free), and cost is flat across policies at a fixed budget ($0.0739-0.0744/conv vs $0.1091 full-history) while full-history's call size grows 66.9 to 1876.7 tokens over 30 exchanges |
-| 13-ann-hnsw | 2026-08-28 | python | hnsw approximate nearest neighbor from scratch (geometric level assignment floor(-ln u / ln M), per-layer greedy descent, best-first beam search of width ef with (distance, id) tie-breaking, bidirectional linking with degree caps M / 2M and re-selection shrink, the paper's algorithm-4 neighbor-selection heuristic with fill-from-discarded, naive M-closest ablation mode) + exact flat index as one vectorized squared-L2 scan with id tie-break + distance-computation accounting on both indexes + layer-0 reachability integrity check + seeded gaussian-mixture and uniform synthetic vector datasets with uniform outlier queries; imports 02's recall_at_k (exact top-10 as the relevant set); measured — recall 0.979 at 18.5x fewer distance computations than exact and 0.995 at 15.9x, with the last 0.005 of recall costing ef 80→320 and a fall to 2.5x; M=4 builds at 445 dists/vector for 0.963 vs M=32 at 7373 for 0.998; the selection heuristic vs naive M-closest on tight clusters is 0.997 vs 0.809 with 145 of 2000 nodes stranded unreachable on layer 0 (uniform control: 0.015 apart, 4 nodes), uniform 32-d is harder than clustered for both (0.861 vs 0.997 at identical settings); wall clock at n=3000 is a near-tie with the vectorized exact scan because python per-node overhead eats the ~15x distance-count win — the count is the portable number |
+| 13-ann-hnsw | 2026-08-28 | python | hnsw approximate nearest neighbor from scratch (geometric level assignment floor(-ln u / ln M), per-layer greedy descent, best-first beam search of width ef with (distance, id) tie-breaking, bidirectional linking with degree caps M / 2M and re-selection shrink, the paper's algorithm-4 neighbor-selection heuristic with fill-from-discarded, naive M-closest ablation mode) + exact flat index as one vectorized squared-L2 scan with id tie-break + distance-computation accounting on both indexes + layer-0 reachability integrity check + seeded gaussian-mixture and uniform synthetic vector datasets with uniform outlier queries; imports 02's recall_at_k (exact top-10 as the relevant set); measured — recall 0.979 at 18.5x fewer distance computations than exact and 0.995 at 15.9x, with the last 0.005 of recall costing ef 80→320 and a fall to 2.5x; M=4 builds at 445 dists/vector for 0.963 vs M=32 at 7373 for 0.998; the selection heuristic vs naive M-closest on tight clusters is 0.997 vs 0.809 with 145 of 2000 nodes stranded unreachable on layer 0 (uniform control: 0.015 apart, 4 nodes), uniform 32-d is harder than clustered for both (0.861 vs 0.997 at identical settings); wall clock at n=3000 runs the other way, hnsw slower than the vectorized exact scan in 5 of 6 runs and in 15 of 15 interleaved repeats at a median 1.33x, because python per-node overhead eats the whole ~15x distance-count win — the count is the portable number, and no clock figure is published as a result |
 | 12-groundedness-scoring | 2026-08-28 | python | lexical groundedness scorers as unsupported-claim detectors: content-token overlap precision with a stopword filter + max per-sentence tf-idf cosine (02's TfidfIndex fitted on the context's own sentences, 10's splitter) + numeric consistency gate (digit-literal extraction with thousands joining, fraction of claim numbers present in context, no-numbers passes) + negation-parity heuristic (7-cue list, hard zero on mismatch with the best-matching sentence) + exact pairwise ROC-AUC with half-credit ties + Youden's J threshold sweep (flag-everything scores J=0, unlike best-F1 which degenerated on the 25/35 class balance) + authored 10-context / 60-claim hallucination taxonomy (verbatim/paraphrase/synthesis/negated-paraphrase supported, entity/number/negation/antonym edits + fabrications + outside-knowledge unsupported); measured — sentence cosine ranks hallucinations ABOVE truth (AUC 0.433, mean unsup 0.762 vs sup 0.668) because minimal edits keep a sentence's words while paraphrases lose them, the two lexical methods' best thresholds land at 1.000 and on the same row to three places (0.640/0.914/0.720/0.194), each trusting the 7 verbatim copies plus 3 hallucinations scoring a perfect 1.0 (FPR 0.720), the numeric gate is precision 1.000 at FPR 0.000 but misses the 1-of-2-numbers-real swap (score 0.5), negation parity buys 7/7 flip recall for 4/4 zeroed negated paraphrases, and 2 of 4 antonym flips are bag-of-words-identical to a true sentence and score 1.0 under every method |
 | 11-prompt-caching | 2026-08-27 | typescript | simulated provider-side prefix cache modeling the documented semantics (longest-cached-prefix hit with exact length-prefixed keys, writes billed only for the delta past the hit, ttl expiry with free refresh-on-read at the entry's own ttl, min cacheable prefix 1024 tokens, 4-breakpoint cap, 20-block lookback per breakpoint) + read/write cost multipliers per ttl (0.1x reads, 1.25x 5m writes, 2x 1h writes over parameterized base pricing) + breakpoint placement strategies (none, static prefix, incremental tail, lookback-spaced) + seeded phrase-bank agent workload with interleaved conversations, volatile-header cache-bust variant, unique one-shot requests, and tool-heavy turns; imports 08's token estimator and 05's rng; measured — incremental breakpoints save 78.0% input cost vs no caching (hit rate 89.6%) where static-only saves 44.2%, one volatile header line drops hits 59/60 to 0/60 and lands at 1.250x of not caching, unique one-shot prompts with caching on bill exactly 1.250x, a gap sweep flips the 5m ttl from 0.246x to a pure 1.250x loss the moment turn gaps pass the ttl (1h ttl holds 0.341x until 70m, then 2.000x), and 26-block turns outrun the 20-block lookback so the naive tail breakpoint rewrites all history every turn (1.072x, worse than no caching) until one spaced marker restores 0.362x |
 | 10-chunking-strategies | 2026-08-27 | python | regex sentence splitter with character spans (abbreviation guard, non-ascii-safe uppercase boundary check via str.isupper) + fixed word-window chunker with optional overlap + greedy sentence-packing chunker under a word budget, all emitting exact doc substrings with [start, end) offsets + exact answer-containment relevance over chunks with split-rate, best-coverage (char overlap of answer span with best chunk), and context-words-at-k metrics, over an authored 10-doc / 40-query ops corpus with verbatim-unique answer sentences; imports 02's bm25/tokenizer/metrics (chunking changes the index contents, not the scorer); measured — fixed-80 splits 42.5% of answers and 17 of its 20 hit@5 misses are boundary splits not ranking failures, sentence packing at identical index size (5391 words) holds splits at 0% and wins hit@5 0.850 vs 0.500 with a smaller context bill (333.7 vs 388.2 words), overlap-20 buys back 15/17 splits for +30.4% index but newly splits 1 answer plain fixed-80 kept whole (stride 60 moves every boundary, overlap does not just add windows), and a split answer's best chunk still holds 71.1% of it on average |
@@ -189,6 +189,69 @@ claims, medium = robustness or consistency, low = performance wrong in kind.
 Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
+
+- [fixed 2026-10-15] 13 — the wall clock section published one run's pair as a
+  near-tie, and both readmes stated the tie as the result. the section read
+  "one run on this machine printed hnsw ef=32 at 0.339 ms/query vs 0.328 for
+  the exact scan; those two numbers move a few percent run to run and even
+  swap order between runs" and closed "at n=3000 they finish near a tie"; the
+  root index row carried the same takeaway as "wall clock at n=3000 is a
+  near-tie with numpy's vectorized full scan". three things were wrong. the
+  pair is not reproducible: six runs of `python3 main.py` on this machine put
+  hnsw ef=32 at 0.443 / 0.637 / 0.486 / 0.828 / 0.970 / 0.494 and the exact
+  scan at 0.481 / 0.441 / 0.391 / 0.545 / 0.397 / 0.393, so the published
+  0.339 sits 30% to 119% below what the hnsw side actually prints. "a few
+  percent run to run" understates the spread by about 30x — the hnsw figure
+  alone moves 2.19x between runs. and the direction is a loss, not a tie:
+  hnsw was slower in 5 of those 6 runs, and in an interleaved measurement
+  that controls for drift and warms the exact index out of the timer — 15
+  repeats, medians, alternating sides — slower in 15 of 15 at a median 1.33x,
+  with an earlier 8-repeat cold probe slower in 8 of 8. 28 of 29 observations
+  put hnsw behind the one-pass numpy scan, and the one that did not is
+  main.py's own run 1, which is the arm that charges the exact side its lazy
+  `np.vstack` inside the timer. what survives untouched is the claim the
+  section exists to make: the distance count is the portable number and 15x
+  is a distance ratio, not a speedup. this was the only thing in the project
+  that today's entry point contradicts — of the 138 numeric tokens in the live
+  readme, 136 appear in the run output character for character and the two
+  that did not were 0.339 and 0.328. fix is prose only, no code changed and no
+  measured number moved: the section now publishes no figure as a result,
+  gives the six-run ranges as "observations on one machine, not a bound" in
+  05's shape, and names the direction; the root row says the same.
+  `tests/test_wall_clock_claim.py`, 7 tests: three hold the retired pair, the
+  "a few percent" characterization and both readmes' tie framing gone, two
+  hold the corrected direction in the project readme and the root index row,
+  and two guard the fix against over-deleting by requiring the portable-number
+  claim and the interpreter-overhead mechanism to still be said. 5 fail on the
+  old prose and the revert splits cleanly in a fresh clone — reverting 13's
+  readme alone fails 4, reverting the root readme alone fails 2, restored is 63
+  green. 56 tests → 63. the COMPLETED ledger row for 13 carried the same
+  near-tie takeaway and is corrected in place. found and fixed 2026-10-15
+
+- [medium] 13 — the corrected wall-clock claim rests on a measurement no
+  committed code reproduces. main.py's section still takes one observation per
+  side, in a fixed order, with the exact index built fresh so its lazy
+  `np.vstack` of all 3000 rows lands inside the timer — the 2026-08-29 low
+  below, which is still open and whose premise this fix narrowed: it argued
+  from the published 0.339/0.328 gap, and that gap is retired now, so the low
+  applies only to the live printed figure. the readme's "slower in every one
+  of 15 interleaved repeats ... around 1.3x" came from a scratch probe that
+  alternates sides and warms the exact index, and nothing in the repo runs it.
+  the direction holds under main.py's own unfair arm too (5 of 6), which is
+  why the claim is safe as written, but an interleaved median belongs in
+  main.py if the project is going to publish a direction at all. found
+  2026-10-15
+
+- [medium] 13 — the three published tables are bound by no test. the ef sweep,
+  the M sweep and the ablation table are typed prose: the only readme-bound
+  figures in the project are the miss-attribution block, which
+  `test_readme_prints_the_attribution_block` holds character for character,
+  and the handful of substrings the 2026-10-08 fix pinned. checked every one
+  of the three tables against `python3 main.py` this run and all are right
+  today — 0.979/162/18.5 through 1.000/1221/2.5, the four M rows, the four
+  ablation rows — so this is not a wrong claim. it is the mechanism that
+  produced the one that just got fixed: the wall-clock pair was unbound prose
+  and it drifted. same shape as the 11 ledger-row mediums. found 2026-10-15
 
 - [fixed 2026-10-15] 12 — the tradeoffs bullet explained the antonym_flip
   row's 0.50 with the overlap channel's reason and published it for both
@@ -6774,7 +6837,7 @@ question is not reopened.
 | 16-llm-as-judge | 2026-10-08 |
 | 15-embedding-quantization | 2026-10-08 |
 | 14-context-window | 2026-10-08 |
-| 13-ann-hnsw | 2026-10-08 |
+| 13-ann-hnsw | 2026-10-15 |
 | 12-groundedness-scoring | 2026-10-15 |
 | 11-prompt-caching | 2026-10-14 |
 | 10-chunking-strategies | 2026-10-13 |
@@ -6785,6 +6848,59 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-12 |
 | 04-bpe-tokenizer | 2026-10-12 |
 | 02-retrieval-eval | 2026-10-12 |
+
+13 was last reviewed on 2026-10-08 and the catch this time is the one number
+the project could not reproduce. all 56 committed tests passed before the fix
+and 63 after, and the run is deterministic where it claims to be: four runs of
+`python3 main.py` plus a fifth from a fresh clone are byte-identical on every
+line except the wall-clock columns, which the readme already names
+run-dependent — every recall, every dists/query, every vs-exact ratio, the
+build total, the level histogram, the degree line and the whole attribution
+block identical. the mechanical cross-check found exactly two published figures
+the entry point contradicts: of 138 numeric tokens in the live readme, 136
+appear in today's output character for character, and the two that do not are
+the wall-clock pair 0.339 and 0.328. the other nine non-matching tokens are
+five values — 02 and float64's 64, which are a project name and a type, and
+0.188, 0.015, 97.9, 3930, 7.4 and 0.001, which are prose arithmetic over
+printed operands, with 3930 pinned by its own test. so the fix wrote itself,
+and it went further than a stale number: measured properly the published pair
+is not just unreproducible, it points the wrong way. hnsw at ef=32 lost to the
+one-pass numpy scan in 28 of 29 observations across three setups, median 1.33x
+on 15 interleaved warm repeats, and "near a tie" was the takeaway in the root
+index row too.
+
+the rest of the project held up, and the algorithm is the honest part of it.
+checked `ann/hnsw.py` term by term against Malkov & Yashunin rather than
+trusted: the level draw is floor(-ln(u) x 1/ln M) with u pulled off 0 so the
+log stays finite, the descent runs ef=1 per layer from the top entry point
+down to the insertion level, the insertion loop searches at efConstruction and
+carries the whole result set down as the next layer's entry points, the
+heuristic is algorithm 4 including the keepPrunedConnections fill from the
+discarded pile, layer 0 caps at 2M while every insertion still selects M, and
+`_shrink` re-selects through the same rule rather than a second one. the beam's
+early break is the paper's, and it is guarded on a full result set so a
+component smaller than ef still gets walked out. distance accounting is
+complete — `_search_layer`, `_select_neighbors` and `_shrink` are the only
+three places a distance is computed and all three go through `_dists`. the
+imported metric is right at the seam: 02's `recall_at_k` slices k, not k+1,
+and divides by the relevant-set size, so ann recall@10 against the exact top 10
+is the metric it claims to be. no leakage anywhere — the index is built from
+`data.vectors` only, queries are a separate draw, and M=16 is published as the
+usual production default rather than as the sweep's winner, so nothing is tuned
+on the set it is reported on. cross-project consistency came back clean on the
+thing most likely to have drifted: 21 does not carry a second hnsw,
+`MutableHnswIndex` subclasses this one and every search runs 13's code path.
+the 2026-10-08 nesting fix re-derived exactly — 61 and 88 disjoint, both inside
+1855, 1855 inside 1926, summing to 3930 on 2000 nodes — and the readme's "ten
+queries start inside a 61 or 88 node pocket" is 3 + 7 = 10 and already
+test-pinned. the known mediums all reproduce as written: the layer-0 beam's
+tie-break still runs opposite to `ExactIndex`'s and to its own docstring, the
+duplicate-corpus crowding still returns short with no signal, and the empty
+index still dies in `max([])`. two new mediums above them, both about the
+measurement record rather than the algorithm: the interleaved median the
+corrected wall-clock claim rests on lives in a scratch probe and not in
+main.py, and the three published tables are held by no test at all — which is
+the mechanism that let the wall-clock pair drift in the first place.
 
 10 was last reviewed on 2026-10-06 and the catch this time is the fix that
 review shipped. all 83 committed tests passed before and 93 after, and the run
