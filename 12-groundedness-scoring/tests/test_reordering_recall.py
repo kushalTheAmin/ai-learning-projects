@@ -92,8 +92,10 @@ class TestTheSubclassIsBagIdentical:
     def test_the_other_two_antonym_flips_each_add_an_unseen_word(
         self, contexts, bundles
     ):
-        """c02-5 and c07-5 are catchable for one reason: a word the
-        context never uses. That is the whole 0.50."""
+        """c02-5 and c07-5 are catchable on the overlap channel for one
+        reason: a word the context never uses. The cosine channel buys
+        the same 0.50 off the token they drop instead — see
+        test_unseen_word_channel.py."""
         seen = {}
         for context in contexts:
             for claim in context.claims:

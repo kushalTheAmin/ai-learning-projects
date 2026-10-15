@@ -99,7 +99,12 @@ reading it:
   places (0.640 / 0.914 / 0.720 / 0.194) while trusting different claims —
   each trusts the 7 verbatim copies plus 3 hallucinations that score a perfect
   1.0, the two bag-identical reorderings both ways, and then overlap keeps
-  c07-4 while cosine keeps c01-5
+  c07-4 while cosine keeps c01-5. c01-5 is not bag-identical — it adds "not" —
+  it scores 1.0 because the cosine cannot see an added word at all: `search`
+  builds the claim vector out of the index vocabulary, and a term the context
+  never uses has no idf, so it is dropped before the vector is normalized. a
+  claim can bolt an unsupported word onto a quoted sentence and keep its
+  perfect score
 - the numeric gate is the opposite temperament: precision 1.000 at FPR 0.000.
   but it is `min(cosine, numeric)`, so it flags through two channels and only
   6 of its 8 flags are numeric — the other two are c07-6 and c09-5,
@@ -127,7 +132,10 @@ reading it:
   to a useful detector is exactly the part that needs meaning, not surface:
   entity swaps (0/7 at the tuned threshold), bag-identical reorderings (0/2 at
   every threshold — the antonym_flip row's 0.50 is the other two, c02-5 and
-  c07-5, which each introduce a word the context never uses), and paraphrase
+  c07-5, and only overlap catches them for the reason it looks like: each adds
+  a word the context never uses and precision pays for it. the cosine is blind
+  to that word, so on its side the 0.50 is bought by the token each one drops,
+  "least" in c02-5 and "only"/"after" in c07-5), and paraphrase
   vs fabrication (the gated methods flag only 2 of 6 fabrications at their
   threshold because a fabricated sentence shares topic words with the context)
 - the dataset is deliberately hard-mode for lexical methods: every swap and
@@ -151,9 +159,21 @@ opinion in typescript.
 
 ## fixes
 
+- 2026-10-15 — the tradeoffs bullet explained the antonym_flip row's 0.50 as
+  c02-5 and c07-5 "which each introduce a word the context never uses", and
+  that is the overlap channel's reason published for both lexical columns —
+  the cosine never sees an added word, `search` drops a term with no idf
+  before normalizing, so stripping "most" and "before" leaves both cosines
+  byte-identical. on that side the 0.50 is bought by the token each claim
+  drops. the same mechanism is why c01-5 scores a perfect 1.0 while adding
+  "not", which the 2026-10-07 AUC entry called bag-identical. both channels
+  are named now and both entries corrected. no measured number moved, the
+  code was already right
+
 - 2026-10-07 — the tradeoffs bullet published "0.50 recall at best" for the
   bag-identical reorderings, and that 0.50 is the antonym_flip row's — earned
-  by c02-5 and c07-5, which each add a word the context never uses. the two
+  by c02-5 and c07-5, on overlap by the word each one adds and on cosine by
+  the token each one drops (the 2026-10-15 entry splits it). the two
   the bullet names, c04-5 and c09-6, score exactly 1.0 under all four methods,
   tied with every verbatim quote, so theyre 0/2 at every threshold — which the
   reading one screen above already said. the bullet names the subclass's own
@@ -162,8 +182,10 @@ opinion in typescript.
 - 2026-10-07 — three of the four published AUCs were float noise. the tf-idf
   cosine lands a few 1e-16 either side of its true value, and `auc` counts a
   tie by exact equality, so of the 21 pairs that sit mathematically on 1.0 —
-  7 verbatim quotes against c01-5, c04-5, c09-6, all bag-identical to the
-  sentence they match — only 6 compared equal, the rest scored as wins or
+  7 verbatim quotes against c01-5, c04-5, c09-6, each carrying its matching
+  sentence's in-vocabulary token bag (c01-5 adds "not", which the index drops;
+  the 2026-10-15 entry has it) — only 6 compared equal, the rest scored as
+  wins or
   losses worth 1e-16 in whichever direction python happened to round. the
   cosine is rounded to 12 places now, 4 orders above the noise and 8 below the
   closest real gap, so the same run prints the same numbers on 3.11 and 3.13.
