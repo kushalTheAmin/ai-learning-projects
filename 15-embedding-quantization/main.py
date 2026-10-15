@@ -34,6 +34,13 @@ K = 10
 
 SCHEMES = ["float32", "int8-sym-vec", "int8-asym-dim", "int4-asym-dim"]
 
+# Clip fractions swept for the rogue-vector failure. 0.0 is the plain
+# min/max fit. The set has to straddle the peak: the fraction only works
+# once it clips more rows per tail than the corruption has rows, so a
+# single fraction reads as a property of the method when it is an
+# operating point tuned to a contamination rate nobody measures.
+CLIP_QUANTILES = [0.0, 0.001, 0.002, 0.005, 0.02]
+
 
 def reconstruct(scheme: str, vectors: np.ndarray) -> np.ndarray:
     """The float vectors a search over this scheme's codes is equivalent to."""
@@ -178,30 +185,70 @@ def rogue_dimension(base: Dataset, magnitude: float) -> None:
     print(f"(int8-sym-vec on the same data without the rogue dimension: {clean:.3f})\n")
 
 
-def rogue_vectors(base: Dataset, n_rogue: int, magnitude: float) -> None:
-    """Corrupt a few rows to huge values: min/max grids stretch to cover
-    them and everyone else loses resolution. A quantile fit clips them."""
+def inject_rogue_vectors(
+    base: Dataset, n_rogue: int, magnitude: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Corrupt n_rogue rows to U(-magnitude, magnitude). Returns the corrupted
+    collection and the ids of the rows that were corrupted."""
     rng = np.random.default_rng(SEED + 2)
     vectors = base.vectors.copy()
     rogue_ids = rng.choice(vectors.shape[0], size=n_rogue, replace=False)
     vectors[rogue_ids] = rng.uniform(-magnitude, magnitude, size=(n_rogue, vectors.shape[1]))
-    truth = flat_truth(vectors, base.queries)
+    return vectors, rogue_ids
 
-    grid_minmax = fit_grid(vectors, levels=256)
-    grid_clip = fit_grid(vectors, levels=256, clip_quantile=0.002)
+
+def clip_quantile_sweep(
+    vectors: np.ndarray,
+    queries: np.ndarray,
+    truth: list[list[tuple[int, float]]],
+    quantiles: list[float],
+) -> list[tuple[float, float, float]]:
+    """(clip fraction, mean per-dim step, recall@10) per fraction.
+
+    The grid is refitted on the same collection at every fraction, so the
+    best row is the best operating point on this data rather than a number
+    the method carries anywhere.
+    """
+    rows = []
+    for q in quantiles:
+        grid = fit_grid(vectors, levels=256, clip_quantile=q)
+        recon = grid_decode(grid, grid_encode(grid, vectors))
+        rows.append(
+            (q, float(np.mean(grid.step)), flat_recall(recon, queries, truth))
+        )
+    return rows
+
+
+def rogue_vectors(base: Dataset, n_rogue: int, magnitude: float) -> None:
+    """Corrupt a few rows to huge values: min/max grids stretch to cover them
+    and everyone else loses resolution. A quantile fit clips them back, at a
+    fraction that has to be bigger than the contamination rate — so the whole
+    sweep is printed, not just its peak."""
+    vectors, rogue_ids = inject_rogue_vectors(base, n_rogue, magnitude)
+    n = vectors.shape[0]
+    truth = flat_truth(vectors, base.queries)
+    bulk_step = float(
+        np.mean(fit_grid(np.delete(vectors, rogue_ids, axis=0), levels=256).step)
+    )
+    sweep = clip_quantile_sweep(vectors, base.queries, truth, CLIP_QUANTILES)
+    best = max(sweep, key=lambda row: row[2])
+
     print(f"-- failure: {n_rogue} rogue vectors in U(-{magnitude:.0f}, {magnitude:.0f}) --")
     print(
-        f"mean per-dim step: minmax fit {float(np.mean(grid_minmax.step)):.4f}, "
-        f"quantile(0.002) fit {float(np.mean(grid_clip.step)):.4f}"
+        f"{n_rogue} of {n} rows corrupted ({100.0 * n_rogue / n:.3f}%); the "
+        f"{n - n_rogue} clean rows need mean step {bulk_step:.4f}"
     )
-    rows = [
-        ("int8-asym-dim minmax", grid_decode(grid_minmax, grid_encode(grid_minmax, vectors))),
-        ("int8-asym-dim q0.002", grid_decode(grid_clip, grid_encode(grid_clip, vectors))),
-        ("int8-sym-vec", symmetric_decode(symmetric_encode(vectors))),
-    ]
-    for label, recon in rows:
-        recall = flat_recall(recon, base.queries, truth)
-        print(f"{label:<22} recall@10 {recall:.3f}")
+    print(f"{'clip':>7} {'rows/tail':>10} {'mean step':>10} {'recall@10':>10}")
+    for q, step, recall in sweep:
+        note = "min/max fit" if q == 0.0 else ""
+        if (q, step, recall) == best:
+            note = "<- best"
+        print(
+            f"{q:>7.4f} {q * n:>10.1f} {step:>10.4f} {recall:>10.3f}"
+            f"{'  ' + note if note else ''}"
+        )
+    sym = flat_recall(symmetric_decode(symmetric_encode(vectors)), base.queries, truth)
+    print(f"int8-sym-vec (no shared grid): recall@10 {sym:.3f}")
     print()
 
 

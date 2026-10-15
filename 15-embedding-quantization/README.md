@@ -54,7 +54,19 @@ they are duals: what each scheme shares is what breaks it.
 
 **a rogue dimension breaks per-vector symmetric.** append one near-constant dimension at ~40 to vectors whose informative dimensions span ~1.78. true distances barely move (a constant cancels in differences), but max|x| is now 40, the per-vector step becomes 0.315, and every informative dimension keeps ~6 of its 255 levels. recall falls 0.987 to 0.515. the per-dimension grid does not care (0.987): the rogue dimension gets its own tight range. this is the shape real transformer embeddings are known for, so per-vector symmetric on raw embeddings is a footgun.
 
-**rogue vectors break the per-dimension grid.** corrupt 5 rows of 3000 to uniform noise in [-40, 40] and the min/max fit stretches every dimension to cover them: mean step lands at 0.2051, 33x coarser than the 0.0062 the bulk of the data needs, and recall lands at 0.649. per-vector symmetric shrugs (0.987), only the rogue rows themselves quantize badly. the fix is to fit the grid on quantiles instead of min/max: fitting [0.002, 0.998] per dimension gives step 0.0062 and recall 0.983, at the price that outliers clip to the grid edge and reconstruct wrong. clipping 5 garbage rows is the right trade; clipping 5 important customers is not, and nothing in the math knows which one you have.
+**rogue vectors break the per-dimension grid.** corrupt 5 rows of 3000 to uniform noise in [-40, 40] and the min/max fit stretches every dimension to cover them: mean step lands at 0.2051, 29x coarser than the 0.0070 the 2995 clean rows need, and recall lands at 0.649. per-vector symmetric shrugs (0.987), only the rogue rows themselves quantize badly.
+
+fitting the grid on quantiles instead of min/max claws it back — but the clip fraction is an operating point, not a fix, so here is the whole sweep:
+
+| clip fraction | rows clipped per tail | mean step | recall@10 |
+|---|---|---|---|
+| 0.000 | 0.0 | 0.2051 | 0.649 |
+| 0.001 | 3.0 | 0.0224 | 0.935 |
+| 0.002 | 6.0 | 0.0062 | 0.983 |
+| 0.005 | 15.0 | 0.0056 | 0.961 |
+| 0.020 | 60.0 | 0.0048 | 0.889 |
+
+0.002 is the best row, and it is the best row because it clips 6 per tail while the corruption is 5 rows — a fraction sized to a contamination rate you dont get told in production. halve it and 3 per tail leaves rogues inside the fit, step goes back to 0.0224 and recall to 0.935. go the other way and the bulk starts clipping instead. note the best step 0.0062 is already below the 0.0070 the clean rows need, so even the good row is throwing some real data at the grid edge. so read 0.983 as the ceiling a correctly sized clip reaches on this corpus, not as what a quantile fit buys. clipping 5 garbage rows is the right trade; clipping 5 important customers is not, and nothing in the math knows which one you have.
 
 ## tradeoffs and where it breaks down
 
@@ -67,6 +79,14 @@ python because the vectors, the indexes, and the recall metric all live in the p
 
 ## fixes
 
+- 2026-10-15 — the rogue-vector recovery was published as one row, "a quantile
+  fit gives step 0.0062 and recall 0.983", which reads as what the method buys.
+  it is the peak of a sweep nothing here ran: 0.002 clips 6 rows per tail and
+  the corruption is 5 rows, so the fraction was sized to a contamination rate a
+  deployment never knows, and 0.001 falls to 0.935. now prints and publishes the
+  whole clip sweep with the peak marked, and the min/max stretch is quoted
+  against the 2995 clean rows' own step (0.0070) instead of the clipped grid's
+  0.0062 — so that multiple is 29x, not 33x. no measured number moved
 - 2026-10-08 — the open question pricing hnsw's ef knob against int8 read its
   endpoint off the last row of 13's sweep, so recall 1.000 came out at 6.5x the
   distance budget — ef 160 reaches the same 1.000 at 3.1x. now names ef 20 to
@@ -91,7 +111,7 @@ python because the vectors, the indexes, and the recall metric all live in the p
 ## open questions
 
 - int8 asym costs 1.5 recall points here, and 13 showed hnsw ef 20 to 160 buys 0.5 points (0.995 to 1.000) for 3.1x the distance budget (188 to 581 per query). per byte of RAM, which knob is cheaper at a fixed recall target on one shared sweep
-- the quantile clip fraction is a hyperparameter with a cliff on each side, too small keeps the rogue stretch and too large clips real data. an adaptive rule from the observed per-dim histogram is the production question
+- the clip sweep above shows the cliff but not the way out of it: every row refits on a corpus whose contamination rate is known here and isnt in production. an adaptive rule from the observed per-dim histogram, picking the fraction without being told how many rogues there are, is the production question
 - product quantization is the standard next step past scalar, subvector codebooks trained by k-means. its extra recall per bit on these exact datasets is unmeasured here
 - hnsw built on floats then searched on codes (or the reverse) would split the constant +0.015 gap into build damage vs search damage
 - real embeddings over 02's corpus would test the rogue-dimension story against an actual model instead of an authored constant
