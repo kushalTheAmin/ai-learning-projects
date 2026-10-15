@@ -190,6 +190,55 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-15] 14 — the sliding-window bullet published retention by lag
+  as a step function and the project's own run makes it a ramp. the bullet read
+  "at 800 tokens the window holds about 11 exchanges, so short and medium lag
+  probes are perfect and long lag drops to 23.8%. the policy has no memory past
+  its own edge, retention by lag is a step function", and the COMPLETED ledger
+  row said it harder still — "sliding window is a step function in lag (100%
+  inside the 800-token window, 23.8% past it)" — reading the long bucket's
+  average as the step's lower level. a step needs a fixed edge and this window
+  has none: the edge sits wherever the token cost of the turns in the window
+  puts it, so it moves call to call. measured over the 382 calls at budget 800
+  that evict anything, the deepest surviving lag takes all eight values from 8
+  to 15 (8:2, 9:19, 10:66, 11:100, 12:86, 13:61, 14:43, 15:5, mean 11.65), and
+  at budget 400 all six from 3 to 8 (mean 5.42). so per-lag retention is graded
+  rather than two-valued: 167 of 167 probes at lag 10 or shorter, 10 of 14 at
+  lags 11-12, 2 of 59 past that, with lags 11, 12 and 14 landing strictly
+  between 0% and 100%. the published long column's 23.8% is 19 of 80 averaged
+  across that ramp — 7 of 7 at lags 9-10 and then the slide — not a level the
+  curve sits at anywhere. what survives untouched is the claim the bullet exists
+  to make: the budget is a cliff and the policy has no memory past its own edge.
+  no measured number moved either — both entry points are byte-identical before
+  and after. fix is prose only in two places, the project readme bullet and the
+  ledger row; the root index row never carried the claim. 7 new tests in
+  `tests/experiment.test.ts`: five recompute the edge distribution and the
+  per-lag counts from the library, since main.ts prints only the bucket averages
+  the step reading was inferred from, one binds the corrected bullet and one the
+  ledger row, and a guard requires the cliff and the 23.8% figure to still be
+  said so the shape cannot be fixed by deleting the point. 2 fail on the old
+  prose and the revert splits cleanly in a fresh clone — reverting the readme
+  alone fails 1, the ledger alone 1, both 2, restored is 122 green. 115 tests
+  → 122. found and fixed 2026-10-15
+
+- [medium] 14 — the lag mix inside each bucket is uneven, so a bucket average is
+  weighted by the draw as well as by the policy. the published set spreads the
+  long bucket's 80 probes as 9:3, 10:4, 11:7, 12:7, 13:2, 14:8, 15:14, 16:12,
+  17:5, 18:6, 19:5, 20:7 against 6.67 expected per lag (chi2 19.9 on df 11), and
+  medium as 3:13, 4:9, 5:10, 6:17, 7:8, 8:23 against 13.33 (chi2 12.4 on df 5).
+  most of that is an 80-draw sample, but a real tilt sits underneath it: over
+  16000 draws per bucket the long bucket still declines from 1451 at lag 9 to
+  1306 at lag 20 (chi2 32.1 on df 11), because `scheduleFact` draws
+  `intro = randInt(rng, 0, exchanges - 1 - lag)` from a range that shrinks as lag
+  grows, so large lags collide with `usedIntro`/`usedProbe` more often and are
+  rejected more often. short and medium come back uniform at that scale (chi2 4.3
+  on df 1, 5.2 on df 5). no published number is wrong — every rate is what the
+  set produces — but it means the long column mixes retention that is 100% at
+  lags 9-10 with 0% past lag 15 in whatever proportion the generator happened to
+  draw, which the step-function fix above makes legible for the first time.
+  drawing lag and intro jointly from the feasible pairs, or publishing the
+  per-lag curve beside the bucket, would remove the dependence. found 2026-10-15
+
 - [fixed 2026-10-15] 13 — the wall clock section published one run's pair as a
   near-tie, and both readmes stated the tie as the result. the section read
   "one run on this machine printed hnsw ef=32 at 0.339 ms/query vs 0.328 for
@@ -6836,7 +6885,7 @@ question is not reopened.
 | 17-confidence-calibration | 2026-10-09 |
 | 16-llm-as-judge | 2026-10-08 |
 | 15-embedding-quantization | 2026-10-08 |
-| 14-context-window | 2026-10-08 |
+| 14-context-window | 2026-10-15 |
 | 13-ann-hnsw | 2026-10-15 |
 | 12-groundedness-scoring | 2026-10-15 |
 | 11-prompt-caching | 2026-10-14 |
@@ -6848,6 +6897,52 @@ question is not reopened.
 | 03-hybrid-search | 2026-10-12 |
 | 04-bpe-tokenizer | 2026-10-12 |
 | 02-retrieval-eval | 2026-10-12 |
+
+14 was last reviewed on 2026-10-08 and the catch this time is the shape of a
+curve rather than a number. every published figure reproduces: `npm start` and
+`npm run start:irreversible` are byte-identical across three runs each and
+again from the gate clone, all 115 committed tests passed before the fix and
+122 after, and of 213 numeric tokens in the pre-fix readme 199 appear in the
+run output character for character. the 14 that do not are 08 and 1958, which
+are a project name and a year, the dates, 120 probes a side (20 conversations
+x 12 facts, half each class), and nine derived statistics every one of which a
+test already pinned or this run verified independently — z=2.69 and the exact
+p=0.0143 off the 120-of-120 ceiling, the 11.7-point widest gap at z=1.84 (11.6
+by the rounded columns, 14/120 unrounded, so the readme reads off the raw
+rates), 0.0455 and the 1.05 rows the threshold hands out free, 1.81x for 1039.4
+to 1876.7, and the 73.9 / 34.3 buried-vs-standalone intro turn means, which
+recompute exactly. so the stale-number sweep came back empty and the defect was
+in a characterization: "retention by lag is a step function" needs an edge that
+sits at one lag, and this window's edge is set by the token cost of whatever
+turns are in it, so it moves — all eight values from 8 to 15 exchanges back
+across the 382 evicting calls at budget 800, all six from 3 to 8 at budget 400.
+the curve is a ramp and three of its lags read strictly between 0% and 100%.
+
+the rest of the project held up well, and the code held up better than the
+prose. checked `salience.ts`'s luhn term by term against the 1958 algorithm
+rather than trusted: significance is frequency over the pool with stopwords
+dropped, the cluster breaks when more than maxGap insignificant words separate
+two significant ones (`i - runEnd > maxGap + 1`, which is exactly that), the
+span counts every word in the bracket including stopwords, and the score is
+count^2/span with the sentence taking its best run. rarity is the mean of
+ln(N/sf) over unique content words as documented. the budget invariant holds
+everywhere it is claimed: across all four budgets x nine policy configurations
+x 20 conversations, no assembled context exceeds its budget with `overBudget`
+false, sliding-window's kept turns are always a contiguous suffix, and every
+summary sentence is always drawn from the evicted pool — 0 violations of each.
+no leakage: the scorer only ever sees evicted history turns, never the current
+probe, and probe questions carry the key and never the value, which
+generation-time validation pins at exactly one occurrence per value. the
+head-and-tail mechanism claim is exact rather than approximate — all 14 of its
+long-lag hits at budget 400 are facts introduced in the pinned head, and all 14
+long-lag facts introduced there hit, so "facts introduced in the pinned head
+stay forever" is the whole of that 17.5%. edge cases behave: empty history, a
+single turn, zero-length text, unicode, duplicate turns, budget below base and
+budget exactly base all return sane contexts, and share 0 degenerates to
+sliding-window while share 1 keeps no raw turns. the known mediums and lows all
+still reproduce as written, the 6-exchange lag floor included. one new medium
+above: the lag mix inside each bucket is uneven and mildly biased by the
+generator, which the ramp fix makes legible for the first time.
 
 13 was last reviewed on 2026-10-08 and the catch this time is the one number
 the project could not reproduce. all 56 committed tests passed before the fix
