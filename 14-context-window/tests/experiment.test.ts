@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { estimateTokens } from "../../08-agent-tool-loop/src/messages.js";
 import { rate, runCell, type CellResult } from "../src/experiment.js";
-import { renderTurn, type PolicyConfig } from "../src/policies.js";
+import { assembleContext, renderTurn, type PolicyConfig, type Turn } from "../src/policies.js";
 import { generateConversations } from "../src/workload.js";
 
 // Small fixed set shared by every test in this file: 5 conversations,
@@ -345,5 +345,142 @@ describe("full-history call growth from exchange 15 to 30", () => {
     expect(row, "root README has no index row for 14").toBeDefined();
     expect(row).toContain("nearly doubles");
     expect(row).not.toMatch(/tripl/);
+  });
+});
+
+// The sliding-window bullet closed with "retention by lag is a step function",
+// and a step needs a fixed edge. The window's edge is not fixed: it sits
+// wherever the token cost of the turns that happen to be in the window puts
+// it, so it moves call to call and retention by lag comes out a ramp. main.ts
+// prints only the bucket averages the step reading was inferred from, so the
+// edge distribution and the per-lag counts are recomputed here.
+describe("the sliding window's edge moves, so retention by lag ramps", () => {
+  /** For every call that evicts something, the deepest lag whose intro turn still survives. */
+  function edgeLags(budget: number): number[] {
+    const out: number[] = [];
+    for (const c of PUBLISHED) {
+      const history: Turn[] = [];
+      for (let e = 0; e < c.exchanges; e++) {
+        const ctx = assembleContext({ name: "sliding-window" }, c.system, history, c.turns[2 * e]!, budget);
+        if (ctx.keptTurns.length > 0 && ctx.keptTurns.length < history.length) {
+          // A fact introduced at exchange x lives in history index 2x+1, so the
+          // oldest kept index fixes the furthest-back intro this call can hold.
+          const oldest = history.length - ctx.keptTurns.length;
+          out.push(e - Math.ceil((oldest - 1) / 2));
+        }
+        history.push(c.turns[2 * e]!, c.turns[2 * e + 1]!);
+      }
+    }
+    return out;
+  }
+
+  /** Retention by exact probe lag, the curve the bullet characterizes. */
+  function retentionByLag(budget: number): Map<number, { hits: number; total: number }> {
+    const m = new Map<number, { hits: number; total: number }>();
+    for (const c of PUBLISHED) {
+      const probeAt = new Map(c.facts.map((f) => [f.probeExchange, f] as const));
+      const history: Turn[] = [];
+      for (let e = 0; e < c.exchanges; e++) {
+        const ctx = assembleContext({ name: "sliding-window" }, c.system, history, c.turns[2 * e]!, budget);
+        const p = probeAt.get(e);
+        if (p !== undefined) {
+          const r = m.get(p.lag) ?? { hits: 0, total: 0 };
+          r.total++;
+          if (ctx.parts.join("\n").includes(p.value)) r.hits++;
+          m.set(p.lag, r);
+        }
+        history.push(c.turns[2 * e]!, c.turns[2 * e + 1]!);
+      }
+    }
+    return m;
+  }
+
+  function segment(m: Map<number, { hits: number; total: number }>, lo: number, hi: number): { hits: number; total: number } {
+    let hits = 0;
+    let total = 0;
+    for (const [lag, r] of m) {
+      if (lag >= lo && lag <= hi) {
+        hits += r.hits;
+        total += r.total;
+      }
+    }
+    return { hits, total };
+  }
+
+  const EDGES_800 = edgeLags(800);
+  const LAGS_800 = retentionByLag(800);
+
+  test("the edge at budget 800 is a band of lags, not one", () => {
+    const distinct = [...new Set(EDGES_800)].sort((a, b) => a - b);
+    expect(distinct).toEqual([8, 9, 10, 11, 12, 13, 14, 15]);
+    expect(EDGES_800).toHaveLength(382);
+    const mean = EDGES_800.reduce((a, b) => a + b, 0) / EDGES_800.length;
+    expect(mean).toBeCloseTo(11.65, 2);
+  });
+
+  test("the edge moves at budget 400 too, so it is the mechanism and not one budget's luck", () => {
+    const distinct = [...new Set(edgeLags(400))].sort((a, b) => a - b);
+    expect(distinct).toEqual([3, 4, 5, 6, 7, 8]);
+  });
+
+  test("per-lag retention reads values a step function cannot produce", () => {
+    // A step is 100% then 0%. These lags are strictly between the two.
+    const graded = [...LAGS_800.entries()].filter(([, r]) => r.hits > 0 && r.hits < r.total).sort((a, b) => a[0] - b[0]);
+    expect(graded.map(([lag]) => lag)).toEqual([11, 12, 14]);
+    expect(LAGS_800.get(11)).toEqual({ hits: 5, total: 7 });
+    expect(LAGS_800.get(12)).toEqual({ hits: 5, total: 7 });
+  });
+
+  test("the published long column is an average over the ramp, not a post-edge level", () => {
+    const long = segment(LAGS_800, 9, 20);
+    expect(long).toEqual({ hits: 19, total: 80 });
+    // 23.8% is this average; inside it the curve runs from 7 of 7 down to 2 of 59.
+    expect(segment(LAGS_800, 9, 10)).toEqual({ hits: 7, total: 7 });
+    expect(segment(LAGS_800, 1, 10)).toEqual({ hits: 167, total: 167 });
+    expect(segment(LAGS_800, 11, 12)).toEqual({ hits: 10, total: 14 });
+    expect(segment(LAGS_800, 13, 20)).toEqual({ hits: 2, total: 59 });
+  });
+
+  test("the README bullet publishes the band instead of calling it a step function", () => {
+    const hist = new Map<number, number>();
+    for (const d of EDGES_800) hist.set(d, (hist.get(d) ?? 0) + 1);
+    const histText = [...hist.keys()].sort((a, b) => a - b).map((k) => `${k}:${hist.get(k)}`).join(", ");
+    const mean = (EDGES_800.reduce((a, b) => a + b, 0) / EDGES_800.length).toFixed(2);
+    const lo = Math.min(...EDGES_800);
+    const hi = Math.max(...EDGES_800);
+    const edges400 = edgeLags(400);
+
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+    const bullet = readme.split("\n").find((l) => l.includes("a budget is a cliff for sliding windows"));
+    expect(bullet, "README has no sliding-window cliff bullet").toBeDefined();
+    expect(bullet).not.toMatch(/step function/);
+    expect(bullet).toContain(`${EDGES_800.length} calls`);
+    expect(bullet).toContain(`${lo} to ${hi} exchanges back`);
+    expect(bullet).toContain(`mean ${mean}`);
+    expect(bullet).toContain(`(${histText})`);
+    expect(bullet).toContain("167 of 167 probes at lag 10 or shorter");
+    expect(bullet).toContain("10 of 14 at lags 11-12");
+    expect(bullet).toContain("2 of 59 past that");
+    expect(bullet).toContain("19 of 80");
+    expect(bullet).toContain("7 of 7 at lags 9-10");
+    expect(bullet).toContain(`${Math.min(...edges400)} to ${Math.max(...edges400)}`);
+  });
+
+  test("the corrected bullet still makes the claim the section exists to make", () => {
+    // Guard against fixing the shape by deleting the point: the cliff, the
+    // published long-lag figure and the no-memory mechanism all have to stay.
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+    const bullet = readme.split("\n").find((l) => l.includes("a budget is a cliff for sliding windows"))!;
+    expect(bullet).toContain("23.8%");
+    expect(bullet).toContain("no memory past its own edge");
+  });
+
+  test("the ledger's completed row for 14 ramps in lag instead of stepping", () => {
+    const ledger = readFileSync(new URL("../../progress.md", import.meta.url), "utf-8");
+    const row = ledger.split("\n").find((l) => l.startsWith("| 14-context-window |") && l.includes("| typescript |"));
+    expect(row, "progress.md has no COMPLETED row for 14").toBeDefined();
+    expect(row).not.toMatch(/step function in lag/);
+    expect(row).toContain(`${Math.min(...EDGES_800)} to ${Math.max(...EDGES_800)} exchanges back`);
+    expect(row).toContain("167 of 167");
   });
 });

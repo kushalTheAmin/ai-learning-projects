@@ -71,7 +71,7 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
 
 ## what the numbers mean
 
-- **a budget is a cliff for sliding windows.** at 800 tokens the window holds about 11 exchanges, so short and medium lag probes are perfect and long lag drops to 23.8%. the policy has no memory past its own edge, retention by lag is a step function
+- **a budget is a cliff for sliding windows, and the edge of the cliff moves.** at 800 tokens the window holds about 11 exchanges, so short and medium lag probes are perfect and long lag drops to 23.8%. the policy has no memory past its own edge — but that edge is not one lag. it sits wherever the token cost of the turns in the window puts it, and across the 382 calls that evict anything it lands 8 to 15 exchanges back, mean 11.65 (8:2, 9:19, 10:66, 11:100, 12:86, 13:61, 14:43, 15:5). so retention by lag ramps over that band instead of stepping: 167 of 167 probes at lag 10 or shorter, 10 of 14 at lags 11-12, 2 of 59 past that. the long column's 23.8% is 19 of 80 averaged across the ramp — 7 of 7 at lags 9-10 and then the slide — not a level the curve sits at. at 400 the same band runs 3 to 8
 - **head-and-tail buys early facts with medium ones.** at 400 it holds 17.5% of long-lag probes where sliding holds 0.0%, because facts introduced in the pinned head stay forever. the price shows at the same budget: medium drops from 45.0% to 20.0%, the pinned head is budget the tail doesnt get
 - **summarizing with the wrong salience is worse than not summarizing.** luhn-25% at 800 lands at 71.3% overall against sliding-window's 74.6%, and its long-lag column reads 15.0% against 23.8%. the summary block spent budget on chatter, and the tail it displaced was holding real facts. more summary makes it worse: luhn at 50% share falls to 61.7%
 - **the failure is the salience definition, not summarization.** luhn keeps what the conversation talks about most, but a decision stated once is by definition the rarest thing in the transcript. flip the scorer to rarity and the same policy at the same budget goes to 85.8% overall and 57.5% long-lag, at the same cost. the share sweep slopes in opposite directions for the two scorers: more luhn summary loses facts, more rarity summary keeps them (92.5% long-lag at 50% share)
@@ -86,6 +86,12 @@ rarity-50%           800     97.1%   100.0%    98.8%    92.5%       100.0%    94
 - the probe never restates the value. real conversations re-mention decisions, which refreshes them into any recency-based window and would flatter sliding-window relative to these numbers
 
 ## fixes
+
+- 2026-10-15 — the sliding-window bullet closed "retention by lag is a step
+  function", and a step needs a fixed edge. the window's edge moves with the
+  token cost of whatever turns are in it — 8 to 15 exchanges back across the 382
+  evicting calls at budget 800. now published as a ramp over that band with the
+  per-lag counts, here and in the repo ledger. no measured number moved
 
 - 2026-10-08 — the split bullet said no gap anywhere in the sweep clears two
   standard errors, and the share sweep three blocks above it has one —
