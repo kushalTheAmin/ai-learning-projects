@@ -134,12 +134,17 @@ to be wider for the same recall.
 
 ## wall clock, and where the distance count lies
 
-one run on this machine printed hnsw ef=32 at 0.339 ms/query vs 0.328 for the
-exact scan; those two numbers move a few percent run to run and even swap
-order between runs, nothing like the 15x the distance counts promise. the
-exact scan is one vectorized numpy pass, hnsw pays python-level overhead per
-visited node. at n=3000 they finish near a tie. the distance count is the
-portable number: it
+no figure for this is published here — the clock moves too much to be a
+result. six runs of this committed code put hnsw ef=32 between 0.44 and
+0.97 ms/query and the exact scan between 0.39 and 0.55, and those are
+observations on one machine, not a bound. what survives the spread is the
+direction, and it is not a tie: hnsw was slower in 5 of those 6 runs, and
+slower in every one of 15 interleaved repeats with the exact index already
+warm — around 1.3x, itself an observation and not a bound. the exact scan is
+one vectorized numpy pass, hnsw pays python-level overhead per visited node,
+and at n=3000 the overhead eats the whole algorithmic win. nothing like the
+15x the distance counts promise — in this runtime the sign is the other way.
+the distance count is the portable number: it
 says what an implementation with a compiled per-candidate kernel (which is
 what hnswlib and faiss are) gets to keep. the honest claim is 15x fewer
 distance computations, not 15x faster in this runtime.
@@ -162,6 +167,14 @@ distance computations, not 15x faster in this runtime.
 
 ## fixes
 
+- 2026-10-15 — the wall clock section published one run's pair, 0.339 vs 0.328
+  ms/query, called its variance "a few percent run to run" and read the result
+  as a tie — the root index row said "near-tie" too. six runs put hnsw ef=32
+  between 0.44 and 0.97 and the exact scan between 0.39 and 0.55, so the pair
+  is not reproducible and the spread is ~2x, and the direction is a loss, not a
+  tie: hnsw slower in 5 of 6 runs and in 15 of 15 interleaved repeats, around
+  1.3x. no figure is published for it now. no measured number moved, no code
+  changed
 - 2026-10-08 — the ablation printed the four layer-0 reach sizes as
   "components of 61 / 88 / 1855 / 1926" and the readme read them as pieces of
   the graph, one bigger than the entry point's own. they nest: 61 and 88 are
