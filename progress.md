@@ -190,6 +190,62 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-15] 15 — the rogue-vector recovery was published as a single
+  tuned clip fraction, and the min/max stretch was priced against that clipped
+  grid's own step. the readme read "the fix is to fit the grid on quantiles
+  instead of min/max: fitting [0.002, 0.998] per dimension gives step 0.0062
+  and recall 0.983", with the ledger row saying it harder still — "mean step
+  0.2051 vs 0.0062 needed ... quantile-0.002 fit recovers 0.983" — both of
+  which read as what the method buys. 0.983 is the peak of a sweep nothing in
+  the project ran: clip 0.002 clips 6 rows per tail while the corruption is 5
+  rows, so the fraction was sized to a contamination rate a deployment never
+  gets told, and the sweep falls off hard on the low side (0.0015 → 0.975,
+  0.001 → 0.935, 0.0005 → 0.837) and drifts down on the high side (0.005 →
+  0.961, 0.02 → 0.889). the second half: "the 0.0062 the bulk of the data
+  needs" is the clipped grid's step, not the uncorrupted rows' own — the 2995
+  clean rows need 0.0070 by their own min/max, so the published 33x stretch is
+  29x against the honest reference, and the winning fraction's 0.0062 is
+  already below what the bulk needs, i.e. even the good row clips real data.
+  main.py now sweeps the clip fraction (CLIP_QUANTILES = 0.0, 0.001, 0.002,
+  0.005, 0.02) and prints every row with the peak marked plus the clean rows'
+  reference step; the readme publishes that sweep as a table and reads 0.983 as
+  the ceiling a correctly sized clip reaches on this corpus. five new tests:
+  three on the sweep's shape (clipping only narrows the grid, the peak sits
+  strictly inside the swept range so both ends of the knob are wrong, the
+  min/max stretch is measured against the clean rows) and two binding the
+  readme's table and its stretch sentence to a recomputation of the sweep at
+  the published 3000x32 configuration — nothing else here would have noticed
+  that paragraph drifting, since its numbers come from main.py at the published
+  sizes rather than from the small fixture the other integration tests use. the
+  ledger row's before-value was also the wrong scheme's: it wrote the grid
+  going 0.987→0.649 where 0.987 is clean per-vector symmetric and the clean
+  per-dimension grid is 0.985. no measured number moved
+- [cleared 2026-10-15] 15 — the rogue-dimension drop to 0.515 is not an
+  artifact of the appended dimension's own 0.02 noise reshaping the truth the
+  recall is measured against. an exactly-constant rogue column at 40.0 gives
+  0.513 on the same corpus, and the augmented top-10 agrees with the base
+  top-10 on 99.7% of neighbors (the rogue dimension's mean squared
+  contribution to a pair distance is 0.0008 against a median 10th-neighbor
+  distance of 1.0308), so "a constant cancels in differences" holds and the
+  drop is the per-vector scale collapse the readme says it is
+- [low] 15 — the root index row hardens the project readme's "roughly
+  constant" hnsw quantization gap into "holds constant across the whole ef
+  sweep". the measured band is +0.013 to +0.017 over ef 10-160 on 150 queries
+  and no uncertainty is published for it, so neither wording is backed by a
+  spread. the conclusion the sentence exists for ("no search budget buys it
+  back") rests on the int8 curve converging to its own 0.985 flat ceiling,
+  which is the stronger argument and is published
+- [low] 15 — `grid_decode` does not bound codes by `grid.levels`, so codes
+  encoded on a 256-level grid and decoded against a 16-level one reconstruct
+  far past hi with no error. not reachable from main.py, where every
+  encode/decode pair shares one grid object, but it is the one validation
+  gap in a module that otherwise checks every shape and range
+- [low] 15 — `flat_truth` rebuilds a flat index over the same clustered
+  dataset six times in one `main()` run (scheme_table, hnsw_sweep,
+  rerank_sweep, rogue_dimension twice, rogue_vectors), each rebuild being
+  3000 `ExactIndex.add` calls plus 150 scans. perf in kind rather than
+  micro: the truth for a given corpus is computed once and could be passed
+  down, and this is most of the ~24s runtime
 - [fixed 2026-10-15] 14 — the sliding-window bullet published retention by lag
   as a step function and the project's own run makes it a ramp. the bullet read
   "at 800 tokens the window holds about 11 exchanges, so short and medium lag
@@ -6884,7 +6940,7 @@ question is not reopened.
 | 18-semantic-caching | 2026-10-09 |
 | 17-confidence-calibration | 2026-10-09 |
 | 16-llm-as-judge | 2026-10-08 |
-| 15-embedding-quantization | 2026-10-08 |
+| 15-embedding-quantization | 2026-10-15 |
 | 14-context-window | 2026-10-15 |
 | 13-ann-hnsw | 2026-10-15 |
 | 12-groundedness-scoring | 2026-10-15 |
