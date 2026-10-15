@@ -190,6 +190,65 @@ Fixed items stay listed with their fix date so the history reads in one place;
 cleared items are the ones a review checked and found correct, kept so the same
 question is not reopened.
 
+- [fixed 2026-10-15] 12 — the tradeoffs bullet explained the antonym_flip
+  row's 0.50 with the overlap channel's reason and published it for both
+  lexical columns. the bullet read "the antonym_flip row's 0.50 is the other
+  two, c02-5 and c07-5, which each introduce a word the context never uses",
+  and an added word is precisely what `sentence_cosine` cannot see: 02's
+  `TfidfIndex.search` builds the query vector out of the index vocabulary
+  only, so a term with no idf is dropped before the vector is normalized.
+  measured this run on all 60 claims — appending an unseen token moves no
+  claim's cosine by anything, 0/60. stripping "most" out of c02-5 leaves its
+  cosine at 0.968914188238 and stripping "before" out of c07-5 leaves its
+  cosine at 0.909445969732, both byte-identical to the claim with the word in.
+  what actually pulls those two off 1.0 on the cosine side is the token they
+  delete — "least" in c02-5, "only" and "after" in c07-5 — and restoring it
+  scores exactly 1.0. the overlap column is the one the added word costs:
+  0.9167 and 0.8571, both exactly 1.000 once the word is stripped, so for
+  precision the retired sentence was right and complete. the same mechanism
+  runs under c01-5, which the 2026-10-07 AUC entry called "bag-identical to
+  the sentence they match": it adds "not", ctx-01 never uses "not", the index
+  has no idf for it, and the claim scores a perfect 1.0 on cosine against
+  overlap 0.875. that one word is the difference between a negation flip the
+  scorer could in principle see and one tied with every verbatim quote.
+  `tests/test_unseen_word_channel.py`, 13 tests: one holds the invariant over
+  all 60 claims, one holds that the probe token really is out of vocabulary,
+  two hold c02-5 and c07-5's cosines identical with and without the added word
+  and trace the shortfall to the dropped token, one holds the added word as
+  the whole overlap shortfall, three hold c01-5's bag difference, ctx-01's
+  missing idf and its 1.0-on-cosine/under-1-on-overlap split, and five bind
+  the readme — the retired sentence gone from the prose, still quoted in the
+  changelog, both channels named in the tradeoffs bullet, the c01-5 mechanism
+  named in the reading, and the three substrings the 2026-10-07 fixes pinned
+  still standing. the revert check in a fresh clone fails exactly the 5 readme
+  tests with the prose reverted, 123 green restored. no measured number moved,
+  the code was already right — `main.py` is byte-identical before and after.
+  the two 2026-10-07 changelog entries carried the same wrong mechanism and
+  are corrected in place. 110 tests → 123
+
+- [medium] 12 — the cosine's blind spot has no category in the dataset. a
+  claim can append a whole clause the context never uses to a verbatim quote
+  and keep a perfect 1.0 on `sentence_cosine`, because every token of that
+  clause is dropped for want of an idf. none of the six unsupported
+  categories exercises it: entity and number swaps substitute, negation and
+  antonym flips substitute, fabrications and outside-knowledge claims are
+  whole new sentences that share only topic words. so the readme's ceiling
+  figure — "AUC 0.626 with both consistency checks stacked" — is measured on
+  a dataset that never asks the question the cosine is worst at. not a wrong
+  claim, the ceiling is the ceiling for these 60 claims, but a seventh
+  category (quote plus fabricated clause) would move it and the project does
+  not say so. found 2026-10-15
+
+- [low] 12 — `ContextBundle.best_sentence` takes `search`'s top hit, and
+  `TfidfIndex.search` breaks a score tie on `(-score, doc_id)` with ids
+  `s0..sN` as strings, so with ten or more sentences `s10` sorts before `s2`
+  and the tie-break is not sentence order. it matters only for
+  `negation_aware`, which reads the winner's negation parity: two sentences
+  tied at the top with opposite parity would decide the claim's score by
+  lexicographic id. swept all 60 claims this run, no context has a second
+  sentence within 1e-12 of its top score and every context has 5 sentences,
+  so nothing 12 publishes rides on it. found 2026-10-15
+
 - [fixed 2026-10-14] 11 — the base price was documented as a sonnet-class
   model and set at two thirds of one. `src/pricing.ts` says "Base prices
   default to a sonnet-class model" while `DEFAULT_PRICING` carried
@@ -6716,7 +6775,7 @@ question is not reopened.
 | 15-embedding-quantization | 2026-10-08 |
 | 14-context-window | 2026-10-08 |
 | 13-ann-hnsw | 2026-10-08 |
-| 12-groundedness-scoring | 2026-10-07 |
+| 12-groundedness-scoring | 2026-10-15 |
 | 11-prompt-caching | 2026-10-14 |
 | 10-chunking-strategies | 2026-10-13 |
 | 09-concurrency | 2026-10-14 |
